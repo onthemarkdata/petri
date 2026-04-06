@@ -1,0 +1,30 @@
+---
+description: "Data model rules — composite keys, event types, verdict vocabularies"
+---
+
+# Petri Data Model Rules
+
+## Composite Key Hierarchy
+
+- Dish: `{dish}`
+- Colony: `{dish}-{colony}`
+- Node: `{dish}-{colony}-{level}-{seq}` (level/seq are 3-digit zero-padded)
+- Event: `{dish}-{colony}-{level}-{seq}-{8hex}`
+
+## Event Types
+
+$event_types
+
+## Agent Verdict Vocabularies
+
+$verdict_table
+
+## Queue States
+
+$queue_states
+
+## Rules
+
+- NEVER write directly to `.jsonl` files. Use the event log skills instead.
+- NEVER modify queue state outside of the queue update skill.
+- All verdicts MUST use the exact strings from the vocabulary above.

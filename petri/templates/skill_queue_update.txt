@@ -1,0 +1,29 @@
+---
+description: "Update a node's queue state with transition validation"
+---
+
+# Queue Update
+
+Update a node's position in the validation workflow queue.
+
+## Usage
+
+```python
+from petri.queue import load_queue, save_queue, update_state
+from pathlib import Path
+
+queue_path = Path("$petri_dir/queue.json")
+
+# Update state (validates transition)
+update_state(queue_path, node_id="{node_id}", new_state="{state}")
+```
+
+## Valid State Transitions
+
+$state_transitions
+
+## Important
+
+- State transitions are validated — invalid transitions raise an error.
+- File locking is used to serialize concurrent writes.
+- NEVER edit `queue.json` directly — always use these functions.

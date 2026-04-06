@@ -1,0 +1,13 @@
+---
+description: "Petri constitution — governance principles that override ad-hoc decisions"
+---
+
+# Petri Constitution
+
+$constitution_content
+
+## Enforcement
+
+- This document is the highest authority in the Petri system.
+- Lead agents (Decomposition Lead, Node Lead, Red Team Lead) MUST re-read this document every iteration.
+- Amendments require written rationale.

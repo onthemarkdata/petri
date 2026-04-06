@@ -1,0 +1,31 @@
+---
+description: "Read events from a node's event log"
+---
+
+# Event Log Read
+
+Query events from a node's event log.
+
+## Usage
+
+```python
+from petri.event_log import query_events, get_verdicts, load_events
+from pathlib import Path
+
+events_path = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}/events.jsonl")
+
+# Load all events
+events = load_events(events_path)
+
+# Query by filters
+results = query_events(events_path, node_id="{node_id}", event_type="{type}", iteration={n})
+
+# Get verdicts for a node + iteration
+verdicts = get_verdicts(events_path, node_id="{node_id}", iteration={n})
+```
+
+## Important
+
+- Events are read from append-only JSONL files — the source of truth.
+- Use query parameters to filter efficiently.
+- NEVER parse `.jsonl` files manually — always use these functions.

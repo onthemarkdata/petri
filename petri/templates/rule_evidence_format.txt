@@ -1,0 +1,24 @@
+---
+description: "Evidence format rules — source hierarchy and citation requirements"
+---
+
+# Evidence Format Rules
+
+## Source Hierarchy (strongest to weakest)
+
+$source_hierarchy
+
+## Terminal Decision Requirements
+
+Terminal decisions (VALIDATED or DISPROVEN) require at least one source at Level 1-$minimum_terminal_level.
+
+## Citation Format
+
+When reviewing a source, log a `source_reviewed` event with:
+- url: the source URL
+- title: source title
+- pub_date: publication date
+- hierarchy_level: 1-6 per the hierarchy above
+- finding: what the source says
+- supports_or_contradicts: "supports" or "contradicts"
+- confidence: HIGH, MEDIUM, or LOW

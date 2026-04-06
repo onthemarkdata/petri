@@ -1,0 +1,19 @@
+---
+description: "$command_description"
+---
+
+# petri $command_name
+
+$command_help
+
+## Usage
+
+```bash
+$command_usage
+```
+
+## Implementation
+
+```python
+$command_implementation
+```

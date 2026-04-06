@@ -1,0 +1,36 @@
+---
+description: "Write an event to a node's event log with Pydantic validation"
+---
+
+# Event Log Write
+
+Append an event to a node's event log. This is the ONLY way to write events.
+
+## Usage
+
+```python
+from petri.event_log import append_event
+from pathlib import Path
+
+# Construct the events path for the target node
+events_path = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}/events.jsonl")
+
+append_event(
+    events_path=events_path,
+    node_id="{node_id}",
+    event_type="{event_type}",
+    agent="{agent_name}",
+    iteration={iteration},
+    data={data_dict},
+)
+```
+
+## Event Types
+
+$event_types
+
+## Important
+
+- All data is validated against Pydantic models before writing.
+- Event IDs and timestamps are generated automatically.
+- NEVER write to `.jsonl` files directly — always use this skill.

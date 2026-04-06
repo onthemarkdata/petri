@@ -1,0 +1,24 @@
+---
+description: "Research methodology rules — how agents conduct research and assessments"
+---
+
+# Research Methodology Rules
+
+## General Principles
+
+- Every claim must be evaluated on its own merits with primary sources.
+- Seek disconfirming evidence as actively as confirming evidence.
+- Cite all sources with hierarchy level classification.
+- Flag stale evidence for freshness review.
+
+## Agent Communication
+
+- Agents communicate ONLY via the event log — never directly.
+- Debates are mediated by the Node Lead through the debate mediation skill.
+- Phase 2 → Phase 1 messages are held for the next iteration.
+
+## Evidence Preservation
+
+- Event logs are append-only. Never delete or modify past events.
+- When a node is re-opened, all prior evidence is preserved.
+- New evidence is appended alongside existing evidence.

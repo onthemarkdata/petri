@@ -1,0 +1,38 @@
+---
+description: "Read a node's metadata and evidence"
+---
+
+# Read Node
+
+Read a node's current state, metadata, and evidence.
+
+## Usage
+
+```python
+from petri.colony import deserialize_colony
+from pathlib import Path
+import json
+
+# Read node metadata
+node_dir = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}")
+metadata = json.loads((node_dir / "metadata.json").read_text())
+
+# Read evidence
+evidence = (node_dir / "evidence.md").read_text()
+
+# Load full colony graph
+colony_dir = Path("$petri_dir/petri-dishes/{colony}")
+graph, colony = deserialize_colony(colony_dir, dish_id="{dish_id}")
+
+# Get specific node
+node = graph.get_node("{node_id}")
+```
+
+## Node File Structure
+
+```
+.petri/petri-dishes/{colony}/{level}-{seq}/
+├── evidence.md      # Human-readable research/evidence
+├── events.jsonl     # Append-only event log (source of truth)
+└── metadata.json    # Node attributes (status, level, dependencies)
+```

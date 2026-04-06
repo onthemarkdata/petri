@@ -1,0 +1,217 @@
+# Petri Dish Configuration
+# Single config file — all settings in one place.
+
+name: petri
+
+# ── Model & Harness ─────────────────────────────────────────────────────
+# WARNING: The multi-agent pipeline is expensive with paid models.
+# Petri defaults to a free local model to protect you from unexpected costs.
+
+model:
+  name: gemma-3-4b-it
+  provider: local
+  # For paid models (opt-in):
+  # name: claude-sonnet-4-6
+  # provider: anthropic
+
+harness: claude-code
+
+# ── Pipeline ────────────────────────────────────────────────────────────
+
+max_iterations: 3
+max_concurrent: 4
+
+# ── Source Hierarchy ────────────────────────────────────────────────────
+# 6-level evidence credibility ranking (strongest to weakest)
+# Terminal decisions (VALIDATED/DISPROVEN) require at least one Level 1-4 source
+
+source_hierarchy:
+  minimum_terminal_level: 4
+  levels:
+    1:
+      name: Direct Measurement
+      description: "Ran the experiment, recorded the data"
+      terminal_eligible: true
+    2:
+      name: Authoritative Documentation
+      description: "Official docs, published specs, pricing pages"
+      terminal_eligible: true
+    3:
+      name: Derived Calculation
+      description: "Math from known inputs — show the formula"
+      terminal_eligible: true
+    4:
+      name: Corroborated Expert Consensus
+      description: "Multiple independent experts agree"
+      terminal_eligible: true
+    5:
+      name: Single Expert Opinion
+      description: "One credible source, noted as such"
+      terminal_eligible: false
+    6:
+      name: Community Report
+      description: "Reddit, forums, Discord — useful signal, not proof"
+      terminal_eligible: false
+
+# ── Debates ─────────────────────────────────────────────────────────────
+# 4 structured debates mediated by Node Lead during critique phase
+
+debates:
+  - pair: [skeptic, champion]
+    rounds: 1.5  # Skeptic gets final word
+    purpose: "Adversarial challenge — skeptic builds case against, champion defends"
+
+  - pair: [skeptic, pragmatist]
+    rounds: 1
+    purpose: "Practical relevance — does the skeptic's concern matter in practice?"
+
+  - pair: [simplifier, impact_assessor]
+    rounds: 1
+    purpose: "Scope safety — is simplification safe given the node's impact?"
+
+  - pair: [triage, impact_assessor]
+    rounds: 1
+    purpose: "Effort alignment — is the effort justified by the node's criticality?"
+
+# ── Agents ──────────────────────────────────────────────────────────────
+# 3 lead agents (non-blocking orchestrators) + 10 specialist agents
+
+agents:
+
+  # === Lead Agents (non-blocking, orchestrate phases) ===
+
+  decomposition_lead:
+    display_name: Decomposition Lead
+    is_lead: true
+    scope: decomposition
+    phase: null
+    blocking: false
+    verdicts_pass: [DECOMPOSITION_COMPLETE, DECOMPOSITION_NEEDS_REFINEMENT]
+    verdicts_block: []
+    redirect_on_block: null
+
+  node_lead:
+    display_name: Node Lead
+    is_lead: true
+    scope: pipeline
+    phase: null
+    blocking: false
+    verdicts_pass: [PIPELINE_COMPLETE, PIPELINE_STALLED]
+    verdicts_block: []
+    redirect_on_block: null
+
+  red_team_lead:
+    display_name: Red Team Lead
+    is_lead: true
+    scope: red_team
+    phase: null
+    blocking: false
+    verdicts_pass: [STRONG_DISPROVAL_CASE, WEAK_DISPROVAL_CASE, NO_CONTRADICTING_EVIDENCE]
+    verdicts_block: []
+    redirect_on_block: null
+
+  # === Phase 1 Agents (Research) ===
+
+  investigator:
+    display_name: Investigator
+    is_lead: false
+    scope: null
+    phase: 1
+    blocking: true
+    verdicts_pass: [EVIDENCE_SUFFICIENT, EVIDENCE_CONTRADICTS]
+    verdicts_block: [NEEDS_MORE_EVIDENCE, CANNOT_DETERMINE]
+    redirect_on_block: null
+
+  freshness_checker:
+    display_name: Freshness Checker
+    is_lead: false
+    scope: null
+    phase: 1
+    blocking: true
+    verdicts_pass: [EVIDENCE_CURRENT, STALE_BUT_HOLDS]
+    verdicts_block: [MATERIALLY_STALE]
+    redirect_on_block: null
+
+  dependency_auditor:
+    display_name: Dependency Auditor
+    is_lead: false
+    scope: null
+    phase: 1
+    blocking: true
+    verdicts_pass: [DEPENDENCIES_CLEAN]
+    verdicts_block: [UNVALIDATED_DEPS, CIRCULAR_REASONING]
+    redirect_on_block: null
+
+  # === Phase 2 Agents (Critique) ===
+
+  skeptic:
+    display_name: Skeptic
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: true
+    verdicts_pass: [ARGUMENT_WITHSTANDS_CRITIQUE]
+    verdicts_block: [CRITICAL_FLAW_FOUND, UNADDRESSED_COUNTERARGUMENT]
+    redirect_on_block: null
+
+  champion:
+    display_name: Champion
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: true
+    verdicts_pass: [STRONG_CASE, DEFENSIBLE_WITH_CAVEATS]
+    verdicts_block: [CANNOT_DEFEND]
+    redirect_on_block: null
+
+  pragmatist:
+    display_name: Pragmatist
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: true
+    verdicts_pass: [PRODUCTION_READY, DIRECTIONALLY_CORRECT]
+    verdicts_block: [WOULD_NOT_SHIP_THIS]
+    redirect_on_block: null
+
+  simplifier:
+    display_name: Simplifier
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: false
+    verdicts_pass: [APPROPRIATELY_SCOPED, COULD_BE_SIMPLER]
+    verdicts_block: [OVERCOMPLICATED]
+    redirect_on_block: null
+
+  triage:
+    display_name: Triage
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: conditional
+    verdicts_pass: [HIGH_VALUE, MODERATE_VALUE]
+    verdicts_block: [LOW_VALUE_DEFER]
+    redirect_on_block: DEFER_OPEN
+
+  impact_assessor:
+    display_name: Impact Assessor
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: false
+    verdicts_pass: [CRITICAL_PATH, SUPPORTING_NOT_BLOCKING, ISOLATED_LOW_IMPACT]
+    verdicts_block: []
+    redirect_on_block: null
+
+  # === Post-Convergence ===
+
+  evidence_evaluator:
+    display_name: Evidence Evaluator
+    is_lead: false
+    scope: null
+    phase: null
+    blocking: false
+    verdicts_pass: [EVIDENCE_CONFIRMS, EVIDENCE_REFUTES, EVIDENCE_INCONCLUSIVE]
+    verdicts_block: []
+    redirect_on_block: null

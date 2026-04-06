@@ -1,0 +1,36 @@
+---
+description: "Check convergence status for a node"
+---
+
+# Convergence Check
+
+Determine whether all blocking agents have passed for a given node and iteration.
+
+## Usage
+
+```python
+from petri.convergence import check_convergence, load_agent_roles, evaluate_short_circuits, compute_circuit_breaker
+
+# Load agent definitions
+roles = load_agent_roles()
+
+# Gather verdicts for the current iteration from the event log
+# verdicts = [{"agent": "investigator", "verdict": "EVIDENCE_SUFFICIENT"}, ...]
+
+# Check convergence
+result = check_convergence(verdicts, roles)
+# result = {"converged": bool, "blocking_results": {...}, "weakest_link": str|None, ...}
+
+# Check for short-circuits
+short_circuit = evaluate_short_circuits(verdicts, roles)
+# Returns None or {"type": "needs_experiment"|"defer_open", ...}
+
+# Check circuit breaker
+should_break = compute_circuit_breaker(iteration, cycle_start_iteration, max_iterations=$max_iterations)
+```
+
+## Important
+
+- Convergence is a mechanical boolean check — no LLM judgment.
+- ALL 6 blocking agents must have their latest verdict in the pass set.
+- Lead agents are NOT counted toward convergence.

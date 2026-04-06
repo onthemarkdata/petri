@@ -1,0 +1,31 @@
+---
+description: "Feedback loop rules — iteration, convergence, circuit breaker"
+---
+
+# Feedback Loop Rules
+
+## Convergence
+
+Convergence is mechanical: ALL blocking agents must have their latest verdict in the pass set. No LLM judges convergence.
+
+## Blocking Agents
+
+$blocking_agents
+
+## Iteration Loop
+
+1. Phase 1 (Research): Investigator, Freshness Checker, Dependency Auditor gather evidence
+2. Phase 2 (Critique): Skeptic, Champion, Pragmatist, Simplifier, Triage, Impact Assessor critique
+3. Mediation: 4 structured debates run
+4. Convergence check: if all blocking pass → converge; else identify weakest link and iterate
+
+## Circuit Breaker
+
+- Max iterations per cycle: $max_iterations
+- Uses relative counting: `iteration - cycle_start_iteration`
+- When fired: node moves to STALLED → needs_human
+
+## Short-Circuits
+
+- Investigator issues CANNOT_DETERMINE + all others pass → NEEDS_EXPERIMENT
+- Triage issues LOW_VALUE_DEFER + all others pass → DEFER_OPEN
