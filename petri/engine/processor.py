@@ -200,13 +200,32 @@ def _get(result: object, key: str, default: str = "") -> object:
 
 def _verdict_data(result: object) -> dict:
     """Build a verdict_issued data dict from an AssessmentResult or dict."""
+    sources = _get(result, "sources_cited", [])
+    serialized_sources = []
+    for source_entry in sources:
+        if hasattr(source_entry, "model_dump"):
+            serialized_sources.append(source_entry.model_dump(exclude_none=True))
+        elif isinstance(source_entry, dict):
+            serialized_sources.append(source_entry)
     return {
         "verdict": _get(result, "verdict", "PASS"),
         "summary": _to_str(_get(result, "summary", "")),
-        "arguments": _to_str(_get(result, "arguments", "")),
-        "evidence": _to_str(_get(result, "evidence", "")),
+        "arguments": "",
+        "evidence": "",
         "confidence": _to_str(_get(result, "confidence", "")),
+        "sources_cited": serialized_sources,
     }
+
+
+# Hierarchy level display names.
+_LEVEL_NAMES = {
+    1: "Direct Measurement",
+    2: "Authoritative Documentation",
+    3: "Derived Calculation",
+    4: "Expert Consensus",
+    5: "Single Expert",
+    6: "Community Report",
+}
 
 
 # ── Evidence File Helpers ────────────────────────────────────────────────
@@ -219,30 +238,35 @@ def _log_sources_from_result(
     sources = _get(result, "sources_cited", [])
     if not isinstance(sources, list):
         return
-    for src in sources:
+    for source_entry in sources:
         # Handle both SourceCitation models and raw dicts
-        if hasattr(src, "url_or_name"):
+        if hasattr(source_entry, "url"):
             data = {
-                "url": src.url_or_name,
-                "title": getattr(src, "title", ""),
-                "pub_date": getattr(src, "pub_date", ""),
-                "hierarchy_level": getattr(src, "hierarchy_level", None),
-                "finding": getattr(src, "finding", ""),
-                "supports_or_contradicts": getattr(src, "supports_or_contradicts", None),
-                "confidence": getattr(src, "confidence", None),
+                "url": getattr(source_entry, "url", "") or getattr(source_entry, "url_or_name", ""),
+                "title": getattr(source_entry, "title", ""),
+                "pub_date": getattr(source_entry, "pub_date", ""),
+                "hierarchy_level": getattr(source_entry, "hierarchy_level", None),
+                "finding": getattr(source_entry, "finding", ""),
+                "supports_or_contradicts": getattr(source_entry, "supports_or_contradicts", None),
+                "confidence": getattr(source_entry, "confidence", None),
             }
-        elif isinstance(src, dict):
+        elif isinstance(source_entry, dict):
             data = {
-                "url": src.get("url", src.get("url_or_name", "")),
-                "title": src.get("title", ""),
-                "pub_date": src.get("pub_date", ""),
-                "hierarchy_level": src.get("hierarchy_level"),
-                "finding": src.get("finding", ""),
-                "supports_or_contradicts": src.get("supports_or_contradicts"),
-                "confidence": src.get("confidence"),
+                "url": source_entry.get("url", source_entry.get("url_or_name", "")),
+                "title": source_entry.get("title", ""),
+                "pub_date": source_entry.get("pub_date", ""),
+                "hierarchy_level": source_entry.get("hierarchy_level"),
+                "finding": source_entry.get("finding", ""),
+                "supports_or_contradicts": source_entry.get("supports_or_contradicts"),
+                "confidence": source_entry.get("confidence"),
             }
         else:
             continue
+        if not data["url"].startswith(("http://", "https://")):
+            logger.warning(
+                "Source without valid URL from %s: %s",
+                agent, data.get("title", "unknown"),
+            )
         append_event(
             events_path=events_file,
             node_id=node_id,
@@ -298,43 +322,47 @@ def _update_evidence_status(
 
 
 def _format_phase1_evidence(verdicts: list[dict], iteration: int) -> str:
-    """Format Phase 1 (Research) findings as markdown."""
-    lines = [f"### Research Findings (Iteration {iteration})\n"]
+    """Format Phase 1 (Research) findings as markdown — citation-first."""
+    lines = [f"### Iteration {iteration} — Phase 1 Research\n"]
+
+    # Collect all sources across phase 1 agents into a numbered list.
+    source_num = 0
+    agent_summaries: dict[str, tuple[str, str]] = {}  # agent -> (verdict, summary)
 
     for verdict_entry in verdicts:
         agent_name = _get(verdict_entry, "agent", "unknown")
         verdict_value = _get(verdict_entry, "verdict", "")
         summary_text = _get(verdict_entry, "summary", "")
-        arguments_text = _to_str(_get(verdict_entry, "arguments", ""))
-        evidence_text = _to_str(_get(verdict_entry, "evidence", ""))
-        confidence_level = _get(verdict_entry, "confidence", "")
+        agent_summaries[agent_name] = (verdict_value, summary_text)
 
-        lines.append(f"**{agent_name.replace('_', ' ').title()}:** {verdict_value}")
-        if summary_text:
-            lines.append(f"- {summary_text}")
-        if arguments_text:
-            lines.append(f"- Arguments: {arguments_text}")
-        if evidence_text:
-            lines.append(f"- Evidence: {evidence_text}")
-        if confidence_level:
-            lines.append(f"- Confidence: {confidence_level}")
-
-        # Sources table
         cited_sources = _get(verdict_entry, "sources_cited", [])
-        if isinstance(cited_sources, list) and cited_sources:
-            lines.append("")
-            lines.append("| Source | Level | Finding | Supports/Contradicts |")
-            lines.append("|--------|-------|---------|---------------------|")
+        if isinstance(cited_sources, list):
             for source in cited_sources:
                 if not isinstance(source, dict):
                     continue
-                source_name = source.get("url", source.get("url_or_name", source.get("title", "—")))
-                hierarchy_level = source.get("hierarchy_level", "—")
-                source_finding = source.get("finding", "—")
-                source_side = source.get("supports_or_contradicts", "—")
-                lines.append(f"| {source_name} | {hierarchy_level} | {source_finding} | {source_side} |")
+                source_num += 1
+                level = source.get("hierarchy_level", 6)
+                level_name = _LEVEL_NAMES.get(level, "Unknown")
+                title = source.get("title", "Unknown source")
+                url = source.get("url", source.get("url_or_name", ""))
+                finding = source.get("finding", "")
+                direction = source.get("supports_or_contradicts", "supports")
+                direction_label = direction.capitalize() + "s" if not direction.endswith("s") else direction.capitalize()
 
-        lines.append("")
+                url_part = f" — {url}" if url else ""
+                lines.append(
+                    f"**Source {source_num} (Level {level} — {level_name}):** "
+                    f"{title}{url_part} — {finding} "
+                    f"**{direction_label} claim.**"
+                )
+                lines.append("")
+
+    # Agent summaries
+    for agent_name, (verdict_value, summary_text) in agent_summaries.items():
+        display = agent_name.replace("_", " ").title()
+        if summary_text:
+            lines.append(f"**{display}:** {summary_text}")
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -342,8 +370,8 @@ def _format_phase1_evidence(verdicts: list[dict], iteration: int) -> str:
 def _format_phase2_evidence(
     verdicts: list, debates: list, iteration: int,
 ) -> str:
-    """Format Phase 2 (Critique) assessment as markdown."""
-    lines = [f"### Critique Assessment (Iteration {iteration})\n"]
+    """Format Phase 2 (Critique) assessment as markdown — citation-first."""
+    lines = [f"### Iteration {iteration} — Phase 2 Critique\n"]
 
     # Verdict summary table
     lines.append("| Agent | Verdict | Summary |")
@@ -355,58 +383,46 @@ def _format_phase2_evidence(
         lines.append(f"| {agent_name} | {verdict_value} | {summary_text} |")
     lines.append("")
 
-    # Detailed arguments from key agents
-    for verdict_entry in verdicts:
-        agent_name = _get(verdict_entry, "agent", "")
-        arguments_text = _to_str(_get(verdict_entry, "arguments", ""))
-        if arguments_text:
-            lines.append(f"**{agent_name.replace('_', ' ').title()} Arguments:** {arguments_text}\n")
-
     # Debate summaries
     if debates:
-        lines.append("#### Debate Exchanges\n")
+        lines.append("**Debate Outcomes:**")
         for debate_entry in debates:
             pair = _get(debate_entry, "pair", ("", ""))
-            purpose = _get(debate_entry, "purpose", "")
             debate_summary = _get(debate_entry, "summary", "")
-            lines.append(f"**{pair[0]} vs {pair[1]}** — {purpose}")
             if debate_summary:
-                lines.append(f"- {debate_summary}")
-            lines.append("")
+                lines.append(f"- {pair[0]} vs {pair[1]}: {debate_summary}")
+        lines.append("")
 
     return "\n".join(lines)
 
 
 def _format_red_team_evidence(result: dict, iteration: int) -> str:
-    """Format Red Team review as markdown."""
+    """Format Red Team review as markdown — citation-first."""
     verdict = _get(result, "verdict", "")
     summary = _to_str(_get(result, "summary", ""))
-    arguments = _to_str(_get(result, "arguments", ""))
-    evidence = _to_str(_get(result, "evidence", ""))
-    confidence = _to_str(_get(result, "confidence", ""))
 
     lines = [f"### Red Team Review (Iteration {iteration})\n"]
-    lines.append(f"**Red Team Verdict:** {verdict}\n")
 
-    if summary:
-        lines.append(f"{summary}\n")
-    if arguments:
-        lines.append(f"**Counter-Arguments & Assumptions Challenged:**\n{arguments}\n")
-    if evidence:
-        lines.append(f"**Counter-Evidence Found:**\n{evidence}\n")
-    if confidence:
-        lines.append(f"**Confidence:** {confidence}\n")
-
-    # Sources
+    # Numbered counter-arguments from sources
     sources = _get(result, "sources_cited", [])
     if isinstance(sources, list) and sources:
-        lines.append("**Sources:**")
-        for src in sources:
-            if isinstance(src, dict):
-                name = src.get("url", src.get("url_or_name", ""))
-                finding = src.get("finding", "")
-                lines.append(f"- {name}: {finding}")
+        for source_idx, source_entry in enumerate(sources, 1):
+            if not isinstance(source_entry, dict):
+                continue
+            level = source_entry.get("hierarchy_level", 6)
+            level_name = _LEVEL_NAMES.get(level, "Unknown")
+            title = source_entry.get("title", "Unknown source")
+            source_url = source_entry.get("url", source_entry.get("url_or_name", ""))
+            finding = source_entry.get("finding", "")
+            url_part = f" — {source_url}" if source_url else ""
+            lines.append(
+                f"{source_idx}. **(Level {level} — {level_name})** "
+                f"{title}{url_part} — {finding} **Contradicts claim.**"
+            )
         lines.append("")
+
+    lines.append(f"**Red Team Verdict:** {verdict} — {summary}")
+    lines.append("")
 
     return "\n".join(lines)
 
@@ -414,32 +430,43 @@ def _format_red_team_evidence(result: dict, iteration: int) -> str:
 def _format_evaluation_evidence(
     result: dict, source_validation: dict, iteration: int,
 ) -> str:
-    """Format Evidence Evaluation as markdown."""
+    """Format Evidence Evaluation as markdown — citation-first."""
     verdict = _get(result, "verdict", "")
     summary = _to_str(_get(result, "summary", ""))
-    arguments = _to_str(_get(result, "arguments", ""))
-    evidence = _to_str(_get(result, "evidence", ""))
     confidence = _to_str(_get(result, "confidence", ""))
 
     lines = [f"### Evidence Evaluation (Iteration {iteration})\n"]
-    lines.append(f"**Verdict:** {verdict}\n")
 
+    # Source inventory table
+    sources = _get(result, "sources_cited", [])
+    if isinstance(sources, list) and sources:
+        lines.append("| # | Source | Level | Direction | Key Finding |")
+        lines.append("|---|--------|-------|-----------|-------------|")
+        for source_idx, source_entry in enumerate(sources, 1):
+            if not isinstance(source_entry, dict):
+                continue
+            title = source_entry.get("title", "Unknown")
+            level = source_entry.get("hierarchy_level", "—")
+            direction = source_entry.get("supports_or_contradicts", "—")
+            finding = source_entry.get("finding", "—")
+            lines.append(f"| {source_idx} | {title} | {level} | {direction} | {finding} |")
+        lines.append("")
+
+    lines.append(f"**Verdict:** {verdict} | **Confidence:** {confidence}")
+    lines.append("")
     if summary:
-        lines.append(f"**Assessment:** {summary}\n")
-    if arguments:
-        lines.append(f"**Reasoning:** {arguments}\n")
-    if evidence:
-        lines.append(f"**Evidence Considered:** {evidence}\n")
-    if confidence:
-        lines.append(f"**Confidence:** {confidence}\n")
+        lines.append(f"**Assessment:** {summary}")
+        lines.append("")
 
     # Source validation summary
     if source_validation:
         terminal_ok = source_validation.get("meets_terminal_threshold", False)
         max_level = source_validation.get("max_hierarchy_level")
-        lines.append(f"**Source Hierarchy:** Meets terminal threshold: {'Yes' if terminal_ok else 'No'}")
-        if max_level is not None:
-            lines.append(f" (best source level: {max_level})")
+        level_str = f" (best level: {max_level})" if max_level is not None else ""
+        lines.append(
+            f"**Source Hierarchy:** Meets terminal: "
+            f"{'Yes' if terminal_ok else 'No'}{level_str}"
+        )
         lines.append("")
 
     return "\n".join(lines)

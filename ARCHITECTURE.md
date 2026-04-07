@@ -173,6 +173,21 @@ Every action is recorded as an immutable event in per-node JSONL files (`.petri/
 
 Events are identified by `{node_key}-{8hex}` and timestamped in UTC. The event log is the source of truth -- the queue and metadata files are derived state.
 
+## Citation-First Evidence Model
+
+All agent output follows a citation-first pattern: every claim must be backed by at least one URL-linked source. Agents produce numbered sources with hierarchy levels and 1-2 sentence findings rather than verbose free-text analysis. Summaries are capped at 1-3 sentences to prevent context rot as evidence accumulates across iterations.
+
+Evidence files (`evidence.md`) follow this structure per phase:
+
+```markdown
+### Iteration 1 — Phase 1 Research
+
+**Source 1 (Level 2 — Authoritative Documentation):** Title (Year) — URL — Finding. **Supports claim.**
+**Source 2 (Level 2 — Peer-Reviewed):** Title (Year) — URL — Finding. **Supports claim.**
+
+**Summary:** Terse assessment with source counts and dimensions.
+```
+
 ## Source Hierarchy
 
 Evidence is ranked by a six-level credibility hierarchy:

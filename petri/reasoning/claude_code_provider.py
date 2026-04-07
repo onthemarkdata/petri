@@ -188,20 +188,12 @@ class ClaudeCodeProvider:
     def assess_node(
         self, node_id: str, claim_text: str, context: dict, agent_role: str
     ) -> "AssessmentResult":
-        from petri.config import get_agent_verdicts, get_agent_instruction, get_agents_with_sources
+        from petri.config import get_agent_verdicts, get_agent_instruction
         from petri.models import AssessmentResult, SourceCitation
 
         valid_verdicts = get_agent_verdicts(agent_role) or ["PASS"]
         verdict_list = ", ".join(valid_verdicts)
         role_instruction = get_agent_instruction(agent_role) or "Assess this claim thoroughly."
-
-        sources_schema = ""
-        if agent_role in get_agents_with_sources():
-            sources_schema = (
-                '- "sources_cited": array of {"url_or_name": "...", '
-                '"hierarchy_level": 1-6, "finding": "...", '
-                '"supports_or_contradicts": "supports"|"contradicts"}\n'
-            )
 
         context_parts = []
         if context.get("iteration"):
@@ -234,12 +226,20 @@ class ClaudeCodeProvider:
             f"Valid verdicts: {verdict_list}\n\n"
             f"Return ONLY a JSON object with:\n"
             f'- "verdict": one of [{verdict_list}]\n'
-            f'- "summary": detailed 3-5 sentence assessment\n'
-            f'- "arguments": thorough analysis as a single string\n'
-            f'- "evidence": specific facts and data as a single string\n'
-            f'- "confidence": low/medium/high with justification\n'
-            f"{sources_schema}\n"
-            f"All fields must be strings (not arrays). Return ONLY the JSON."
+            f'- "sources_cited": REQUIRED array. Each source must have:\n'
+            f'  - "url": full URL (https://...) to the source\n'
+            f'  - "title": "Publication, Article Title (Year)"\n'
+            f'  - "hierarchy_level": 1-6 (1=direct measurement, 2=authoritative docs, '
+            f'3=derived calculation, 4=expert consensus, 5=single expert, 6=community report)\n'
+            f'  - "finding": 1-2 sentence finding from this source\n'
+            f'  - "supports_or_contradicts": "supports" or "contradicts"\n'
+            f'- "summary": 1-3 concise sentences. Enumerate dimensions, cite specific numbers.\n'
+            f'- "confidence": "HIGH", "MEDIUM", or "LOW"\n\n'
+            f"RULES:\n"
+            f"- Every claim MUST be backed by at least one source with a valid URL.\n"
+            f"- Keep summary TERSE — citations are the evidence.\n"
+            f"- Do NOT include \"arguments\" or \"evidence\" fields.\n\n"
+            f"Return ONLY the JSON."
         )
 
         raw = self._ask(prompt)
@@ -265,8 +265,6 @@ class ClaudeCodeProvider:
                 agent=agent_role,
                 verdict=validated_verdict,
                 summary=_coerce_str(parsed.get("summary", "")),
-                arguments=_coerce_str(parsed.get("arguments", "")),
-                evidence=_coerce_str(parsed.get("evidence", "")),
                 confidence=_coerce_str(parsed.get("confidence", "")),
                 sources_cited=sources,
             )

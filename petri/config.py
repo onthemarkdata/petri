@@ -100,18 +100,14 @@ def get_critique_agents(config: dict | None = None) -> list[str]:
 def get_agents_with_sources(config: dict | None = None) -> list[str]:
     """Get agent names that should produce sources_cited in their output.
 
-    These are agents whose role involves citing evidence: investigator-type
-    (phase 1), champion, red_team_lead, and evidence_evaluator.
+    All non-lead agents must cite sources with URLs.
     """
     cfg = config or load_config()
     agents = cfg.get("agents", {})
-    source_agents = []
-    for name, defn in agents.items():
-        # Phase 1 agents gather evidence, plus champion/red_team/evaluator cite sources
-        instruction = defn.get("instruction", "")
-        if "sources_cited" in instruction:
-            source_agents.append(name)
-    return source_agents
+    return [
+        name for name, defn in agents.items()
+        if not defn.get("is_lead", False)
+    ]
 
 
 def get_agent_instruction(agent_name: str, config: dict | None = None) -> str:

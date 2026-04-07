@@ -148,12 +148,14 @@ petri --help
 Each node in the colony goes through:
 
 1. **Socratic questioning** -- Clarify terms, challenge assumptions, identify what evidence is needed
-2. **Research phase** -- Investigator gathers evidence, Freshness Checker verifies currency, Dependency Auditor checks prerequisites
+2. **Research phase** -- Investigator gathers evidence with URL-cited sources, Freshness Checker verifies currency, Dependency Auditor checks prerequisites
 3. **Critique phase** -- Specialist agents assess in parallel, Node Lead mediates structured debates
 4. **Convergence check** -- All blocking verdicts must pass (mechanical check, no LLM)
 5. **Circuit breaker** -- Max 3 iterations per cycle; if not converged, flags for human guidance
 6. **Red Team** -- Dedicated adversarial phase builds the strongest case against the node
 7. **Evidence Evaluation** -- Neutral weighing of all evidence: VALIDATED, DISPROVEN, or DEFER
+
+**Citation-first evidence model:** Every agent must back claims with URL-linked sources ranked by a 6-level hierarchy (direct measurement → community report). Summaries are kept terse to prevent context rot across iterations.
 
 Every action is logged as an immutable event in the node's JSONL file, identified by a composite key (`{dish}-{colony}-{level}-{seq}-{8hex}`).
 

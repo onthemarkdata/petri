@@ -11,7 +11,9 @@ import re
 from enum import Enum
 from typing import Any, Optional, Protocol, runtime_checkable
 
-from pydantic import BaseModel, Field
+import logging
+
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 
@@ -306,15 +308,32 @@ class PetriConfig(BaseModel):
 
 
 class SourceCitation(BaseModel):
-    """A source cited by an agent during assessment."""
+    """A source cited by an agent during assessment.
 
-    url_or_name: str = ""
+    Every source should have a valid URL. The ``url`` field accepts
+    legacy data via the ``url_or_name`` alias.
+    """
+
+    url: str = Field(
+        default="",
+        validation_alias=AliasChoices("url", "url_or_name"),
+    )
     title: str = ""
-    hierarchy_level: Optional[int] = None
+    hierarchy_level: int = 6  # default to weakest (community report)
     finding: str = ""
-    supports_or_contradicts: Optional[str] = None
+    supports_or_contradicts: str = "supports"
     confidence: Optional[str] = None
     pub_date: str = ""
+    pub_year: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def _warn_missing_url(cls, url_value: str) -> str:
+        if url_value and not url_value.startswith(("http://", "https://")):
+            logging.getLogger("petri.models").warning(
+                "Source without valid URL: %s", url_value[:80]
+            )
+        return url_value
 
 
 class AssessmentResult(BaseModel):
