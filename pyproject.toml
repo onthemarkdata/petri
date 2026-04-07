@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,17 @@ name = "petri-grow"
 version = "0.1.0"
 description = "An agent orchestration framework to grow your AI's context."
 requires-python = ">=3.11"
-license = "MIT"
+license = "Apache-2.0"
+authors = [{name = "On the Mark Data LLC", email = "mark@onthemarkdata.com"}]
+readme = "README.md"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
@@ -24,5 +34,17 @@ all = ["petri-grow[pdf,dashboard,test]"]
 [project.scripts]
 petri = "petri.cli:app"
 
+[project.urls]
+Homepage = "https://github.com/onthemarkdata/petri"
+Repository = "https://github.com/onthemarkdata/petri"
+
 [tool.setuptools.packages.find]
 include = ["petri*"]
+
+[tool.setuptools.package-data]
+petri = [
+    "defaults/*.yaml",
+    "defaults/*.md",
+    "templates/*.txt",
+    "assets/**/*",
+]
