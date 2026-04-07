@@ -22,7 +22,7 @@ Understand the cost implications before switching to cloud models: a single colo
 
 ## Prerequisites
 
-1. **[Claude Code](https://claude.com/claude-code)** — Petri uses Claude Code as its inference harness.
+1. **[Claude Code](https://claude.com/claude-code)** — Petri uses Claude Code as its agentic harness.
 2. **[Ollama](https://ollama.com)** — Required for local models. Claude Code connects to Ollama automatically ([setup guide](https://docs.ollama.com/integrations/claude-code)).
 
 ```bash
@@ -128,7 +128,3 @@ Every action is logged as an immutable event in the node's JSONL file, identifie
 uv pip install -e ".[all]"
 uv run pytest tests/
 ```
-
-## License
-
-MIT
