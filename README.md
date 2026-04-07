@@ -114,16 +114,19 @@ petri check
 petri grow --all
 # → Processes nodes bottom-up: Socratic → Research → Critique → Red Team → Evaluation
 
-# 5. Feed new evidence
+# 5. Feed new evidence (requires nodes that have completed validation)
 petri feed https://arxiv.org/abs/2026.12345
+# → Ingests content, matches to relevant nodes, flags for re-validation
 
 # 6. Analyze
 petri analyze --graph       # text tree / DOT export
 petri analyze --dashboard   # REST + SSE API on port 8090
 petri analyze --scan --fix  # contradiction scanner
+# → --graph shows the colony DAG; --dashboard opens a live web UI
 
 # 7. Stop
 petri stop
+# → Gracefully halts any active processing
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
