@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Petri — a colony-based research orchestration framework that decomposes claims into DAGs of logical units and validates them bottom-up through a 13-agent adversarial review pipeline.
+Petri — a colony-based research orchestration framework that decomposes claims into DAGs of logical units and validates them bottom-up through a multi-agent adversarial review pipeline.
 
 ## Build & Install
 
