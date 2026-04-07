@@ -27,7 +27,8 @@ def load_source_hierarchy(config_path: Path) -> dict:
     sensible defaults.
     """
     if yaml is None:
-        return {"minimum_terminal_level": 4, "levels": {}}
+        from petri.config import get_minimum_terminal_level
+        return {"minimum_terminal_level": get_minimum_terminal_level(), "levels": {}}
 
     # Try consolidated petri.yaml first
     petri_yaml = config_path / "petri.yaml"
@@ -40,7 +41,8 @@ def load_source_hierarchy(config_path: Path) -> dict:
     # Legacy fallback
     hierarchy_file = config_path / "source_hierarchy.yaml"
     if not hierarchy_file.exists():
-        return {"minimum_terminal_level": 4, "levels": {}}
+        from petri.config import get_minimum_terminal_level
+        return {"minimum_terminal_level": get_minimum_terminal_level(), "levels": {}}
 
     with open(hierarchy_file) as f:
         return yaml.safe_load(f) or {}
@@ -49,7 +51,7 @@ def load_source_hierarchy(config_path: Path) -> dict:
 def validate_terminal_sources(
     events_path: Path,
     node_id: str,
-    min_level: int = 4,
+    min_level: int | None = None,
 ) -> dict:
     """Validate that a node has Level 1-4 sources for terminal decisions.
 
@@ -67,9 +69,9 @@ def validate_terminal_sources(
     """
     events = load_events(events_path)
     sources = [
-        e
-        for e in events
-        if e.get("type") == "source_reviewed" and e.get("node_id") == node_id
+        event
+        for event in events
+        if event.get("type") == "source_reviewed" and event.get("node_id") == node_id
     ]
 
     if not sources:
@@ -81,8 +83,8 @@ def validate_terminal_sources(
         }
 
     levels: list[int] = []
-    for s in sources:
-        data = s.get("data", {})
+    for source in sources:
+        data = source.get("data", {})
         hl = data.get("hierarchy_level")
         if hl is not None:
             levels.append(int(hl))
@@ -94,6 +96,10 @@ def validate_terminal_sources(
             "sources": sources,
             "highest_level": None,
         }
+
+    if min_level is None:
+        from petri.config import get_minimum_terminal_level
+        min_level = get_minimum_terminal_level()
 
     highest = min(levels)  # Lower number = higher quality
     passes = highest <= min_level

@@ -23,6 +23,9 @@ The core library imports only stdlib + Pydantic. Adapters bridge to specific har
 ### VII. Simplicity as Default
 JSONL files, JSON queue with file locking, SQLite as a disposable read index. No external infrastructure, no message queues, no Docker required.
 
+### VIII. First-Principles Decomposition
+Claims decompose from foundational assumptions upward using iterative questioning. Each premise is examined at its root — not borrowing credibility from higher-level claims. The Socratic method (clarify, challenge assumptions, seek evidence, consider alternatives, examine consequences) is the structural backbone of the agent pipeline, not an afterthought. When convergence fails, the decomposition itself is questioned — not just the evidence. Agents are explicitly anchored to first-principles roles: the investigator seeks evidence for irreducible claims, the skeptic challenges assumptions, the pragmatist examines consequences, and the triage agent questions whether the right questions are being asked.
+
 ## Governance
 
 - This constitution supersedes ad-hoc decisions.

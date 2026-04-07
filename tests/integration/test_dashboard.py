@@ -14,94 +14,30 @@ from pathlib import Path
 
 import pytest
 
-from petri.colony import ColonyGraph, serialize_colony
 from petri.dashboard.migrate import (
     incremental_sync,
     init_db,
     rebuild_sqlite,
 )
 from petri.event_log import append_event, rollup_to_combined
-from petri.models import Colony, Edge, Node, NodeStatus, build_node_key
 from petri.queue import add_to_queue
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────
-
-
-def _node(
-    dish: str,
-    colony: str,
-    level: int,
-    seq: int,
-    claim: str = "",
-    status: NodeStatus = NodeStatus.NEW,
-    dependencies: list[str] | None = None,
-) -> Node:
-    nid = build_node_key(dish, colony, level, seq)
-    return Node(
-        id=nid,
-        colony_id=f"{dish}-{colony}",
-        claim_text=claim or f"claim-{level}-{seq}",
-        level=level,
-        status=status,
-        dependencies=dependencies or [],
-    )
-
-
-def _edge(from_id: str, to_id: str) -> Edge:
-    return Edge(from_node=from_id, to_node=to_id, edge_type="intra_colony")
-
-
 @pytest.fixture
-def dashboard_env(tmp_path):
-    """Set up a .petri env with a colony, events, and queue entries."""
-    petri_dir = tmp_path / ".petri"
-    petri_dir.mkdir()
-    (petri_dir / "petri-dishes").mkdir()
-
-    (petri_dir / "petri.yaml").write_text(
-        "name: test-dish\nmodel:\n  name: gemma-3-4b-it\n  provider: local\n"
-        "harness: claude-code\nmax_iterations: 3\n"
-    )
-
-    queue_data = {"version": 1, "last_updated": None, "entries": {}}
-    (petri_dir / "queue.json").write_text(json.dumps(queue_data, indent=2) + "\n")
-
-    # Build a small colony
-    dish_id = "test-dish"
-    colony_name = "colony"
-    colony_id = f"{dish_id}-{colony_name}"
-
-    center = _node(
-        dish_id, colony_name, 0, 0, "Central thesis",
-        dependencies=[build_node_key(dish_id, colony_name, 1, 1)],
-    )
-    cell = _node(dish_id, colony_name, 1, 1, "Cell node")
-
-    graph = ColonyGraph(colony_id=colony_id)
-    graph.add_node(center)
-    graph.add_node(cell)
-    graph.add_edge(_edge(center.id, cell.id))
-
-    colony_model = Colony(
-        id=colony_id,
-        dish=dish_id,
-        center_claim="Central thesis",
-        center_node_id=center.id,
-        created_at="2026-01-01T00:00:00Z",
-    )
-
-    colony_path = petri_dir / "petri-dishes" / colony_name
-    serialize_colony(graph, colony_model, colony_path)
+def dashboard_env(petri_env_with_colony):
+    """Extend the shared colony environment with events and queue entries."""
+    env = petri_env_with_colony
+    colony_path = env["colony_path"]
+    colony_model = env["colony_model"]
 
     # Resolve event paths from node_paths mapping
-    cell_events_path = colony_path / colony_model.node_paths[cell.id] / "events.jsonl"
-    center_events_path = colony_path / colony_model.node_paths[center.id] / "events.jsonl"
+    cell1_events_path = colony_path / colony_model.node_paths[env["cell1"].id] / "events.jsonl"
+    center_events_path = colony_path / colony_model.node_paths[env["center"].id] / "events.jsonl"
 
     for i in range(3):
         append_event(
-            cell_events_path,
-            node_id=cell.id,
+            cell1_events_path,
+            node_id=env["cell1"].id,
             event_type="search_executed",
             agent="investigator",
             iteration=i,
@@ -109,8 +45,8 @@ def dashboard_env(tmp_path):
         )
 
     append_event(
-        cell_events_path,
-        node_id=cell.id,
+        cell1_events_path,
+        node_id=env["cell1"].id,
         event_type="verdict_issued",
         agent="investigator",
         iteration=1,
@@ -119,24 +55,19 @@ def dashboard_env(tmp_path):
 
     append_event(
         center_events_path,
-        node_id=center.id,
+        node_id=env["center"].id,
         event_type="decomposition_created",
         agent="decomposition_lead",
         iteration=0,
-        data={"parent_node_id": center.id, "child_node_ids": [cell.id]},
+        data={"parent_node_id": env["center"].id, "child_node_ids": [env["cell1"].id]},
     )
 
     # Add a queue entry
-    add_to_queue(petri_dir / "queue.json", cell.id)
+    add_to_queue(env["petri_dir"] / "queue.json", env["cell1"].id)
 
     return {
-        "petri_dir": petri_dir,
-        "db_path": tmp_path / "petri.sqlite",
-        "dish_id": dish_id,
-        "colony_name": colony_name,
-        "center": center,
-        "cell": cell,
-        "colony_path": colony_path,
+        **env,
+        "db_path": env["tmp_path"] / "petri.sqlite",
     }
 
 
@@ -171,7 +102,7 @@ class TestRebuildSqlite:
         conn = sqlite3.connect(str(env["db_path"]))
         rows = conn.execute(
             "SELECT COUNT(*) FROM events WHERE node_id = ?",
-            [env["cell"].id],
+            [env["cell1"].id],
         ).fetchone()
         conn.close()
 
@@ -229,13 +160,12 @@ class TestIncrementalSync:
         file_offsets = {str(combined): initial_size}
 
         # Append a new event — resolve path from colony.json
-        import json as _json
-        colony_data = _json.loads((env["colony_path"] / "colony.json").read_text())
-        cell_rel = colony_data["node_paths"][env["cell"].id]
-        cell_events_path = env["colony_path"] / cell_rel / "events.jsonl"
+        colony_data = json.loads((env["colony_path"] / "colony.json").read_text())
+        cell1_rel = colony_data["node_paths"][env["cell1"].id]
+        cell1_events_path = env["colony_path"] / cell1_rel / "events.jsonl"
         append_event(
-            cell_events_path,
-            node_id=env["cell"].id,
+            cell1_events_path,
+            node_id=env["cell1"].id,
             event_type="verdict_issued",
             agent="skeptic",
             iteration=2,
@@ -315,11 +245,11 @@ class TestEventsEndpoint:
 
     def test_filter_by_node_id(self, api_client):
         client, env = api_client
-        resp = client.get("/api/events", params={"node_id": env["cell"].id})
+        resp = client.get("/api/events", params={"node_id": env["cell1"].id})
         assert resp.status_code == 200
         events = resp.json()
         assert len(events) == 4
-        assert all(e["node_id"] == env["cell"].id for e in events)
+        assert all(e["node_id"] == env["cell1"].id for e in events)
 
     def test_filter_by_event_type(self, api_client):
         client, _ = api_client
@@ -368,7 +298,7 @@ class TestQueueEndpoint:
         entries = resp.json()
         assert isinstance(entries, list)
         assert len(entries) >= 1
-        assert entries[0]["node_id"] == env["cell"].id
+        assert entries[0]["node_id"] == env["cell1"].id
 
 
 class TestNodesEndpoint:
@@ -378,11 +308,11 @@ class TestNodesEndpoint:
         assert resp.status_code == 200
         nodes = resp.json()
         assert isinstance(nodes, list)
-        assert len(nodes) == 2  # center + cell
+        assert len(nodes) == 5  # canonical colony: center + 2 premises + 2 cells
 
         node_ids = {n["node_id"] for n in nodes}
         assert env["center"].id in node_ids
-        assert env["cell"].id in node_ids
+        assert env["cell1"].id in node_ids
 
     def test_node_has_expected_fields(self, api_client):
         client, _ = api_client
@@ -398,18 +328,18 @@ class TestNodesEndpoint:
 class TestNodeDetailEndpoint:
     def test_get_node_detail(self, api_client):
         client, env = api_client
-        resp = client.get(f"/api/node/{env['cell'].id}")
+        resp = client.get(f"/api/node/{env['cell1'].id}")
         assert resp.status_code == 200
 
         detail = resp.json()
-        assert detail["node_id"] == env["cell"].id
-        assert detail["claim_text"] == "Cell node"
+        assert detail["node_id"] == env["cell1"].id
+        assert detail["claim_text"] == "Cell premise of P1"
         assert "events" in detail
         assert len(detail["events"]) == 4  # 3 search + 1 verdict
 
     def test_node_detail_includes_events(self, api_client):
         client, env = api_client
-        detail = client.get(f"/api/node/{env['cell'].id}").json()
+        detail = client.get(f"/api/node/{env['cell1'].id}").json()
         event_types = [e["type"] for e in detail["events"]]
         assert "search_executed" in event_types
         assert "verdict_issued" in event_types
@@ -442,9 +372,5 @@ class TestSSEStream:
     def test_stream_endpoint_registered(self, api_client):
         """Verify the SSE endpoint is registered in the app routes."""
         client, _ = api_client
-        # Check the route exists by inspecting the app's routes directly
-        # (avoid calling the infinite SSE generator which blocks TestClient)
-        from petri.dashboard.api import create_app
-
         routes = [r.path for r in client.app.routes if hasattr(r, "path")]
         assert "/api/stream" in routes

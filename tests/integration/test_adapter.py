@@ -8,8 +8,6 @@ re-read instructions, and passes the contradiction scanner.
 from __future__ import annotations
 
 import json
-import shutil
-from pathlib import Path
 
 import pytest
 
@@ -17,36 +15,6 @@ from petri.adapters.claude_code import ClaudeCodeAdapter
 from petri.convergence import load_agent_roles
 from petri.models import PetriConfig
 from petri.scanner import scan
-
-
-@pytest.fixture
-def petri_env(tmp_path):
-    """Set up a .petri/ directory with defaults from the package."""
-    petri_dir = tmp_path / ".petri"
-    petri_dir.mkdir()
-    (petri_dir / "petri-dishes").mkdir()
-
-    # Copy real defaults
-    src_defaults = Path(__file__).parent.parent.parent / "petri" / "defaults"
-    dst_defaults = petri_dir / "defaults"
-    shutil.copytree(src_defaults, dst_defaults)
-
-    # Write petri.yaml
-    (petri_dir / "petri.yaml").write_text(
-        "name: test-dish\n"
-        "model:\n"
-        "  name: gemma-3-4b-it\n"
-        "  provider: local\n"
-        "harness: claude-code\n"
-        "max_iterations: 3\n"
-        "max_concurrent: 4\n"
-    )
-
-    # Queue
-    queue = {"version": 1, "last_updated": None, "entries": {}}
-    (petri_dir / "queue.json").write_text(json.dumps(queue, indent=2) + "\n")
-
-    return tmp_path
 
 
 @pytest.fixture

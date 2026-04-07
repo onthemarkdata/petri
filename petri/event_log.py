@@ -18,7 +18,7 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petri.models import Event, EventType, build_event_key, validate_event_data
+from petri.models import Event, EventType, Verdict, build_event_key, validate_event_data
 
 
 # ── Core Write Operations ────────────────────────────────────────────────
@@ -137,7 +137,7 @@ def get_verdicts(
     node_id: str | None = None,
     iteration: int | None = None,
     agent: str | None = None,
-) -> list[dict]:
+) -> list[Verdict]:
     """Return verdict_issued events with extracted verdict and summary."""
     events = query_events(
         events_path,
@@ -146,17 +146,17 @@ def get_verdicts(
         event_type="verdict_issued",
         agent=agent,
     )
-    verdicts: list[dict] = []
+    verdicts: list[Verdict] = []
     for evt in events:
         data = evt.get("data", {})
         verdicts.append(
-            {
-                "node_id": evt.get("node_id"),
-                "agent": evt.get("agent"),
-                "iteration": evt.get("iteration"),
-                "verdict": data.get("verdict"),
-                "summary": data.get("summary"),
-            }
+            Verdict(
+                node_id=evt.get("node_id", ""),
+                agent=evt.get("agent", ""),
+                iteration=evt.get("iteration", 0),
+                verdict=data.get("verdict", ""),
+                summary=data.get("summary", ""),
+            )
         )
     return verdicts
 

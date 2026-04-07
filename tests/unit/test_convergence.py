@@ -13,7 +13,9 @@ from petri.convergence import (
     identify_weakest_link,
     load_agent_roles,
 )
-from petri.models import AgentRole
+from petri.models import AgentRole, Verdict
+
+from tests.conftest import make_verdict
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -23,11 +25,6 @@ from petri.models import AgentRole
 def agent_roles():
     """Load the default agent roles from petri/defaults/agents.yaml."""
     return load_agent_roles()
-
-
-def _make_verdict(agent: str, verdict: str) -> dict:
-    """Helper to build a verdict dict."""
-    return {"agent": agent, "verdict": verdict}
 
 
 # ── load_agent_roles ─────────────────────────────────────────────────────
@@ -66,134 +63,134 @@ class TestCheckConvergence:
     def test_all_blocking_pass_converges(self, agent_roles):
         """All blocking verdicts in their pass set -> converged."""
         verdicts = [
-            _make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
         ]
         result = check_convergence(verdicts, agent_roles)
-        assert result["converged"] is True
-        assert result["weakest_link"] is None
-        assert len(result["missing_blocking"]) == 0
+        assert result.converged is True
+        assert result.weakest_link is None
+        assert len(result.missing_blocking) == 0
 
     def test_one_blocking_fails_not_converged(self, agent_roles):
         """One blocking verdict fails -> not converged."""
         verdicts = [
-            _make_verdict("investigator", "NEEDS_MORE_EVIDENCE"),  # FAILS
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("investigator", "NEEDS_MORE_EVIDENCE"),  # FAILS
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
         ]
         result = check_convergence(verdicts, agent_roles)
-        assert result["converged"] is False
-        assert result["weakest_link"] == "investigator"
+        assert result.converged is False
+        assert result.weakest_link == "investigator"
 
     def test_missing_blocking_agent_not_converged(self, agent_roles):
         """Missing a blocking agent -> not converged."""
         verdicts = [
             # investigator missing
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
         ]
         result = check_convergence(verdicts, agent_roles)
-        assert result["converged"] is False
-        assert "investigator" in result["missing_blocking"]
+        assert result.converged is False
+        assert "investigator" in result.missing_blocking
 
     def test_non_blocking_verdicts_dont_affect_convergence(self, agent_roles):
         """Non-blocking agents (simplifier, impact_assessor) don't block convergence."""
         verdicts = [
-            _make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
             # simplifier and impact_assessor have blocking verdicts but are non-blocking
-            _make_verdict("simplifier", "OVERCOMPLICATED"),
-            _make_verdict("impact_assessor", "ISOLATED_LOW_IMPACT"),
+            make_verdict("simplifier", "OVERCOMPLICATED"),
+            make_verdict("impact_assessor", "ISOLATED_LOW_IMPACT"),
         ]
         result = check_convergence(verdicts, agent_roles)
-        assert result["converged"] is True
+        assert result.converged is True
 
     def test_lead_agents_excluded_from_convergence(self, agent_roles):
         """Lead agents are excluded from convergence checks entirely."""
         verdicts = [
-            _make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
             # Lead agents' verdicts should not matter
-            _make_verdict("node_lead", "PIPELINE_STALLED"),
+            make_verdict("node_lead", "PIPELINE_STALLED"),
         ]
         result = check_convergence(verdicts, agent_roles)
-        assert result["converged"] is True
+        assert result.converged is True
         # node_lead should not appear in blocking or non-blocking results
-        assert "node_lead" not in result["blocking_results"]
+        assert "node_lead" not in result.blocking_results
 
     def test_latest_verdict_per_agent_used(self, agent_roles):
         """When an agent has multiple verdicts, the latest one wins."""
         verdicts = [
-            _make_verdict("investigator", "NEEDS_MORE_EVIDENCE"),  # old
-            _make_verdict("investigator", "EVIDENCE_SUFFICIENT"),  # latest
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("investigator", "NEEDS_MORE_EVIDENCE"),  # old
+            make_verdict("investigator", "EVIDENCE_SUFFICIENT"),  # latest
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
         ]
         result = check_convergence(verdicts, agent_roles)
-        assert result["converged"] is True
+        assert result.converged is True
 
     def test_conditional_blocking_with_redirect(self, agent_roles):
         """Triage with LOW_VALUE_DEFER triggers redirect."""
         verdicts = [
-            _make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "LOW_VALUE_DEFER"),
+            make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "LOW_VALUE_DEFER"),
         ]
         result = check_convergence(verdicts, agent_roles)
-        assert result["converged"] is False
-        triage_result = result["blocking_results"]["triage"]
+        assert result.converged is False
+        triage_result = result.blocking_results["triage"]
         assert triage_result["redirect"] == "DEFER_OPEN"
 
     def test_empty_verdicts_not_converged(self, agent_roles):
         """No verdicts at all -> not converged, all blocking agents missing."""
         result = check_convergence([], agent_roles)
-        assert result["converged"] is False
-        assert len(result["missing_blocking"]) > 0
+        assert result.converged is False
+        assert len(result.missing_blocking) > 0
 
     def test_evidence_contradicts_passes(self, agent_roles):
         """EVIDENCE_CONTRADICTS is a pass verdict for investigator."""
         verdicts = [
-            _make_verdict("investigator", "EVIDENCE_CONTRADICTS"),
-            _make_verdict("freshness_checker", "STALE_BUT_HOLDS"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "DEFENSIBLE_WITH_CAVEATS"),
-            _make_verdict("pragmatist", "DIRECTIONALLY_CORRECT"),
-            _make_verdict("triage", "MODERATE_VALUE"),
+            make_verdict("investigator", "EVIDENCE_CONTRADICTS"),
+            make_verdict("freshness_checker", "STALE_BUT_HOLDS"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "DEFENSIBLE_WITH_CAVEATS"),
+            make_verdict("pragmatist", "DIRECTIONALLY_CORRECT"),
+            make_verdict("triage", "MODERATE_VALUE"),
         ]
         result = check_convergence(verdicts, agent_roles)
-        assert result["converged"] is True
+        assert result.converged is True
 
 
 # ── identify_weakest_link ────────────────────────────────────────────────
@@ -201,36 +198,31 @@ class TestCheckConvergence:
 
 class TestIdentifyWeakestLink:
     def test_missing_agent_is_weakest(self):
-        result = {"missing_blocking": ["investigator"], "blocking_results": {}}
-        assert identify_weakest_link(result) == "investigator"
+        blocking_results = {}
+        missing_blocking = ["investigator"]
+        assert identify_weakest_link(blocking_results, missing_blocking) == "investigator"
 
     def test_failing_agent_is_weakest(self):
-        result = {
-            "missing_blocking": [],
-            "blocking_results": {
-                "investigator": {"verdict": "EVIDENCE_SUFFICIENT", "passes": True},
-                "skeptic": {"verdict": "CRITICAL_FLAW_FOUND", "passes": False},
-            },
+        blocking_results = {
+            "investigator": {"verdict": "EVIDENCE_SUFFICIENT", "passes": True},
+            "skeptic": {"verdict": "CRITICAL_FLAW_FOUND", "passes": False},
         }
-        assert identify_weakest_link(result) == "skeptic"
+        missing_blocking = []
+        assert identify_weakest_link(blocking_results, missing_blocking) == "skeptic"
 
     def test_all_pass_returns_none(self):
-        result = {
-            "missing_blocking": [],
-            "blocking_results": {
-                "investigator": {"verdict": "EVIDENCE_SUFFICIENT", "passes": True},
-            },
+        blocking_results = {
+            "investigator": {"verdict": "EVIDENCE_SUFFICIENT", "passes": True},
         }
-        assert identify_weakest_link(result) is None
+        missing_blocking = []
+        assert identify_weakest_link(blocking_results, missing_blocking) is None
 
     def test_missing_takes_priority_over_failure(self):
-        result = {
-            "missing_blocking": ["freshness_checker"],
-            "blocking_results": {
-                "investigator": {"verdict": "NEEDS_MORE_EVIDENCE", "passes": False},
-            },
+        blocking_results = {
+            "investigator": {"verdict": "NEEDS_MORE_EVIDENCE", "passes": False},
         }
-        assert identify_weakest_link(result) == "freshness_checker"
+        missing_blocking = ["freshness_checker"]
+        assert identify_weakest_link(blocking_results, missing_blocking) == "freshness_checker"
 
 
 # ── evaluate_short_circuits ──────────────────────────────────────────────
@@ -240,45 +232,45 @@ class TestEvaluateShortCircuits:
     def test_cannot_determine_triggers_needs_experiment(self, agent_roles):
         """CANNOT_DETERMINE from investigator + all others pass -> needs_experiment."""
         verdicts = [
-            _make_verdict("investigator", "CANNOT_DETERMINE"),
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("investigator", "CANNOT_DETERMINE"),
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
         ]
         sc = evaluate_short_circuits(verdicts, agent_roles)
         assert sc is not None
-        assert sc["type"] == "needs_experiment"
-        assert sc["agent"] == "investigator"
+        assert sc.type == "needs_experiment"
+        assert sc.agent == "investigator"
 
     def test_low_value_defer_triggers_defer_open(self, agent_roles):
         """LOW_VALUE_DEFER from triage + all others pass -> defer_open."""
         verdicts = [
-            _make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "LOW_VALUE_DEFER"),
+            make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "LOW_VALUE_DEFER"),
         ]
         sc = evaluate_short_circuits(verdicts, agent_roles)
         assert sc is not None
-        assert sc["type"] == "defer_open"
-        assert sc["agent"] == "triage"
+        assert sc.type == "defer_open"
+        assert sc.agent == "triage"
 
     def test_no_short_circuit_when_all_pass(self, agent_roles):
         """All pass -> no short circuit."""
         verdicts = [
-            _make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
-            _make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("investigator", "EVIDENCE_SUFFICIENT"),
+            make_verdict("freshness_checker", "EVIDENCE_CURRENT"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
         ]
         sc = evaluate_short_circuits(verdicts, agent_roles)
         assert sc is None
@@ -286,13 +278,13 @@ class TestEvaluateShortCircuits:
     def test_no_short_circuit_when_multiple_fail(self, agent_roles):
         """CANNOT_DETERMINE + another failure -> no short circuit."""
         verdicts = [
-            _make_verdict("investigator", "CANNOT_DETERMINE"),
-            _make_verdict("freshness_checker", "MATERIALLY_STALE"),  # also fails
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("investigator", "CANNOT_DETERMINE"),
+            make_verdict("freshness_checker", "MATERIALLY_STALE"),  # also fails
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
         ]
         sc = evaluate_short_circuits(verdicts, agent_roles)
         assert sc is None
@@ -300,13 +292,13 @@ class TestEvaluateShortCircuits:
     def test_no_short_circuit_with_missing_agents(self, agent_roles):
         """CANNOT_DETERMINE but missing agents -> no short circuit."""
         verdicts = [
-            _make_verdict("investigator", "CANNOT_DETERMINE"),
+            make_verdict("investigator", "CANNOT_DETERMINE"),
             # freshness_checker missing
-            _make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
-            _make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
-            _make_verdict("champion", "STRONG_CASE"),
-            _make_verdict("pragmatist", "PRODUCTION_READY"),
-            _make_verdict("triage", "HIGH_VALUE"),
+            make_verdict("dependency_auditor", "DEPENDENCIES_CLEAN"),
+            make_verdict("skeptic", "ARGUMENT_WITHSTANDS_CRITIQUE"),
+            make_verdict("champion", "STRONG_CASE"),
+            make_verdict("pragmatist", "PRODUCTION_READY"),
+            make_verdict("triage", "HIGH_VALUE"),
         ]
         sc = evaluate_short_circuits(verdicts, agent_roles)
         assert sc is None

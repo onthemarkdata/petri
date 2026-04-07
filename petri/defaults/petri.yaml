@@ -8,11 +8,11 @@ name: petri
 # Petri defaults to a free local model to protect you from unexpected costs.
 
 model:
-  name: gemma-3-4b-it
-  provider: local
-  # For paid models (opt-in):
-  # name: claude-sonnet-4-6
-  # provider: anthropic
+  name: gemma4:4b
+  # Claude Code handles all model routing:
+  #   - Local models (e.g. gemma4:4b) via Ollama integration
+  #   - Cloud models (e.g. claude-opus-4-6) via Anthropic API
+  # See: https://docs.ollama.com/integrations/claude-code
 
 harness: claude-code
 
@@ -20,6 +20,7 @@ harness: claude-code
 
 max_iterations: 3
 max_concurrent: 4
+max_decomposition_depth: 3  # Five Whys: how many levels deep to decompose
 
 # ── Source Hierarchy ────────────────────────────────────────────────────
 # 6-level evidence credibility ranking (strongest to weakest)
@@ -109,6 +110,13 @@ agents:
     verdicts_pass: [STRONG_DISPROVAL_CASE, WEAK_DISPROVAL_CASE, NO_CONTRADICTING_EVIDENCE]
     verdicts_block: []
     redirect_on_block: null
+    instruction: >
+      You lead an adversarial red team to DISPROVE this claim.
+      In 'arguments', list: counter-evidence found, assumptions challenged
+      (with scenario where each fails and plausibility), source credibility challenges.
+      In 'evidence', cite specific contradicting sources with hierarchy levels.
+      Add contradicting sources to sources_cited with supports_or_contradicts='contradicts'.
+      In 'summary', state the single strongest argument for disproval.
 
   # === Phase 1 Agents (Research) ===
 
@@ -121,6 +129,17 @@ agents:
     verdicts_pass: [EVIDENCE_SUFFICIENT, EVIDENCE_CONTRADICTS]
     verdicts_block: [NEEDS_MORE_EVIDENCE, CANNOT_DETERMINE]
     redirect_on_block: null
+    instruction: >
+      FIRST PRINCIPLES ROLE: Seek evidence for irreducible claims.
+      You gather and evaluate evidence for/against the claim at its most fundamental level.
+      Do not accept surface-level support — trace evidence to its source.
+      For EACH source you reference, add it to sources_cited with:
+      url_or_name, hierarchy_level (1=direct measurement, 2=authoritative docs,
+      3=derived calculation, 4=expert consensus, 5=single expert, 6=community report),
+      finding, supports_or_contradicts.
+      In 'evidence', list specific facts, data points, and statistics.
+      In 'arguments', explain what evidence exists and what gaps remain.
+      In 'summary', give a 3-5 sentence assessment with specific reasoning.
 
   freshness_checker:
     display_name: Freshness Checker
@@ -131,6 +150,13 @@ agents:
     verdicts_pass: [EVIDENCE_CURRENT, STALE_BUT_HOLDS]
     verdicts_block: [MATERIALLY_STALE]
     redirect_on_block: null
+    instruction: >
+      You verify whether evidence underlying this claim is current.
+      For each key source: note its date, age, staleness risk (NONE/LOW/MEDIUM/HIGH),
+      and whether newer data exists.
+      In 'evidence', list each source checked with its date and staleness assessment.
+      In 'arguments', explain whether the conclusions still hold given any staleness.
+      In 'summary', state whether the evidence base is current or outdated.
 
   dependency_auditor:
     display_name: Dependency Auditor
@@ -141,6 +167,13 @@ agents:
     verdicts_pass: [DEPENDENCIES_CLEAN]
     verdicts_block: [UNVALIDATED_DEPS, CIRCULAR_REASONING]
     redirect_on_block: null
+    instruction: >
+      FIRST PRINCIPLES ROLE: Challenge assumptions — identify hidden premises.
+      You audit the logical foundation of this claim. Every dependency must be independently valid.
+      In 'arguments', list: any circular reasoning found, unvalidated assumptions,
+      hidden premises, and logical gaps in the argument chain.
+      In 'evidence', identify which sub-claims support this claim and whether they are validated.
+      In 'summary', state whether the dependency chain is clean or has issues.
 
   # === Phase 2 Agents (Critique) ===
 
@@ -153,6 +186,14 @@ agents:
     verdicts_pass: [ARGUMENT_WITHSTANDS_CRITIQUE]
     verdicts_block: [CRITICAL_FLAW_FOUND, UNADDRESSED_COUNTERARGUMENT]
     redirect_on_block: null
+    instruction: >
+      FIRST PRINCIPLES ROLE: Challenge assumptions — build falsification conditions.
+      You build the strongest case AGAINST the claim by attacking its foundations.
+      In 'arguments', list specific counterarguments with plausibility
+      (HIGH/MEDIUM/LOW) and what evidence would resolve each.
+      ALSO include falsification conditions: specific things that would prove this claim false.
+      In 'evidence', cite specific counterexamples, contradicting data, or edge cases.
+      In 'summary', state the strongest single reason to doubt this claim.
 
   champion:
     display_name: Champion
@@ -163,6 +204,13 @@ agents:
     verdicts_pass: [STRONG_CASE, DEFENSIBLE_WITH_CAVEATS]
     verdicts_block: [CANNOT_DEFEND]
     redirect_on_block: null
+    instruction: >
+      You build the strongest case FOR the claim.
+      In 'arguments', list the strongest supporting evidence (strongest first)
+      with source, hierarchy level, and strength (STRONG/MODERATE/WEAK).
+      Include rebuttals to likely skeptic objections.
+      In 'evidence', cite specific facts, studies, or data that support the claim.
+      In 'summary', state the strongest single reason to believe this claim.
 
   pragmatist:
     display_name: Pragmatist
@@ -173,6 +221,13 @@ agents:
     verdicts_pass: [PRODUCTION_READY, DIRECTIONALLY_CORRECT]
     verdicts_block: [WOULD_NOT_SHIP_THIS]
     redirect_on_block: null
+    instruction: >
+      FIRST PRINCIPLES ROLE: Examine consequences — does this matter if true or false?
+      You evaluate practical significance by tracing the claim to real-world impact.
+      In 'arguments', assess: Would I build on this? Real-world factors considered
+      vs factors missing. Known theory-practice gaps.
+      In 'evidence', cite practical examples or implementations.
+      In 'summary', state whether this claim matters in practice and why.
 
   simplifier:
     display_name: Simplifier
@@ -183,6 +238,11 @@ agents:
     verdicts_pass: [APPROPRIATELY_SCOPED, COULD_BE_SIMPLER]
     verdicts_block: [OVERCOMPLICATED]
     redirect_on_block: null
+    instruction: >
+      You check whether the claim is appropriately scoped.
+      In 'arguments', assess: Is the scope focused or too broad?
+      Could it be simpler? What rigor would be lost by simplifying?
+      In 'summary', state whether the claim is appropriately scoped.
 
   triage:
     display_name: Triage
@@ -193,6 +253,12 @@ agents:
     verdicts_pass: [HIGH_VALUE, MODERATE_VALUE]
     verdicts_block: [LOW_VALUE_DEFER]
     redirect_on_block: DEFER_OPEN
+    instruction: >
+      FIRST PRINCIPLES ROLE: Question the questions — is this the right thing to validate?
+      You assess whether this claim is worth the effort of first-principles validation.
+      In 'arguments', assess: What decision does this inform? What changes if
+      validated vs invalidated? What risk if skipped entirely? Research effort required.
+      In 'summary', state the priority level and why.
 
   impact_assessor:
     display_name: Impact Assessor
@@ -203,6 +269,12 @@ agents:
     verdicts_pass: [CRITICAL_PATH, SUPPORTING_NOT_BLOCKING, ISOLATED_LOW_IMPACT]
     verdicts_block: []
     redirect_on_block: null
+    instruction: >
+      You evaluate downstream impact of this claim.
+      In 'arguments', map dependencies: what claims depend on this? What breaks if
+      this is wrong? Classify as FOUNDATION_STONE, KEYSTONE, CAPSTONE, or ISOLATED.
+      Estimate blast radius (HIGH >5 claims, MEDIUM 2-5, LOW 0-1).
+      In 'summary', state what breaks if this claim is wrong.
 
   # === Post-Convergence ===
 
@@ -215,3 +287,11 @@ agents:
     verdicts_pass: [EVIDENCE_CONFIRMS, EVIDENCE_REFUTES, EVIDENCE_INCONCLUSIVE]
     verdicts_block: []
     redirect_on_block: null
+    instruction: >
+      You make the final determination by weighing ALL evidence.
+      In 'arguments', provide: evidence inventory (supporting vs contradicting by
+      hierarchy level), logical coherence assessment, key assumptions status.
+      In 'evidence', summarize the strongest points from investigation, critique,
+      and red team phases.
+      In 'summary', give your balanced final determination with reasoning.
+      In 'confidence', state HIGH/MEDIUM/LOW with justification.

@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from petri.event_log import append_event
-from petri.models import Debate, InferenceProvider
+from petri.models import Debate, DebateExchange, DebateResult, InferenceProvider
 
 # ── Defaults ──────────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ def mediate_debate(
     agent_b_output: dict,
     debate: Debate,
     provider: InferenceProvider | None = None,
-) -> dict:
+) -> DebateResult:
     """Mediate a debate between two agents.
 
     Parameters
@@ -74,35 +74,35 @@ def mediate_debate(
 
     Returns
     -------
-    dict with keys: pair, rounds, purpose, exchanges, summary.
+    DebateResult with pair, rounds, purpose, exchanges, summary.
     """
     agent_a = agent_a_output.get("agent", debate.pair[0])
     agent_b = agent_b_output.get("agent", debate.pair[1])
 
-    exchanges: list[dict] = []
+    exchanges: list[DebateExchange] = []
 
     # ── Round 1: agent_a presents, agent_b responds ───────────────────
     a_content = _build_presentation(agent_a_output, provider, opponent_output=None)
-    exchanges.append({"speaker": agent_a, "content": a_content, "round": 1})
+    exchanges.append(DebateExchange(speaker=agent_a, content=a_content, round=1))
 
     b_content = _build_response(agent_b_output, agent_a_output, provider)
-    exchanges.append({"speaker": agent_b, "content": b_content, "round": 1})
+    exchanges.append(DebateExchange(speaker=agent_b, content=b_content, round=1))
 
     # ── Round 1.5: agent_a gets a final rebuttal ──────────────────────
     if debate.rounds > 1:
         rebuttal = _build_rebuttal(agent_a_output, agent_b_output, provider)
-        exchanges.append({"speaker": agent_a, "content": rebuttal, "round": 1.5})
+        exchanges.append(DebateExchange(speaker=agent_a, content=rebuttal, round=1.5))
 
     # ── Summary ───────────────────────────────────────────────────────
     summary = _build_summary(agent_a, agent_b, agent_a_output, agent_b_output, debate)
 
-    return {
-        "pair": (agent_a, agent_b),
-        "rounds": debate.rounds,
-        "purpose": debate.purpose,
-        "exchanges": exchanges,
-        "summary": summary,
-    }
+    return DebateResult(
+        pair=(agent_a, agent_b),
+        rounds=debate.rounds,
+        purpose=debate.purpose,
+        exchanges=exchanges,
+        summary=summary,
+    )
 
 
 # ── Event Logging ─────────────────────────────────────────────────────────
@@ -112,14 +112,14 @@ def log_debate(
     events_path: Path,
     node_id: str,
     iteration: int,
-    debate_result: dict,
+    debate_result: DebateResult,
 ) -> None:
     """Write a ``debate_mediated`` event to the event log."""
-    pair = debate_result.get("pair", ("", ""))
+    pair = debate_result.pair
     exchange_lines = []
-    for ex in debate_result.get("exchanges", []):
-        exchange_lines.append(f"[Round {ex['round']}] {ex['speaker']}: {ex['content']}")
-    exchange_summary = " | ".join(exchange_lines) if exchange_lines else debate_result.get("summary", "")
+    for exchange in debate_result.exchanges:
+        exchange_lines.append(f"[Round {exchange.round}] {exchange.speaker}: {exchange.content}")
+    exchange_summary = " | ".join(exchange_lines) if exchange_lines else debate_result.summary
 
     append_event(
         events_path=events_path,
@@ -139,7 +139,7 @@ def log_debate(
 
 
 def get_held_messages(
-    debates: list[dict],
+    debates: list[DebateResult],
     current_phase: int,
 ) -> list[dict]:
     """Filter debate results for messages that should be held for the next iteration.
@@ -153,10 +153,10 @@ def get_held_messages(
     held: list[dict] = []
 
     for debate_result in debates:
-        for ex in debate_result.get("exchanges", []):
-            speaker = ex.get("speaker", "")
+        for exchange in debate_result.exchanges:
+            speaker = exchange.speaker
             # Identify the other participant in the debate.
-            pair = debate_result.get("pair", ())
+            pair = debate_result.pair
             if len(pair) == 2:
                 to_agent = pair[1] if speaker == pair[0] else pair[0]
             else:
@@ -169,7 +169,7 @@ def get_held_messages(
                     {
                         "from_agent": speaker,
                         "to_agent": to_agent,
-                        "content": ex.get("content", ""),
+                        "content": exchange.content,
                         "hold_until_phase": 1,
                     }
                 )

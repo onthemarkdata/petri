@@ -13,13 +13,13 @@ dependencies = [
     "pyyaml>=6.0",
     "typer>=0.9",
     "questionary>=2.0",
-    "ollama>=0.4",
-    "fastapi>=0.100",
-    "sse-starlette>=1.6",
-    "uvicorn>=0.23",
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
 ]
+
+[project.optional-dependencies]
+pdf = ["pypdf>=4.0"]
+dashboard = ["fastapi>=0.100", "sse-starlette>=1.6", "uvicorn>=0.23"]
+test = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+all = ["petri-grow[pdf,dashboard,test]"]
 
 [project.scripts]
 petri = "petri.cli:app"

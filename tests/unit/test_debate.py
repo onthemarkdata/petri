@@ -15,6 +15,8 @@ from petri.debate import (
 from petri.event_log import load_events
 from petri.models import Debate
 
+from tests.conftest import CANONICAL_NODE_IDS
+
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -99,10 +101,10 @@ class TestMediateDebate:
         b = _agent_output("champion", "STRONG_CASE", "It's strong", "Arg B")
         result = mediate_debate(a, b, skeptic_champion_debate)
 
-        assert len(result["exchanges"]) == 3
-        assert result["exchanges"][0]["speaker"] == "skeptic"
-        assert result["exchanges"][1]["speaker"] == "champion"
-        assert result["exchanges"][2]["speaker"] == "skeptic"  # final word
+        assert len(result.exchanges) == 3
+        assert result.exchanges[0].speaker == "skeptic"
+        assert result.exchanges[1].speaker == "champion"
+        assert result.exchanges[2].speaker == "skeptic"  # final word
 
     def test_1_round_debate_has_2_exchanges(self, skeptic_pragmatist_debate):
         """1 round = presentation + response (2 exchanges)."""
@@ -110,54 +112,54 @@ class TestMediateDebate:
         b = _agent_output("pragmatist", "PRODUCTION_READY", "Ship it")
         result = mediate_debate(a, b, skeptic_pragmatist_debate)
 
-        assert len(result["exchanges"]) == 2
-        assert result["exchanges"][0]["speaker"] == "skeptic"
-        assert result["exchanges"][1]["speaker"] == "pragmatist"
+        assert len(result.exchanges) == 2
+        assert result.exchanges[0].speaker == "skeptic"
+        assert result.exchanges[1].speaker == "pragmatist"
 
     def test_debate_result_structure(self, skeptic_champion_debate):
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND")
         b = _agent_output("champion", "STRONG_CASE")
         result = mediate_debate(a, b, skeptic_champion_debate)
 
-        assert "pair" in result
-        assert "rounds" in result
-        assert "purpose" in result
-        assert "exchanges" in result
-        assert "summary" in result
+        assert hasattr(result, "pair")
+        assert hasattr(result, "rounds")
+        assert hasattr(result, "purpose")
+        assert hasattr(result, "exchanges")
+        assert hasattr(result, "summary")
 
     def test_debate_preserves_pair_info(self, skeptic_champion_debate):
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND")
         b = _agent_output("champion", "STRONG_CASE")
         result = mediate_debate(a, b, skeptic_champion_debate)
 
-        assert result["pair"] == ("skeptic", "champion")
-        assert result["rounds"] == 1.5
-        assert result["purpose"] == skeptic_champion_debate.purpose
+        assert result.pair == ("skeptic", "champion")
+        assert result.rounds == 1.5
+        assert result.purpose == skeptic_champion_debate.purpose
 
     def test_exchange_round_numbering(self, skeptic_champion_debate):
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND")
         b = _agent_output("champion", "STRONG_CASE")
         result = mediate_debate(a, b, skeptic_champion_debate)
 
-        assert result["exchanges"][0]["round"] == 1
-        assert result["exchanges"][1]["round"] == 1
-        assert result["exchanges"][2]["round"] == 1.5
+        assert result.exchanges[0].round == 1
+        assert result.exchanges[1].round == 1
+        assert result.exchanges[2].round == 1.5
 
     def test_content_includes_verdict(self, skeptic_champion_debate):
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND", "Bad logic")
         b = _agent_output("champion", "STRONG_CASE", "Good logic")
         result = mediate_debate(a, b, skeptic_champion_debate)
 
-        assert "CRITICAL_FLAW_FOUND" in result["exchanges"][0]["content"]
-        assert "STRONG_CASE" in result["exchanges"][1]["content"]
+        assert "CRITICAL_FLAW_FOUND" in result.exchanges[0].content
+        assert "STRONG_CASE" in result.exchanges[1].content
 
     def test_content_includes_arguments(self, skeptic_pragmatist_debate):
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND", "Flaw", "The data is wrong")
         b = _agent_output("pragmatist", "PRODUCTION_READY", "Fine", "Works in practice")
         result = mediate_debate(a, b, skeptic_pragmatist_debate)
 
-        assert "The data is wrong" in result["exchanges"][0]["content"]
-        assert "Works in practice" in result["exchanges"][1]["content"]
+        assert "The data is wrong" in result.exchanges[0].content
+        assert "Works in practice" in result.exchanges[1].content
 
     def test_empty_outputs_produce_fallback_content(self, skeptic_pragmatist_debate):
         a = _agent_output("skeptic", "", "", "")
@@ -165,25 +167,25 @@ class TestMediateDebate:
         result = mediate_debate(a, b, skeptic_pragmatist_debate)
 
         # Should not crash; exchanges should have fallback content
-        assert len(result["exchanges"]) == 2
-        for ex in result["exchanges"]:
-            assert ex["content"]  # not empty
+        assert len(result.exchanges) == 2
+        for exchange in result.exchanges:
+            assert exchange.content  # not empty
 
     def test_summary_contains_agent_names(self, skeptic_champion_debate):
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND")
         b = _agent_output("champion", "STRONG_CASE")
         result = mediate_debate(a, b, skeptic_champion_debate)
 
-        assert "skeptic" in result["summary"]
-        assert "champion" in result["summary"]
+        assert "skeptic" in result.summary
+        assert "champion" in result.summary
 
     def test_summary_contains_verdicts(self, skeptic_champion_debate):
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND")
         b = _agent_output("champion", "STRONG_CASE")
         result = mediate_debate(a, b, skeptic_champion_debate)
 
-        assert "CRITICAL_FLAW_FOUND" in result["summary"]
-        assert "STRONG_CASE" in result["summary"]
+        assert "CRITICAL_FLAW_FOUND" in result.summary
+        assert "STRONG_CASE" in result.summary
 
 
 # ── log_debate ───────────────────────────────────────────────────────────
@@ -192,7 +194,7 @@ class TestMediateDebate:
 class TestLogDebate:
     def test_logs_debate_mediated_event(self, tmp_path, skeptic_champion_debate):
         events_path = tmp_path / "events.jsonl"
-        node_id = "test-colony-001-001"
+        node_id = CANONICAL_NODE_IDS["premise1"]
 
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND", "Flaw found")
         b = _agent_output("champion", "STRONG_CASE", "Strong case")
@@ -210,7 +212,7 @@ class TestLogDebate:
 
     def test_logs_correct_agents_in_data(self, tmp_path, skeptic_champion_debate):
         events_path = tmp_path / "events.jsonl"
-        node_id = "test-colony-001-001"
+        node_id = CANONICAL_NODE_IDS["premise1"]
 
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND")
         b = _agent_output("champion", "STRONG_CASE")
@@ -225,7 +227,7 @@ class TestLogDebate:
 
     def test_exchange_summary_in_event(self, tmp_path, skeptic_champion_debate):
         events_path = tmp_path / "events.jsonl"
-        node_id = "test-colony-001-001"
+        node_id = CANONICAL_NODE_IDS["premise1"]
 
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND", "Problem here")
         b = _agent_output("champion", "STRONG_CASE", "No problem")
@@ -241,7 +243,7 @@ class TestLogDebate:
     def test_multiple_debates_logged(self, tmp_path, debate_pairings):
         """Log all 4 default debates for the same node."""
         events_path = tmp_path / "events.jsonl"
-        node_id = "test-colony-001-001"
+        node_id = CANONICAL_NODE_IDS["premise1"]
 
         for debate in debate_pairings:
             a = _agent_output(debate.pair[0], "PASS_VERDICT")

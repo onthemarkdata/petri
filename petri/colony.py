@@ -53,9 +53,9 @@ class ColonyGraph:
 
         # Remove edges that reference this node
         self._edges = [
-            e
-            for e in self._edges
-            if e.from_node != node_id and e.to_node != node_id
+            edge
+            for edge in self._edges
+            if edge.from_node != node_id and edge.to_node != node_id
         ]
 
         # Clean up adjacency references
@@ -232,8 +232,8 @@ class ColonyGraph:
                 # Cell node with NEW status
                 eligible.append(node)
             elif all(
-                nodes_status.get(d, NodeStatus.NEW) == NodeStatus.VALIDATED
-                for d in deps
+                nodes_status.get(dependency, NodeStatus.NEW) == NodeStatus.VALIDATED
+                for dependency in deps
             ):
                 # All dependencies validated
                 eligible.append(node)

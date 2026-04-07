@@ -29,12 +29,21 @@ DEFAULTS_DIR = Path(__file__).parent / "defaults"
 def _resolve_provider(petri_dir: Path):
     """Resolve an InferenceProvider from petri.yaml config.
 
-    Returns None if no provider can be constructed (caller must handle).
+    All inference routes through Claude Code CLI, which handles auth
+    and model routing (cloud models via API, local models via Ollama).
     """
     config = _load_dish_config(petri_dir)
-    # TODO: wire up actual inference providers based on config
-    # e.g. harness=claude-code, model=gemma-3-4b-it, etc.
-    return None
+    model_cfg = config.get("model", {})
+    if isinstance(model_cfg, dict):
+        model_name = model_cfg.get("name")
+    else:
+        model_name = str(model_cfg) if model_cfg else None
+
+    if not model_name:
+        return None
+
+    from petri.claude_code_provider import ClaudeCodeProvider
+    return ClaudeCodeProvider(model=model_name)
 
 
 def _find_petri_dir(start: Path | None = None) -> Path:
@@ -103,8 +112,11 @@ def _load_colonies(petri_dir: Path, dish_id: str) -> list[tuple]:
 def init(
     path: str = typer.Argument(".", help="Directory to initialize"),
     name: Optional[str] = typer.Option(None, help="Dish name (default: directory name)"),
+    no_questions: bool = typer.Option(
+        False, "--no-questions", help="Skip interactive setup wizard"
+    ),
 ) -> None:
-    """Initialize a new petri dish directory structure."""
+    """Initialize a new petri dish with an interactive setup wizard."""
     target = Path(path).resolve()
     petri_dir = target / ".petri"
 
@@ -115,15 +127,108 @@ def init(
     # Derive dish name
     dish_name = name or target.name
 
+    # ── Interactive Setup Wizard ─────────────────────────────────────
+    model_name = "gemma4:4b"
+    max_concurrent = 4
+    max_iterations = 3
+    interactive = not no_questions
+
+    if interactive:
+        try:
+            import questionary
+            import sys
+
+            if not sys.stdin.isatty():
+                interactive = False
+        except ImportError:
+            interactive = False
+
+    if interactive:
+        typer.echo("\n  Petri Setup Wizard\n")
+
+        # Dish name
+        wizard_name = questionary.text(
+            "Dish name:",
+            default=dish_name,
+        ).ask()
+        if wizard_name is None:
+            typer.echo("Cancelled.")
+            raise typer.Exit(code=1)
+        dish_name = wizard_name
+
+        # Model selection
+        model_choice = questionary.select(
+            "Inference model:",
+            choices=[
+                questionary.Choice(
+                    "gemma4:4b  (local via Ollama — free, no API key)",
+                    value="gemma4:4b",
+                ),
+                questionary.Choice(
+                    "claude-sonnet-4-6  (cloud via Claude Code — fast, cost-effective)",
+                    value="claude-sonnet-4-6",
+                ),
+                questionary.Choice(
+                    "claude-opus-4-6  (cloud via Claude Code — most capable)",
+                    value="claude-opus-4-6",
+                ),
+                questionary.Choice(
+                    "Other (enter model name)",
+                    value="_custom",
+                ),
+            ],
+        ).ask()
+        if model_choice is None:
+            typer.echo("Cancelled.")
+            raise typer.Exit(code=1)
+
+        if model_choice == "_custom":
+            model_name = questionary.text(
+                "Model name (as recognized by Claude Code):",
+                default="gemma4:4b",
+            ).ask()
+            if model_name is None:
+                typer.echo("Cancelled.")
+                raise typer.Exit(code=1)
+        else:
+            model_name = model_choice
+
+        # Max concurrent agents
+        concurrent_input = questionary.text(
+            "Max concurrent agents:",
+            default="4",
+        ).ask()
+        if concurrent_input is None:
+            typer.echo("Cancelled.")
+            raise typer.Exit(code=1)
+        try:
+            max_concurrent = int(concurrent_input)
+        except ValueError:
+            max_concurrent = 4
+
+        # Max iterations per convergence cycle
+        iterations_input = questionary.text(
+            "Max iterations per convergence cycle:",
+            default="3",
+        ).ask()
+        if iterations_input is None:
+            typer.echo("Cancelled.")
+            raise typer.Exit(code=1)
+        try:
+            max_iterations = int(iterations_input)
+        except ValueError:
+            max_iterations = 3
+
+        typer.echo("")
+
+    # ── Create Dish ──────────────────────────────────────────────────
     try:
-        # Create .petri/ directory structure
         petri_dir.mkdir(parents=True)
 
-        # Copy defaults (petri.yaml + constitution.md)
         defaults_dest = petri_dir / "defaults"
         defaults_dest.mkdir()
 
-        # Copy petri.yaml from package defaults and set dish name
+        # Load package defaults and apply wizard choices
         src_config = DEFAULTS_DIR / "petri.yaml"
         if src_config.exists():
             import yaml
@@ -131,14 +236,18 @@ def init(
             with open(src_config) as f:
                 config = yaml.safe_load(f)
             config["name"] = dish_name
+            config.setdefault("model", {})["name"] = model_name
+            config["max_concurrent"] = max_concurrent
+            config["max_iterations"] = max_iterations
             with open(defaults_dest / "petri.yaml", "w") as f:
                 f.write("# Petri Dish Configuration\n")
                 f.write(f"# Initialized for dish: {dish_name}\n\n")
                 yaml.dump(config, f, default_flow_style=False, sort_keys=False)
         else:
-            # Minimal fallback
             (defaults_dest / "petri.yaml").write_text(
-                f"name: {dish_name}\n", encoding="utf-8"
+                f"name: {dish_name}\nmodel:\n  name: {model_name}\n"
+                f"max_concurrent: {max_concurrent}\nmax_iterations: {max_iterations}\n",
+                encoding="utf-8",
             )
 
         # Copy constitution.md
@@ -157,6 +266,9 @@ def init(
         )
 
         typer.echo(f"Initialized petri dish '{dish_name}' at {target}")
+        typer.echo(f"  Model: {model_name}")
+        typer.echo(f"  Max concurrent: {max_concurrent}")
+        typer.echo(f"  Max iterations: {max_iterations}")
 
     except OSError as exc:
         typer.echo(f"Error creating petri dish: {exc}", err=True)
@@ -165,7 +277,7 @@ def init(
 
 @app.command()
 def seed(
-    claim: str = typer.Argument(..., help="The thesis to decompose"),
+    source: str = typer.Argument(..., help="Claim text, URL, or file path to decompose"),
     colony: Optional[str] = typer.Option(
         None, help="Colony name (default: auto-generated)"
     ),
@@ -173,7 +285,7 @@ def seed(
         False, "--no-questions", help="Skip clarifying questions"
     ),
 ) -> None:
-    """Seed a new colony from a claim."""
+    """Seed a new colony from a claim, URL, or file."""
     petri_dir = _find_petri_dir()
     dish_id = _get_dish_id(petri_dir)
 
@@ -183,6 +295,30 @@ def seed(
         generate_clarifying_questions,
         generate_colony_name,
     )
+    from petri.ingest import ingest
+
+    # Ingest the source to extract content
+    ingested = ingest(source)
+    source_type = ingested.source_type
+
+    if source_type != "text":
+        typer.echo(f"Ingested {source_type}: {ingested.title or source}")
+        meta = ingested.metadata
+        if meta.get("page_count"):
+            typer.echo(f"  Pages: {meta['page_count']}")
+        typer.echo(f"  Content length: {len(ingested.content)} characters\n")
+
+    content = ingested.content
+    title = ingested.title
+
+    # Build the claim from ingested content
+    if source_type == "text":
+        claim = content
+    else:
+        if title:
+            claim = f"{title}\n\nSource content:\n{content}"
+        else:
+            claim = content
 
     # Gather clarifications
     clarifications: list[dict] = []
@@ -734,7 +870,7 @@ def grow(
         raise typer.Exit(code=1)
 
     if dry_run:
-        would_process = result.get("would_process", [])
+        would_process = result.would_process
         if would_process:
             typer.echo(f"Would process {len(would_process)} nodes:")
             for nid in would_process:
@@ -743,10 +879,10 @@ def grow(
             typer.echo("No eligible nodes found.")
         raise typer.Exit(code=0)
 
-    processed = result.get("processed", 0)
-    succeeded = result.get("succeeded", 0)
-    failed = result.get("failed", 0)
-    stalled = result.get("stalled", 0)
+    processed = result.processed
+    succeeded = result.succeeded
+    failed = result.failed
+    stalled = result.stalled
 
     typer.echo(f"\nProcessing complete: {processed} nodes processed")
     typer.echo(f"  Succeeded: {succeeded}")
@@ -756,12 +892,8 @@ def grow(
         typer.echo(f"  Failed:    {failed}")
 
     # Show per-node results
-    for r in result.get("results", []):
-        node_id = r.get("node_id", "?")
-        final = r.get("final_state", "?")
-        iters = r.get("iterations", 0)
-        events = r.get("events_logged", 0)
-        typer.echo(f"  {node_id}: {final} ({iters} iterations, {events} events)")
+    for node_result in result.results:
+        typer.echo(f"  {node_result.node_id}: {node_result.final_state} ({node_result.iterations} iterations, {node_result.events_logged} events)")
 
     if stalled:
         raise typer.Exit(code=1)
@@ -785,7 +917,7 @@ def stop(
     request_stop()
 
     # Find active nodes and stall them
-    active_states = {"phase1_active", "phase2_active", "mediating", "red_team_active", "evaluating"}
+    active_states = {"socratic_active", "research_active", "critique_active", "mediating", "red_team_active", "evaluating"}
     entries = list_queue(queue_path)
     stopped_nodes: list[str] = []
 

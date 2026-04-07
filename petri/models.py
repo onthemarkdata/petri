@@ -32,8 +32,9 @@ class NodeStatus(str, Enum):
 
 class QueueState(str, Enum):
     queued = "queued"
-    phase1_active = "phase1_active"
-    phase2_active = "phase2_active"
+    socratic_active = "socratic_active"
+    research_active = "research_active"
+    critique_active = "critique_active"
     mediating = "mediating"
     converged = "converged"
     stalled = "stalled"
@@ -57,6 +58,7 @@ class EventType(str, Enum):
     node_reopened = "node_reopened"
     propagation_triggered = "propagation_triggered"
     decomposition_created = "decomposition_created"
+    decomposition_audit = "decomposition_audit"
 
 
 class HierarchyLevel(int, Enum):
@@ -107,6 +109,10 @@ class FreshnessCheckedData(BaseModel):
 class VerdictIssuedData(BaseModel):
     verdict: str
     summary: str = ""
+    arguments: str = ""
+    evidence: str = ""
+    confidence: str = ""
+    sources_cited: list[dict] = Field(default_factory=list)
 
 
 class EvidenceAppendedData(BaseModel):
@@ -141,6 +147,14 @@ class DecompositionCreatedData(BaseModel):
     child_node_ids: list[str]
 
 
+class DecompositionAuditData(BaseModel):
+    """Logged when convergence failure triggers re-examination of the decomposition."""
+
+    iteration: int = 0
+    suggestion: str = ""
+    should_restructure: bool = False
+
+
 # ── Event Data Dispatch ──────────────────────────────────────────────────
 
 
@@ -155,6 +169,7 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "node_reopened": NodeReopenedData,
     "propagation_triggered": PropagationTriggeredData,
     "decomposition_created": DecompositionCreatedData,
+    "decomposition_audit": DecompositionAuditData,
 }
 
 
@@ -261,6 +276,7 @@ class AgentRole(BaseModel):
     verdicts_pass: list[str] = Field(default_factory=list)
     verdicts_block: list[str] = Field(default_factory=list)
     redirect_on_block: Optional[str] = None
+    instruction: str = ""  # Agent-specific prompt instruction from config
 
 
 class Debate(BaseModel):
@@ -282,6 +298,142 @@ class PetriConfig(BaseModel):
     agents: dict[str, AgentRole] = Field(default_factory=dict)
     debates: list[Debate] = Field(default_factory=list)
     source_hierarchy: dict = Field(default_factory=dict)
+
+
+# ── Result Models (typed returns for provider and processor) ─────────────
+
+
+class SourceCitation(BaseModel):
+    """A source cited by an agent during assessment."""
+
+    url_or_name: str = ""
+    title: str = ""
+    hierarchy_level: Optional[int] = None
+    finding: str = ""
+    supports_or_contradicts: Optional[str] = None
+    confidence: Optional[str] = None
+    pub_date: str = ""
+
+
+class AssessmentResult(BaseModel):
+    """Result from an agent's assess_node call."""
+
+    agent: str
+    verdict: str
+    summary: str = ""
+    arguments: str = ""
+    evidence: str = ""
+    confidence: str = ""
+    sources_cited: list[SourceCitation] = Field(default_factory=list)
+
+
+class ConvergenceOutcome(BaseModel):
+    """Result from a convergence check."""
+
+    outcome: str  # "converged", "iterate", "circuit_breaker", "short_circuit"
+    type: Optional[str] = None  # for short_circuit: "needs_experiment", "defer_open"
+    weakest_link: Optional[str] = None
+
+
+class EvaluationResult(BaseModel):
+    """Result from the evidence evaluation phase."""
+
+    verdict: str  # EVIDENCE_CONFIRMS, EVIDENCE_REFUTES, EVIDENCE_INCONCLUSIVE
+    final_status: str  # VALIDATED, DISPROVEN, DEFER_OPEN
+
+
+class ProcessNodeResult(BaseModel):
+    """Result from processing a single node through the pipeline."""
+
+    node_id: str
+    final_state: str
+    iterations: int = 0
+    events_logged: int = 0
+    final_iteration: int = 0
+    error: Optional[str] = None
+
+
+class QueueProcessingResult(BaseModel):
+    """Aggregated result from processing the queue."""
+
+    processed: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    stalled: int = 0
+    results: list[ProcessNodeResult] = Field(default_factory=list)
+    dry_run: bool = False
+    would_process: list[str] = Field(default_factory=list)
+
+
+class IngestionResult(BaseModel):
+    """Result from content ingestion (URL, file, PDF, or text)."""
+
+    source_type: str  # "url", "file", "pdf", "text"
+    source: str
+    title: str = ""
+    content: str = ""
+    metadata: dict = Field(default_factory=dict)
+
+
+class DebateExchange(BaseModel):
+    """A single exchange in a debate."""
+
+    speaker: str
+    content: str
+    round: float
+
+
+class DebateResult(BaseModel):
+    """Result from mediating a debate between two agents."""
+
+    pair: tuple[str, str]
+    rounds: float
+    purpose: str
+    exchanges: list[DebateExchange] = Field(default_factory=list)
+    summary: str = ""
+
+
+class ConvergenceCheckResult(BaseModel):
+    """Result from check_convergence."""
+
+    converged: bool
+    blocking_results: dict[str, dict] = Field(default_factory=dict)
+    non_blocking_results: dict[str, dict] = Field(default_factory=dict)
+    missing_blocking: list[str] = Field(default_factory=list)
+    weakest_link: Optional[str] = None
+
+
+class ShortCircuitCondition(BaseModel):
+    """A short-circuit condition detected during convergence."""
+
+    type: str  # "needs_experiment", "defer_open"
+    agent: str
+    verdict: str
+
+
+class DecompositionResult(BaseModel):
+    """Result from decomposing a claim into a colony DAG."""
+
+    nodes: list["Node"] = Field(default_factory=list)
+    edges: list["Edge"] = Field(default_factory=list)
+    colony_name: str = ""
+    center_claim: str = ""
+
+
+class ClarifyingQuestion(BaseModel):
+    """A question to clarify a claim before decomposition."""
+
+    question: str
+    options: list[str] = Field(default_factory=list)
+    answer: Optional[str] = None
+
+
+class EvidenceMatch(BaseModel):
+    """A match between new evidence and an existing node."""
+
+    node_id: str
+    relevance: float = 0.0
+    reason: str = ""
 
 
 # ── Composite Key Utilities ──────────────────────────────────────────────
@@ -395,52 +547,27 @@ class InferenceProvider(Protocol):
 
     def generate_clarifying_questions(
         self, claim: str, max_questions: int = 5
-    ) -> list[dict]:
-        """Generate clarifying questions for a claim.
-
-        Returns list of {question, options?, type}.
-        """
+    ) -> list[ClarifyingQuestion]:
+        """Generate clarifying questions for a claim."""
         ...
 
-    def decompose_claim(self, claim: str, clarifications: list[dict]) -> dict:
-        """Decompose a claim into nodes and edges.
-
-        Returns {nodes: [...], edges: [...]}.
-        """
+    def decompose_claim(
+        self, claim: str, clarifications: list[ClarifyingQuestion]
+    ) -> DecompositionResult:
+        """Decompose a claim into nodes and edges."""
         ...
 
     def assess_node(
         self, node_id: str, claim_text: str, context: dict, agent_role: str
-    ) -> dict:
-        """Run an agent role assessment on a node.
-
-        Returns {verdict, summary, ...}.
-        """
+    ) -> AssessmentResult:
+        """Run an agent role assessment on a node."""
         ...
 
-    def match_evidence(self, content: str, nodes: list[dict]) -> list[dict]:
+    def match_evidence(
+        self, content: str, nodes: list[Node]
+    ) -> list[EvidenceMatch]:
         """Match new evidence to existing nodes.
-
-        Returns list of {node_id, relevance, ...}.
         """
         ...
 
 
-# ── Helper Models ────────────────────────────────────────────────────────
-
-
-class ClarifyingQuestion(BaseModel):
-    """A clarifying question for the seed process."""
-
-    question: str
-    options: list[str] = Field(default_factory=list)  # empty = short answer
-    answer: Optional[str] = None
-
-
-class DecompositionResult(BaseModel):
-    """Result of decomposing a claim into a colony."""
-
-    nodes: list[Node]
-    edges: list[Edge]
-    colony_name: str
-    center_claim: str

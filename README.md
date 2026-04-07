@@ -6,25 +6,25 @@ An agent orchestration framework to grow your AI's context. Decomposes claims in
 
 Petri's multi-agent pipeline can be **expensive with paid LLM models**. Each node goes through 13 agents across multiple iterations, generating significant token usage.
 
-**By default, Petri uses `gemma-3-4b-it` — a free, local model** that requires no API keys or billing. This protects you from unexpected costs while you explore the framework.
+**By default, Petri uses `gemma4:4b` — a free, local model** that requires no API keys or billing. This protects you from unexpected costs while you explore the framework.
 
-Switching to paid models (e.g., Claude via Claude Code) is **opt-in** via `petri.yaml`:
+All inference routes through [Claude Code](https://claude.com/claude-code), which handles model routing automatically — local models via Ollama, cloud models via the Anthropic API. Switching models is **opt-in** via `petri.yaml` or the setup wizard:
 
 ```yaml
 model:
-  name: claude-sonnet-4-20250514
-  harness: claude-code
+  name: claude-sonnet-4-6
 ```
 
-Understand the cost implications before switching: a single colony with 10+ nodes can generate thousands of LLM calls across research, critique, debate, red team, and evaluation phases.
+Understand the cost implications before switching to cloud models: a single colony with 10+ nodes can generate thousands of LLM calls across Socratic analysis, research, critique, debate, red team, and evaluation phases.
 
 ## Prerequisites
 
-Petri uses [Ollama](https://ollama.com) to run the default local model (`gemma-3-4b-it`). Install Ollama first, then pull the model:
+1. **[Claude Code](https://claude.com/claude-code)** — Petri uses Claude Code as its inference harness.
+2. **[Ollama](https://ollama.com)** — Required for local models. Claude Code connects to Ollama automatically ([setup guide](https://docs.ollama.com/integrations/claude-code)).
 
 ```bash
-# Install Ollama: https://ollama.com/download
-ollama pull gemma3:4b-it
+# Install Ollama and pull the default model
+ollama pull gemma4:4b
 ```
 
 ## Install
@@ -33,7 +33,7 @@ ollama pull gemma3:4b-it
 uv pip install petri-grow
 ```
 
-This installs everything: CLI, dashboard, Ollama client, and test tools. No API keys required.
+This installs the CLI and core library. No API keys required for local models.
 
 Fallback (pip):
 

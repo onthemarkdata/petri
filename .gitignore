@@ -1,3 +1,9 @@
+# .petri output
+.petri/
+
+#claude
+.claude/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
