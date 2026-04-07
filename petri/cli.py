@@ -349,8 +349,8 @@ def seed(
         if not no_questions:
             questions = generate_clarifying_questions(claim)
             for q in questions:
-                question_text = q.get("question", "")
-                options = q.get("options", [])
+                question_text = q.question
+                options = q.options
 
                 if options:
                     answer = questionary.select(
