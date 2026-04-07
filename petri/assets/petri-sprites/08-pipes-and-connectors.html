@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 08 — Pipes, Elbows, and Connectors</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 40px; }
+  canvas { image-rendering: pixelated; }
+  .label { color: #445; font-family: monospace; font-size: 12px; margin-top: 4px; text-align: center; }
+</style>
+</head>
+<body>
+
+<div>
+  <canvas id="hpipe"></canvas>
+  <div class="label">Horizontal Pipe (tileable)</div>
+</div>
+<div>
+  <canvas id="vpipe"></canvas>
+  <div class="label">Vertical Pipe (tileable)</div>
+</div>
+<div>
+  <canvas id="elbow"></canvas>
+  <div class="label">Pipe Elbow (4 rotations)</div>
+</div>
+<div>
+  <canvas id="joint"></canvas>
+  <div class="label">Pipe Joint / Connector</div>
+</div>
+<div>
+  <canvas id="tee"></canvas>
+  <div class="label">T-Junction</div>
+</div>
+
+<script>
+const S = 4;
+
+function px(ctx, x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+function rect(ctx, x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+
+const metal = [
+  '#b8c8d8', '#a0b4c4', '#8a9eb0', '#7a8ea0', '#6a7e90',
+  '#5c6e82', '#4e6074', '#405268', '#34465c', '#2a3a50',
+  '#223246', '#1a2a3c', '#142234', '#0f1a2c', '#0a1220',
+];
+
+const C = {
+  m1: metal[0],
+  m2: metal[2],
+  m3: metal[4],
+  m4: metal[6],
+  m5: metal[9],
+  m6: metal[13],
+};
+
+// ====== HORIZONTAL PIPE ======
+{
+  const c = document.getElementById('hpipe');
+  const ctx = c.getContext('2d');
+  const W = 80, H = 8;
+  c.width = W * S; c.height = H * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  // 8-distinct color pipe cross-section: cylindrical gradient
+  const pipeColors = [
+    metal[0],  // 0: top highlight (brightest)
+    metal[2],  // 1: upper light
+    metal[4],  // 2: center-upper
+    metal[6],  // 3: center
+    metal[7],  // 4: center-lower
+    metal[9],  // 5: lower
+    metal[11], // 6: shadow
+    metal[13], // 7: darkest edge
+  ];
+
+  for (let row = 0; row < H; row++) {
+    for (let col = 0; col < W; col++) {
+      px(ctx, col, row, pipeColors[row]);
+    }
+  }
+
+  // Rivet marks: 4-shade depth (highlight, body, shadow, deep)
+  for (let x = 15; x < W; x += 20) {
+    px(ctx, x, 2, metal[0]);     // top-left highlight
+    px(ctx, x + 1, 2, metal[0]);
+    px(ctx, x, 3, metal[3]);     // body shade
+    px(ctx, x + 1, 3, metal[3]);
+    px(ctx, x, 4, metal[10]);    // shadow
+    px(ctx, x + 1, 4, metal[13]); // deep shadow
+  }
+}
+
+// ====== VERTICAL PIPE ======
+{
+  const c = document.getElementById('vpipe');
+  const ctx = c.getContext('2d');
+  const W = 8, H = 80;
+  c.width = W * S; c.height = H * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  // 8-distinct color pipe cross-section: cylindrical gradient
+  const pipeColors = [
+    metal[0],  // 0: left highlight (brightest)
+    metal[2],  // 1: upper light
+    metal[4],  // 2: center-upper
+    metal[6],  // 3: center
+    metal[7],  // 4: center-lower
+    metal[9],  // 5: lower
+    metal[11], // 6: shadow
+    metal[13], // 7: darkest edge (right)
+  ];
+
+  for (let row = 0; row < H; row++) {
+    for (let col = 0; col < W; col++) {
+      px(ctx, col, row, pipeColors[col]);
+    }
+  }
+
+  // Rivet marks: 4-shade depth (highlight, body, shadow, deep)
+  for (let y = 15; y < H; y += 20) {
+    px(ctx, 2, y, metal[0]);     // top-left highlight
+    px(ctx, 2, y + 1, metal[0]);
+    px(ctx, 3, y, metal[3]);     // body shade
+    px(ctx, 3, y + 1, metal[3]);
+    px(ctx, 4, y, metal[10]);    // shadow
+    px(ctx, 4, y + 1, metal[13]); // deep shadow
+  }
+}
+
+// ====== ELBOW ======
+{
+  const c = document.getElementById('elbow');
+  const ctx = c.getContext('2d');
+  const SIZE = 20;
+  c.width = SIZE * S; c.height = SIZE * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  // L-shaped elbow: horizontal pipe coming from left, bends down
+  // Horizontal part: rows 0-7, cols 0-11 - 8 distinct shades
+  const hColors = [
+    metal[0], metal[2], metal[4], metal[6], metal[7], metal[9], metal[11], metal[13],
+  ];
+
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 12; col++) {
+      px(ctx, col, row, hColors[row]);
+    }
+  }
+
+  // Vertical part: rows 4-19, cols 4-11 - 8 distinct shades
+  const vColors = [
+    metal[0], metal[2], metal[4], metal[6], metal[7], metal[9], metal[11], metal[13],
+  ];
+
+  for (let row = 4; row < 20; row++) {
+    for (let col = 0; col < 8; col++) {
+      px(ctx, col + 4, row, vColors[col]);
+    }
+  }
+
+  // Corner fill/blend
+  for (let row = 0; row < 4; row++) {
+    for (let col = 4; col < 12; col++) {
+      // Already drawn from horizontal, keep it
+    }
+  }
+
+  // Corner rivet accent
+  px(ctx, 4, 4, C.m1);
+  px(ctx, 5, 4, C.m1);
+  px(ctx, 11, 0, C.m6);
+}
+
+// ====== JOINT ======
+{
+  const c = document.getElementById('joint');
+  const ctx = c.getContext('2d');
+  const W = 16, H = 14;
+  c.width = W * S; c.height = H * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  // Joint: wider collar around a pipe section
+  // Background pipe (8px tall centered) with 8 distinct shades
+  const pipeTop = 3;
+  const hColors = [
+    metal[0], metal[2], metal[4], metal[6], metal[7], metal[9], metal[11], metal[13],
+  ];
+
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < W; col++) {
+      px(ctx, col, pipeTop + row, hColors[row]);
+    }
+  }
+
+  // Joint collar (14px tall) with row-by-row progression through all 15 metal shades
+  const collarX = 4;
+  const collarW = 8;
+
+  for (let row = 0; row < H; row++) {
+    const shade = metal[Math.min(row, 14)];  // Each row gets unique shade from palette
+
+    for (let col = 0; col < collarW; col++) {
+      px(ctx, collarX + col, row, shade);
+    }
+  }
+
+  // Collar border: bright left edge, dark right edge
+  for (let row = 0; row < H; row++) {
+    px(ctx, collarX, row, metal[0]);
+    px(ctx, collarX + collarW - 1, row, metal[14]);
+  }
+  for (let col = collarX; col < collarX + collarW; col++) {
+    px(ctx, col, 0, metal[0]);
+    px(ctx, col, H - 1, metal[14]);
+  }
+
+  // Bolts on collar: 2x2 pixel bolts with 4-shade depth
+  px(ctx, collarX + 2, 2, metal[0]);
+  px(ctx, collarX + 3, 2, metal[0]);
+  px(ctx, collarX + 2, 3, metal[10]);
+  px(ctx, collarX + 3, 3, metal[13]);
+
+  px(ctx, collarX + 5, 2, metal[0]);
+  px(ctx, collarX + 6, 2, metal[0]);
+  px(ctx, collarX + 5, 3, metal[10]);
+  px(ctx, collarX + 6, 3, metal[13]);
+
+  px(ctx, collarX + 2, H - 3, metal[0]);
+  px(ctx, collarX + 3, H - 3, metal[0]);
+  px(ctx, collarX + 2, H - 2, metal[10]);
+  px(ctx, collarX + 3, H - 2, metal[13]);
+
+  px(ctx, collarX + 5, H - 3, metal[0]);
+  px(ctx, collarX + 6, H - 3, metal[0]);
+  px(ctx, collarX + 5, H - 2, metal[10]);
+  px(ctx, collarX + 6, H - 2, metal[13]);
+}
+
+// ====== T-JUNCTION ======
+{
+  const c = document.getElementById('tee');
+  const ctx = c.getContext('2d');
+  const SIZE = 24;
+  c.width = SIZE * S; c.height = SIZE * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  const hColors = [
+    metal[0], metal[2], metal[4], metal[6], metal[7], metal[9], metal[11], metal[13],
+  ];
+
+  // Horizontal pipe across full width, y = 0-7 with 8 distinct shades
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < SIZE; col++) {
+      px(ctx, col, row, hColors[row]);
+    }
+  }
+
+  // Vertical pipe going down from center, x = 8-15, y = 4-23 with 8 distinct shades
+  for (let row = 4; row < SIZE; row++) {
+    for (let col = 0; col < 8; col++) {
+      px(ctx, col + 8, row, hColors[col]);
+    }
+  }
+
+  // Junction fill plate with 3+ more shades via dithered transitions
+  for (let y = 0; y < 10; y++) {
+    let baseShade;
+    if (y < 3) baseShade = metal[2];
+    else if (y < 6) baseShade = metal[4];
+    else baseShade = metal[6];
+
+    for (let x = 7; x < 17; x++) {
+      // Dither between adjacent shades for smoother transition
+      const isDither = ((x + y) % 2 === 0);
+      const shade = isDither ? baseShade : metal[Math.max(0, metal.indexOf(baseShade) + 1)];
+      px(ctx, x, y, shade);
+    }
+  }
+
+  // Highlight border: bright top, dark sides
+  for (let i = 0; i < 10; i++) {
+    px(ctx, 7 + i, 0, metal[0]);
+    px(ctx, 7, i, metal[0]);
+    px(ctx, 16, i, metal[14]);
+  }
+
+  // Rivet on junction plate: 4-shade depth
+  px(ctx, 11, 4, metal[0]);
+  px(ctx, 12, 4, metal[0]);
+  px(ctx, 11, 5, metal[10]);
+  px(ctx, 12, 5, metal[13]);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 10 — Props (Petri Dishes, Crates, Side Panels)</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; min-height: 100vh; gap: 60px; padding: 40px; }
+  canvas { image-rendering: pixelated; }
+  .item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .label { color: #445; font-family: monospace; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="item"><canvas id="petri1"></canvas><div class="label">Petri Dish</div></div>
+<div class="item"><canvas id="petri2"></canvas><div class="label">Petri Dish (culture)</div></div>
+<div class="item"><canvas id="crate1"></canvas><div class="label">Crate (brown)</div></div>
+<div class="item"><canvas id="crate2"></canvas><div class="label">Crate (green)</div></div>
+<div class="item"><canvas id="panel1"></canvas><div class="label">Side Panel</div></div>
+<div class="item"><canvas id="sparkle1"></canvas><div class="label">Sparkle</div></div>
+
+<script>
+const S = 5;
+
+// Expanded metal palette (15 shades)
+const metal = [
+  '#b8c8d8', '#a0b4c4', '#8a9eb0', '#7a8ea0', '#6a7e90',
+  '#5c6e82', '#4e6074', '#405268', '#34465c', '#2a3a50',
+  '#223246', '#1a2a3c', '#142234', '#0f1a2c', '#0a1220',
+];
+
+const metalPalette = {
+  m1: metal[0],
+  m2: metal[2],
+  m3: metal[4],
+  m4: metal[6],
+  m5: metal[9],
+  m6: metal[14],
+};
+
+function px(ctx, x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+function rect(ctx, x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+
+// ====== PETRI DISH 1 (empty) ======
+{
+  const c = document.getElementById('petri1');
+  const ctx = c.getContext('2d');
+  const W = 18, H = 10;
+  c.width = W * S; c.height = H * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  // Hard opaque palette: 3-4 distinct colors instead of rgba gradients
+  const rimColor1 = '#b0d0c0';    // bright glass rim
+  const rimColor2 = '#90b0a0';    // mid glass rim
+  const glassLight = '#708090';   // light glass
+  const glassMid = '#507080';     // mid glass
+  const glassDark = '#305060';    // dark glass interior
+  const baseColor = '#203040';    // base/shadow
+
+  // Top ellipse rim with dithering
+  for (let x = 3; x < 15; x++) px(ctx, x, 0, ((x % 2 === 0) ? rimColor1 : rimColor2));
+  for (let x = 1; x < 17; x++) px(ctx, x, 1, rimColor1);
+  px(ctx, 0, 2, rimColor1); px(ctx, 17, 2, rimColor1);
+  px(ctx, 0, 3, rimColor2); px(ctx, 17, 3, rimColor2);
+
+  // Glass body with 3-shade gradient
+  for (let y = 2; y < 4; y++) {
+    for (let x = 1; x < 17; x++) {
+      px(ctx, x, y, glassLight);
+    }
+  }
+  for (let y = 4; y < 6; y++) {
+    for (let x = 1; x < 17; x++) {
+      px(ctx, x, y, glassMid);
+    }
+  }
+
+  // Bottom ellipse
+  px(ctx, 0, 5, rimColor2); px(ctx, 17, 5, rimColor2);
+  for (let x = 1; x < 17; x++) px(ctx, x, 6, rimColor1);
+  for (let x = 3; x < 15; x++) px(ctx, x, 7, rimColor2);
+
+  // Base/shadow with 2-shade variation
+  for (let x = 4; x < 14; x++) px(ctx, x, 8, baseColor);
+  for (let x = 5; x < 13; x++) px(ctx, x, 9, ((x % 2 === 0) ? baseColor : glassDark));
+}
+
+// ====== PETRI DISH 2 (with green culture) ======
+{
+  const c = document.getElementById('petri2');
+  const ctx = c.getContext('2d');
+  const W = 18, H = 10;
+  c.width = W * S; c.height = H * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  const rimColor1 = '#b0d0c0';
+  const rimColor2 = '#90b0a0';
+  const glassLight = '#708090';
+  const glassMid = '#507080';
+  const cultureBright = '#00ff88';  // Bright green culture
+  const cultureMid = '#00cc66';     // Medium green culture
+  const cultureDark = '#008844';    // Dark green culture
+  const baseColor = '#203040';
+
+  for (let x = 3; x < 15; x++) px(ctx, x, 0, ((x % 2 === 0) ? rimColor1 : rimColor2));
+  for (let x = 1; x < 17; x++) px(ctx, x, 1, rimColor1);
+  px(ctx, 0, 2, rimColor1); px(ctx, 17, 2, rimColor1);
+  px(ctx, 0, 3, rimColor2); px(ctx, 17, 3, rimColor2);
+
+  // Glass base with shading
+  for (let y = 2; y < 4; y++) {
+    for (let x = 1; x < 17; x++) {
+      px(ctx, x, y, glassLight);
+    }
+  }
+  for (let y = 4; y < 6; y++) {
+    for (let x = 1; x < 17; x++) {
+      px(ctx, x, y, glassMid);
+    }
+  }
+
+  // Green culture spots (hard opaque colors, no alpha)
+  px(ctx, 5, 3, cultureBright);
+  px(ctx, 6, 3, cultureMid);
+  px(ctx, 6, 4, cultureBright);
+  px(ctx, 7, 4, cultureMid);
+  px(ctx, 10, 3, cultureMid);
+  px(ctx, 11, 4, cultureBright);
+  px(ctx, 12, 3, cultureDark);
+
+  px(ctx, 0, 5, rimColor2); px(ctx, 17, 5, rimColor2);
+  for (let x = 1; x < 17; x++) px(ctx, x, 6, rimColor1);
+  for (let x = 3; x < 15; x++) px(ctx, x, 7, rimColor2);
+  for (let x = 4; x < 14; x++) px(ctx, x, 8, baseColor);
+  for (let x = 5; x < 13; x++) px(ctx, x, 9, ((x % 2 === 0) ? baseColor : glassMid));
+}
+
+// ====== CRATE 1 (brown with wood grain texture) ======
+{
+  const c = document.getElementById('crate1');
+  const ctx = c.getContext('2d');
+  const W = 14, H = 12;
+  c.width = W * S; c.height = H * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  const woodBrown = ['#7a6a50', '#6a5a42', '#5a4a34', '#4a3a28', '#3a3020', '#2e2418', '#221a10', '#18120a'];
+  const braceLight = '#6a5a42';  // Brace highlight
+  const braceMid = '#4a3a28';    // Brace mid
+  const braceDark = '#1a1208';   // Brace shadow
+
+  // Body - fill with dithered wood grain across 8 shades
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      // Dither between adjacent wood shades for grain texture
+      const shadeIndex = (x + y) % 2;
+      px(ctx, x, y, woodBrown[shadeIndex]);
+    }
+  }
+
+  // Highlight edges with 3-shade bevel
+  for (let x = 0; x < W; x++) {
+    px(ctx, x, 0, braceLight);      // bright top
+    px(ctx, x, H - 1, braceDark);   // dark bottom
+  }
+  for (let y = 0; y < H; y++) {
+    px(ctx, 0, y, braceLight);      // bright left
+    px(ctx, W - 1, y, braceDark);   // dark right
+  }
+
+  // Cross braces (chunky 2-pixel thick) with bevel
+  const midX = Math.round(W / 2);
+  const midY = Math.round(H / 2);
+  for (let x = 0; x < W; x++) {
+    px(ctx, x, midY, braceLight);
+    px(ctx, x, midY - 1, braceMid);
+  }
+  for (let y = 0; y < H; y++) {
+    px(ctx, midX, y, braceLight);
+    px(ctx, midX - 1, y, braceMid);
+  }
+
+  // Center rivet with 3-shade depth
+  px(ctx, midX, midY, braceLight);
+  px(ctx, midX - 1, midY, braceMid);
+  px(ctx, midX, midY - 1, braceMid);
+}
+
+// ====== CRATE 2 (green-tint with wood grain) ======
+{
+  const c = document.getElementById('crate2');
+  const ctx = c.getContext('2d');
+  const W = 12, H = 10;
+  c.width = W * S; c.height = H * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  const woodGreen = ['#3a4a38', '#324038', '#2a3830', '#223028', '#1a2820', '#142018', '#0e1810', '#080c08'];
+  const braceLight = '#3a4a38';  // Brace highlight
+  const braceMid = '#223028';    // Brace mid
+  const braceDark = '#0a1408';   // Brace shadow
+
+  // Body with dithered wood grain across 8 shades
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const shadeIndex = (x + y) % 2;
+      px(ctx, x, y, woodGreen[shadeIndex]);
+    }
+  }
+
+  for (let x = 0; x < W; x++) {
+    px(ctx, x, 0, braceLight);
+    px(ctx, x, H - 1, braceDark);
+  }
+  for (let y = 0; y < H; y++) {
+    px(ctx, 0, y, braceLight);
+    px(ctx, W - 1, y, braceDark);
+  }
+
+  const midX = Math.round(W / 2);
+  const midY = Math.round(H / 2);
+  for (let x = 0; x < W; x++) {
+    px(ctx, x, midY, braceLight);
+  }
+  for (let y = 0; y < H; y++) {
+    px(ctx, midX, y, braceLight);
+  }
+  px(ctx, midX, midY, braceMid);
+}
+
+// ====== SIDE MACHINERY PANEL (metal with hard bands and chunky LEDs) ======
+{
+  const c = document.getElementById('panel1');
+  const ctx = c.getContext('2d');
+  const W = 30, H = 60;
+  c.width = W * S; c.height = H * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  // Panel body - row-by-row progression through 15 metal shades with dithering
+  for (let y = 0; y < H; y++) {
+    // Normalized Y position maps to metal palette indices
+    const shadeIndex = Math.floor((y / H) * 14);  // 0-14 range
+    const baseShade = metal[shadeIndex];
+    const nextShade = metal[Math.min(shadeIndex + 1, 14)];
+
+    for (let x = 0; x < W; x++) {
+      // Dither between current shade and next shade
+      const isDither = ((x + y) % 2 === 0);
+      px(ctx, x, y, isDither ? baseShade : nextShade);
+    }
+  }
+
+  // Bright top, dark bottom border
+  for (let x = 0; x < W; x++) {
+    px(ctx, x, 0, metal[0]);
+    px(ctx, x, H - 1, metal[14]);
+  }
+  for (let y = 0; y < H; y++) {
+    px(ctx, 0, y, metal[0]);
+    px(ctx, W - 1, y, metal[14]);
+  }
+
+  // Equipment slots with 4-shade depth (bright top/left, mid face, dark bottom/right, darkest recess)
+  for (let slot = 0; slot < 6; slot++) {
+    const sy = 4 + slot * 9;
+    rect(ctx, 3, sy, W - 6, 5, metal[12]);  // darkest recess
+
+    // Visible depth using 4 shades
+    for (let x = 3; x < W - 3; x++) {
+      px(ctx, x, sy, metal[0]);           // bright top
+    }
+    for (let x = 3; x < W - 3; x++) {
+      px(ctx, x, sy + 4, metal[14]);      // dark bottom
+    }
+    for (let y = sy; y < sy + 5; y++) {
+      px(ctx, 3, y, metal[1]);            // bright left edge
+      px(ctx, W - 4, y, metal[13]);       // dark right edge
+    }
+  }
+
+  // Status LEDs (3x3 chunky pixels each, hard opaque colors)
+  const ledPositions = [
+    { x: 5, y: 7, color: '#00cfff' },   // blue
+    { x: 10, y: 7, color: '#00ff88' },  // green
+    { x: 15, y: 7, color: '#ff3344' },  // red
+    { x: 5, y: 25, color: '#ffaa00' },  // amber
+    { x: 10, y: 25, color: '#00cfff' }, // blue
+    { x: 5, y: 43, color: '#00ff88' },  // green
+    { x: 10, y: 43, color: '#00ff88' }, // green
+  ];
+
+  for (const led of ledPositions) {
+    // 3x3 chunky LED pixel
+    px(ctx, led.x, led.y, led.color);
+    px(ctx, led.x + 1, led.y, led.color);
+    px(ctx, led.x + 2, led.y, led.color);
+    px(ctx, led.x, led.y + 1, led.color);
+    px(ctx, led.x + 1, led.y + 1, led.color);
+    px(ctx, led.x + 2, led.y + 1, led.color);
+    px(ctx, led.x, led.y + 2, led.color);
+    px(ctx, led.x + 1, led.y + 2, led.color);
+    px(ctx, led.x + 2, led.y + 2, led.color);
+  }
+}
+
+// ====== SPARKLE (classic 4-pointed pixel star) ======
+{
+  const c = document.getElementById('sparkle1');
+  const ctx = c.getContext('2d');
+  const SIZE = 11;
+  c.width = SIZE * S; c.height = SIZE * S;
+  c.style.width = c.width + 'px'; c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  const cx = 5, cy = 5;
+  const white = '#ffffff';
+
+  // Vertical line (hard pixels, no alpha/gradient)
+  for (let i = 1; i < 10; i++) {
+    px(ctx, cx, i, white);
+  }
+
+  // Horizontal line
+  for (let i = 1; i < 10; i++) {
+    px(ctx, i, cy, white);
+  }
+
+  // Diagonal lines (shorter, 4 pixels each direction)
+  for (let i = 1; i <= 3; i++) {
+    px(ctx, cx + i, cy + i, white);
+    px(ctx, cx - i, cy + i, white);
+    px(ctx, cx + i, cy - i, white);
+    px(ctx, cx - i, cy - i, white);
+  }
+
+  // Bright center (core)
+  px(ctx, cx, cy, white);
+}
+</script>
+</body>
+</html>

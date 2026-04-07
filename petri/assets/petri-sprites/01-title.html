@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 01 — Title</title>
+<style>
+  body { margin: 0; background: #050810; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const SCALE = 4;
+
+// PETRI title - pixel font at ~24px pixel-art height, hard chrome palette bands
+const letters = {
+  P: [
+    "111111111111111100",
+    "111111111111111110",
+    "111100000000011111",
+    "111100000000001111",
+    "111100000000001111",
+    "111100000000001111",
+    "111100000000011111",
+    "111111111111111110",
+    "111111111111111100",
+    "111111111111110000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+  ],
+  E: [
+    "111111111111111111",
+    "111111111111111111",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111111111111111100",
+    "111111111111111100",
+    "111111111111111100",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111100000000000000",
+    "111111111111111111",
+    "111111111111111111",
+  ],
+  T: [
+    "111111111111111111",
+    "111111111111111111",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+    "000000011110000000",
+  ],
+  R: [
+    "111111111111111100",
+    "111111111111111110",
+    "111100000000011111",
+    "111100000000001111",
+    "111100000000001111",
+    "111100000000001111",
+    "111100000000011111",
+    "111111111111111110",
+    "111111111111111100",
+    "111111111110000000",
+    "111100011111000000",
+    "111100001111100000",
+    "111100000111110000",
+    "111100000011111000",
+    "111100000001111100",
+    "111100000000111110",
+    "111100000000011111",
+    "111100000000001111",
+  ],
+  I: [
+    "111111111111",
+    "111111111111",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "000011110000",
+    "111111111111",
+    "111111111111",
+  ]
+};
+
+// Rich 15-color blue-chrome palette (Super Metroid inspired)
+const chromePalette = [
+  '#e8f0ff',  // 0: Brightest highlight
+  '#d0e4ff',  // 1
+  '#b4dcff',  // 2
+  '#9ccfff',  // 3
+  '#84c0f0',  // 4
+  '#6caee4',  // 5
+  '#5898d0',  // 6
+  '#4682c8',  // 7: Mid-bright
+  '#3870b8',  // 8
+  '#2e5ca0',  // 9
+  '#1e4888',  // 10
+  '#1a3c78',  // 11
+  '#142850',  // 12
+  '#0f1e3c',  // 13
+  '#0a1428',  // 14: Darkest
+];
+
+function getChromeColorByRow(row, totalRows, col, totalCols) {
+  // Map each row to a unique or near-unique palette index
+  const rowIndex = Math.floor((row / totalRows) * chromePalette.length);
+  let baseIndex = Math.min(rowIndex, chromePalette.length - 1);
+
+  // Per-column variation: left side slightly brighter (light from upper-left)
+  const colRatio = col / totalCols;
+  const colBias = Math.floor(colRatio * 3) - 1; // -1 to +1
+
+  let finalIndex = baseIndex + colBias;
+  finalIndex = Math.max(0, Math.min(finalIndex, chromePalette.length - 1));
+
+  return chromePalette[finalIndex];
+}
+
+// Calculate total width
+const word = "PETRI";
+const letterSpacing = 4;
+let totalWidth = 0;
+for (const ch of word) {
+  totalWidth += letters[ch][0].length;
+}
+totalWidth += (word.length - 1) * letterSpacing;
+const totalHeight = 18;
+
+canvas.width = (totalWidth + 8) * SCALE;
+canvas.height = (totalHeight + 8) * SCALE;
+canvas.style.width = canvas.width + 'px';
+canvas.style.height = canvas.height + 'px';
+
+ctx.imageSmoothingEnabled = false;
+
+// Draw glow layer first
+function drawGlow() {
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = totalWidth + 8;
+  tempCanvas.height = totalHeight + 8;
+  const tctx = tempCanvas.getContext('2d');
+
+  let xOff = 4;
+  for (const ch of word) {
+    const grid = letters[ch];
+    for (let row = 0; row < grid.length; row++) {
+      for (let col = 0; col < grid[row].length; col++) {
+        if (grid[row][col] === '1') {
+          tctx.fillStyle = '#3c8cff';
+          tctx.fillRect(xOff + col, 4 + row, 1, 1);
+        }
+      }
+    }
+    xOff += grid[0].length + letterSpacing;
+  }
+
+  ctx.save();
+  ctx.filter = `blur(${8 * SCALE}px)`;
+  ctx.globalAlpha = 0.6;
+  ctx.drawImage(tempCanvas, 0, 0, tempCanvas.width, tempCanvas.height, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+// Draw the main letters with rich per-row and per-column color variation
+function drawLetters() {
+  let xOff = 4;
+  for (const ch of word) {
+    const grid = letters[ch];
+    const gridWidth = grid[0].length;
+
+    for (let row = 0; row < grid.length; row++) {
+      for (let col = 0; col < grid[row].length; col++) {
+        if (grid[row][col] === '1') {
+          const isTop = row === 0 || grid[row - 1]?.[col] !== '1';
+          const isBottom = row === grid.length - 1 || grid[row + 1]?.[col] !== '1';
+          const isLeft = col === 0 || grid[row][col - 1] !== '1';
+          const isRight = col === grid[row].length - 1 || grid[row][col + 1] !== '1';
+          const isEdge = isTop || isBottom || isLeft || isRight;
+
+          // Base color uses per-row and per-column variation
+          let color = getChromeColorByRow(row, grid.length, col, gridWidth);
+
+          if (isEdge) {
+            // Edge highlights: use brighter adjacent colors
+            const baseIndex = Math.floor((row / grid.length) * chromePalette.length);
+            if (isTop) {
+              // Top edge gets brighter highlight
+              const edgeIndex = Math.max(0, baseIndex - 2);
+              color = chromePalette[edgeIndex];
+            } else if (isLeft) {
+              // Left edge also bright (light source upper-left)
+              const edgeIndex = Math.max(0, baseIndex - 1);
+              color = chromePalette[edgeIndex];
+            } else if (isRight || isBottom) {
+              // Right and bottom edges are slightly darker for depth
+              const edgeIndex = Math.min(chromePalette.length - 1, baseIndex + 1);
+              color = chromePalette[edgeIndex];
+            }
+          }
+
+          ctx.fillStyle = color;
+          ctx.fillRect((xOff + col) * SCALE, (4 + row) * SCALE, SCALE, SCALE);
+        }
+      }
+    }
+    xOff += grid[0].length + letterSpacing;
+  }
+}
+
+drawGlow();
+drawLetters();
+</script>
+</body>
+</html>

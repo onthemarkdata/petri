@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 05 — Agent Network Graph</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 4;  // Increased from 3 to 4 for chunkier pixels
+const SIZE = 100;
+
+canvas.width = SIZE * S;
+canvas.height = SIZE * S;
+canvas.style.width = canvas.width + 'px';
+canvas.style.height = canvas.height + 'px';
+ctx.imageSmoothingEnabled = false;
+
+function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+
+// Node positions (pixel coords in 100x100 grid)
+const nodes = [
+  // Top row
+  { x: 48, y: 6, type: 'agent' },
+  // Second row
+  { x: 30, y: 20, type: 'agent' },
+  { x: 48, y: 20, type: 'agent' },
+  { x: 66, y: 20, type: 'agent' },
+  // Third row (wide)
+  { x: 20, y: 36, type: 'agent' },
+  { x: 36, y: 36, type: 'agent' },
+  { x: 48, y: 36, type: 'hub' },  // center hub
+  { x: 60, y: 36, type: 'agent' },
+  { x: 76, y: 36, type: 'agent' },
+  // Fourth row
+  { x: 30, y: 52, type: 'agent' },
+  { x: 48, y: 52, type: 'agent' },
+  { x: 66, y: 52, type: 'agent' },
+  // Bottom
+  { x: 48, y: 68, type: 'agent' },
+];
+
+// Edges (index pairs)
+const edges = [
+  // Top to second row
+  [0, 1], [0, 2], [0, 3],
+  // Second to third row
+  [1, 4], [1, 5], [2, 5], [2, 6], [2, 7], [3, 7], [3, 8],
+  // Third row cross-links
+  [4, 5], [5, 6], [6, 7], [7, 8],
+  // Third to fourth row
+  [4, 9], [5, 9], [6, 10], [7, 11], [8, 11],
+  // Fourth row cross
+  [9, 10], [10, 11],
+  // Fourth to bottom
+  [9, 12], [10, 12], [11, 12],
+];
+
+// Dashed edges (horizontal connections)
+const dashedEdges = [
+  [1, 3],   // second row across
+  [4, 8],   // third row across
+  [9, 11],  // fourth row across
+];
+
+const colors = {
+  nodeFill: '#1a4a2a',     // Hard dark green
+  nodeStroke: '#00ff88',   // Bright green border
+  hubFill: '#0d3a1a',      // Different darker green for hub
+  hubStroke: '#00cc66',    // Slightly darker bright green for hub
+  edge: '#00ff88',         // Hard opaque bright green (no alpha)
+  dash: '#00cc66',         // Hard opaque dash color (no alpha)
+};
+
+// Draw edges as 2-pixel thick Bresenham lines
+function drawThickLine(x0, y0, x1, y1, color, dashed) {
+  function drawSingleLine(sx, sy, ex, ey) {
+    const dx = Math.abs(ex - sx);
+    const dy = Math.abs(ey - sy);
+    const xdx = sx < ex ? 1 : -1;
+    const ydy = sy < ey ? 1 : -1;
+    let err = dx - dy;
+    let step = 0;
+
+    while (true) {
+      if (!dashed || (Math.floor(step / 3) % 2 === 0)) {  // 3-on-3-off dashed pattern
+        px(sx, sy, color);
+      }
+      step++;
+      if (sx === ex && sy === ey) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; sx += xdx; }
+      if (e2 < dx) { err += dx; sy += ydy; }
+    }
+  }
+
+  // Draw main line
+  drawSingleLine(x0, y0, x1, y1);
+
+  // Draw parallel offset line (2px thick) - offset perpendicular to line direction
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const px_offset = len > 0 ? -dy / len : 0;
+  const py_offset = len > 0 ? dx / len : 0;
+
+  drawSingleLine(
+    Math.round(x0 + px_offset),
+    Math.round(y0 + py_offset),
+    Math.round(x1 + px_offset),
+    Math.round(y1 + py_offset)
+  );
+}
+
+// Draw all edges with 2px thickness
+for (const [a, b] of edges) {
+  drawThickLine(nodes[a].x + 4, nodes[a].y + 4, nodes[b].x + 4, nodes[b].y + 4, colors.edge, false);
+}
+
+for (const [a, b] of dashedEdges) {
+  drawThickLine(nodes[a].x + 4, nodes[a].y + 4, nodes[b].x + 4, nodes[b].y + 4, colors.dash, true);
+}
+
+// Draw nodes (8x8 pixel squares with hard 2-color fill)
+for (const node of nodes) {
+  const isHub = node.type === 'hub';
+  const fill = isHub ? colors.hubFill : colors.nodeFill;
+  const stroke = isHub ? colors.hubStroke : colors.nodeStroke;
+  const size = 8;
+
+  // Node body (solid fill)
+  rect(node.x, node.y, size, size, fill);
+
+  // Border (1px all around, hard color)
+  for (let i = 0; i < size; i++) {
+    px(node.x + i, node.y, stroke);                // top
+    px(node.x + i, node.y + size - 1, stroke);    // bottom
+    px(node.x, node.y + i, stroke);               // left
+    px(node.x + size - 1, node.y + i, stroke);    // right
+  }
+
+  // Bright highlight pixel inside (icon)
+  if (isHub) {
+    // H pattern for hub (distinctive)
+    px(node.x + 2, node.y + 2, stroke);
+    px(node.x + 2, node.y + 3, stroke);
+    px(node.x + 2, node.y + 4, stroke);
+    px(node.x + 2, node.y + 5, stroke);
+    px(node.x + 3, node.y + 4, stroke);
+    px(node.x + 4, node.y + 4, stroke);
+    px(node.x + 5, node.y + 2, stroke);
+    px(node.x + 5, node.y + 3, stroke);
+    px(node.x + 5, node.y + 4, stroke);
+    px(node.x + 5, node.y + 5, stroke);
+  } else {
+    // Single bright pixel in center
+    px(node.x + 4, node.y + 4, stroke);
+  }
+}
+</script>
+</body>
+</html>

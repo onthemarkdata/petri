@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 06 — Loading Spinner + Agent Count</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 4;
+const W = 60;
+const H = 50;
+
+canvas.width = W * S;
+canvas.height = H * S;
+canvas.style.width = canvas.width + 'px';
+canvas.style.height = canvas.height + 'px';
+ctx.imageSmoothingEnabled = false;
+
+function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+const font3x5 = {
+  'A': [[0,1,0],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+  'E': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
+  'G': [[0,1,1],[1,0,0],[1,0,1],[1,0,1],[0,1,1]],
+  'N': [[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+  'T': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[0,1,0]],
+  'S': [[0,1,1],[1,0,0],[0,1,0],[0,0,1],[1,1,0]],
+  '1': [[0,1,0],[1,1,0],[0,1,0],[0,1,0],[1,1,1]],
+  '3': [[1,1,0],[0,0,1],[0,1,0],[0,0,1],[1,1,0]],
+  ':': [[0],[1],[0],[1],[0]],
+  ' ': [[0,0],[0,0],[0,0],[0,0],[0,0]],
+};
+
+function drawText(text, startX, startY, color) {
+  let cx = startX;
+  for (const ch of text) {
+    const glyph = font3x5[ch.toUpperCase()];
+    if (!glyph) { cx += 4; continue; }
+    for (let row = 0; row < glyph.length; row++) {
+      for (let col = 0; col < glyph[row].length; col++) {
+        if (glyph[row][col] === 1) px(cx + col, startY + row, color);
+      }
+    }
+    cx += glyph[0].length + 1;
+  }
+}
+
+// Spinner parameters
+const spinCx = 30;
+const spinCy = 16;
+const spinR = 10;
+const segCount = 12;
+
+// Hard palette: bright and dim green only
+const BRIGHT_GREEN = '#00ff88';
+const DIM_GREEN = '#0a3a1a';
+
+function drawFrame(time) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw spinner ring segments (hard 2-color)
+  const activeSegment = Math.floor(time * 3) % segCount;
+
+  for (let i = 0; i < segCount; i++) {
+    const angle = (i / segCount) * Math.PI * 2 - Math.PI / 2;
+    const nextAngle = ((i + 1) / segCount) * Math.PI * 2 - Math.PI / 2;
+
+    // Draw 3-4 pixels per segment
+    const steps = 4;
+    for (let s = 0; s < steps; s++) {
+      const a = angle + (s / steps) * (nextAngle - angle);
+      const x = Math.round(spinCx + Math.cos(a) * spinR);
+      const y = Math.round(spinCy + Math.sin(a) * spinR);
+
+      // Active segment and neighbors: bright; rest: dim
+      const dist = Math.min(Math.abs(i - activeSegment), segCount - Math.abs(i - activeSegment));
+      const isBright = dist <= 1;
+
+      px(x, y, isBright ? BRIGHT_GREEN : DIM_GREEN);
+    }
+  }
+
+  // Central dot - blinking on/off, no sine wave
+  const blink = Math.floor(time * 3) % 2 === 0 ? 1 : 0;
+  if (blink) {
+    px(spinCx, spinCy, BRIGHT_GREEN);
+  }
+
+  // Text label "AGENTS: 13"
+  drawText('AGENTS: 13', 10, 34, BRIGHT_GREEN);
+
+  requestAnimationFrame(() => drawFrame(performance.now() / 1000));
+}
+
+drawFrame(0);
+</script>
+</body>
+</html>

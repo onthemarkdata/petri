@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 03 — CRT Monitor (Right) — SNES Era</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 4; // chunky SNES-era scale
+
+const MW = 90;
+const MH = 120;
+const SCREEN_X = 8;
+const SCREEN_Y = 8;
+const SCREEN_W = 74;
+const SCREEN_H = 58;
+
+canvas.width = MW * S;
+canvas.height = MH * S;
+canvas.style.width = canvas.width + 'px';
+canvas.style.height = canvas.height + 'px';
+ctx.imageSmoothingEnabled = false;
+
+function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+function hline(x, y, w, color) { rect(x, y, w, 1, color); }
+function vline(x, y, h, color) { rect(x, y, 1, h, color); }
+
+// Expanded 15-shade metal palette for SNES-style depth
+const metal = [
+  '#b8c8d8', // 0: brightest specular highlight
+  '#a0b4c4', // 1: bright highlight
+  '#8a9eb0', // 2: light
+  '#7a8ea0', // 3: light-mid
+  '#6a7e90', // 4: mid-light
+  '#5c6e82', // 5: mid
+  '#4e6074', // 6: mid-dark
+  '#405268', // 7: dark-mid
+  '#34465c', // 8: dark
+  '#2a3a50', // 9: darker
+  '#223246', // 10: darker still
+  '#1a2a3c', // 11: very dark
+  '#142234', // 12: near-black
+  '#0f1a2c', // 13: darkest
+  '#0a1220', // 14: absolute dark
+];
+
+const C = {
+  screenBg: '#020a0a',
+  screenBorder: '#0a1510',
+  green: '#33ff66',
+  red: '#ff3344',
+};
+
+// ---- CHUNKY BEZEL WITH SMOOTH GRADIENT SHADING ----
+// Each row subtly shifts through the full 15-shade palette
+const bezelH = 73;
+for (let y = 0; y < bezelH; y++) {
+  // Per-row shade that smoothly transitions from top to bottom
+  const baseShade = Math.round((y / bezelH) * 14);
+
+  // Per-pixel variation with light from upper-left
+  for (let x = 0; x < MW; x++) {
+    // Dithering: checkerboard pattern with intermediate shades
+    const ditherPattern = (x + y) % 2;
+
+    // Left edge gets brighter (light source from upper-left)
+    const edgeFade = Math.max(0, 2 - Math.floor(x / 15));
+
+    let shadeIndex = baseShade + edgeFade;
+
+    // Right edge gets darker (shadow)
+    if (x > MW - 15) {
+      const shadowFade = Math.floor((x - (MW - 15)) / 3);
+      shadeIndex = baseShade + 8 + shadowFade;
+    }
+
+    // Dithering with intermediate color
+    if (ditherPattern === 1 && x % 4 === 0) {
+      shadeIndex = Math.max(0, shadeIndex - 1);
+    }
+
+    shadeIndex = Math.max(0, Math.min(14, shadeIndex));
+    px(x, y, metal[shadeIndex]);
+  }
+
+  // Texture lines every 5 rows for subtle horizontal detail
+  if (y > 0 && y % 5 === 0) {
+    for (let x = 2; x < MW - 2; x++) {
+      const lineShade = Math.max(0, baseShade - 1);
+      if ((x + y) % 3 !== 0) {  // Skip some pixels for dither
+        px(x, y, metal[lineShade]);
+      }
+    }
+  }
+}
+
+// ---- VISIBLE RIVETS ON BEZEL (chunky 2x2 with 4-shade depth) ----
+// Rivets have bright top-left, mid body, dark bottom-right for 3D effect
+function drawRivet(rx, ry) {
+  // Top-left: bright highlight
+  px(rx, ry, metal[1]);
+  // Top-right and bottom-left: mid-tone
+  px(rx + 1, ry, metal[6]);
+  px(rx, ry + 1, metal[6]);
+  // Bottom-right: deep shadow
+  px(rx + 1, ry + 1, metal[12]);
+}
+
+// Top-left rivet
+drawRivet(3, 3);
+// Top-right rivet
+drawRivet(MW - 5, 3);
+// Bottom-left rivet (near screen)
+drawRivet(3, 68);
+// Bottom-right rivet
+drawRivet(MW - 5, 68);
+
+// ---- PIXEL-LEVEL EDGE HIGHLIGHTS AND SHADOWS ----
+// Top-left bevel highlight with expanded palette
+hline(0, 0, MW, metal[0]);
+hline(1, 1, MW - 2, metal[1]);
+vline(0, 0, bezelH, metal[0]);
+vline(1, 1, bezelH - 2, metal[1]);
+// Right and bottom shadows with expanded palette
+vline(MW - 1, 0, bezelH, metal[14]);
+vline(MW - 2, 1, bezelH - 2, metal[12]);
+hline(0, bezelH - 1, MW, metal[14]);
+hline(1, bezelH - 2, MW - 2, metal[12]);
+
+// ---- SCREEN RECESS (recessed into bezel) ----
+rect(SCREEN_X - 2, SCREEN_Y - 2, SCREEN_W + 4, SCREEN_H + 4, metal[14]);
+hline(SCREEN_X - 2, SCREEN_Y - 2, SCREEN_W + 4, metal[12]);
+vline(SCREEN_X - 2, SCREEN_Y - 2, SCREEN_H + 4, metal[12]);
+
+// ---- SCREEN INTERIOR ----
+rect(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, C.screenBg);
+
+// Screen border pixels
+hline(SCREEN_X, SCREEN_Y, SCREEN_W, C.screenBorder);
+hline(SCREEN_X, SCREEN_Y + SCREEN_H - 1, SCREEN_W, C.screenBorder);
+vline(SCREEN_X, SCREEN_Y, SCREEN_H, C.screenBorder);
+vline(SCREEN_X + SCREEN_W - 1, SCREEN_Y, SCREEN_H, C.screenBorder);
+
+// ---- DITHERED SCREEN SHADING (checkerboard pattern) ----
+for (let y = SCREEN_Y + 1; y < SCREEN_Y + SCREEN_H - 1; y++) {
+  for (let x = SCREEN_X + 1; x < SCREEN_X + SCREEN_W - 1; x++) {
+    if ((x + y) % 2 === 0) {
+      px(x, y, '#0a1a10');
+    }
+  }
+}
+
+// ---- SCANLINES (pixel-level) ----
+for (let y = SCREEN_Y + 2; y < SCREEN_Y + SCREEN_H - 2; y += 2) {
+  hline(SCREEN_X + 1, y, SCREEN_W - 2, '#000000');
+}
+
+// ---- SCREEN TEXT (3x5 pixel font) ----
+const font3x5 = {
+  'A': [[0,1,0],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+  'B': [[1,1,0],[1,0,1],[1,1,0],[1,0,1],[1,1,0]],
+  'C': [[0,1,1],[1,0,0],[1,0,0],[1,0,0],[0,1,1]],
+  'D': [[1,1,0],[1,0,1],[1,0,1],[1,0,1],[1,1,0]],
+  'E': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
+  'G': [[0,1,1],[1,0,0],[1,0,1],[1,0,1],[0,1,1]],
+  'H': [[1,0,1],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+  'I': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[1,1,1]],
+  'K': [[1,0,1],[1,0,1],[1,1,0],[1,0,1],[1,0,1]],
+  'L': [[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+  'M': [[1,0,1],[1,1,1],[1,0,1],[1,0,1],[1,0,1]],
+  'N': [[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+  'O': [[0,1,0],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+  'P': [[1,1,0],[1,0,1],[1,1,0],[1,0,0],[1,0,0]],
+  'R': [[1,1,0],[1,0,1],[1,1,0],[1,0,1],[1,0,1]],
+  'S': [[0,1,1],[1,0,0],[0,1,0],[0,0,1],[1,1,0]],
+  'T': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[0,1,0]],
+  'U': [[1,0,1],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+  'V': [[1,0,1],[1,0,1],[1,0,1],[0,1,0],[0,1,0]],
+  'W': [[1,0,1],[1,0,1],[1,0,1],[1,1,1],[1,0,1]],
+  'Y': [[1,0,1],[1,0,1],[0,1,0],[0,1,0],[0,1,0]],
+  '0': [[0,1,0],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+  '1': [[0,1,0],[1,1,0],[0,1,0],[0,1,0],[1,1,1]],
+  '2': [[1,1,0],[0,0,1],[0,1,0],[1,0,0],[1,1,1]],
+  '3': [[1,1,0],[0,0,1],[0,1,0],[0,0,1],[1,1,0]],
+  '4': [[1,0,1],[1,0,1],[1,1,1],[0,0,1],[0,0,1]],
+  '5': [[1,1,1],[1,0,0],[1,1,0],[0,0,1],[1,1,0]],
+  '6': [[0,1,1],[1,0,0],[1,1,0],[1,0,1],[0,1,0]],
+  '/': [[0,0,1],[0,0,1],[0,1,0],[1,0,0],[1,0,0]],
+  '[': [[1,1],[1,0],[1,0],[1,0],[1,1]],
+  ']': [[1,1],[0,1],[0,1],[0,1],[1,1]],
+  ':': [[0],[1],[0],[1],[0]],
+  '.': [[0],[0],[0],[0],[1]],
+  '(': [[0,1],[1,0],[1,0],[1,0],[0,1]],
+  ')': [[1,0],[0,1],[0,1],[0,1],[1,0]],
+  ' ': [[0,0],[0,0],[0,0],[0,0],[0,0]],
+};
+
+function drawText(text, startX, startY, color) {
+  let cx = startX;
+  for (const ch of text) {
+    const glyph = font3x5[ch.toUpperCase()] || font3x5[' '];
+    if (!glyph) { cx += 4; continue; }
+    for (let row = 0; row < glyph.length; row++) {
+      for (let col = 0; col < glyph[row].length; col++) {
+        if (glyph[row][col] === 1) {
+          px(cx + col, startY + row, color);
+        }
+      }
+    }
+    cx += glyph[0].length + 1;
+  }
+}
+
+// Screen text — max ~17 chars per line to fit 74px screen (4px/char + 3px pad each side)
+drawText('[VALIDATION', SCREEN_X + 3, SCREEN_Y + 3, C.green);
+drawText('PIPELINE]', SCREEN_X + 3, SCREEN_Y + 10, C.green);
+drawText('PHASE: CRITIQUE', SCREEN_X + 3, SCREEN_Y + 17, C.green);
+drawText('(4 DEBATES)', SCREEN_X + 3, SCREEN_Y + 24, C.green);
+drawText('ADVERSARIAL:', SCREEN_X + 3, SCREEN_Y + 31, C.green);
+drawText('RED TEAM', SCREEN_X + 5, SCREEN_Y + 38, C.red);
+drawText('CONVERGENCE:', SCREEN_X + 3, SCREEN_Y + 45, C.green);
+
+// ---- BASE / STAND / KEYBOARD ----
+const baseY = bezelH;
+const baseW = 60;
+const baseX = (MW - baseW) / 2;
+// Base with smooth gradient
+for (let y = 0; y < 6; y++) {
+  const shadeIndex = Math.round((y / 5) * 8 + 4);  // shades 4-12
+  hline(baseX, baseY + y, baseW, metal[shadeIndex]);
+}
+
+// ---- STAND (trapezoid with smooth gradient) ----
+const standW = 30;
+const standY = baseY + 6;
+for (let row = 0; row < 10; row++) {
+  const t = row / 9;
+  const w = Math.round(standW + t * 10);
+  const x = Math.round((MW - w) / 2);
+  // Smooth shade transition from top to bottom
+  const shadeIndex = Math.round((row / 9) * 8 + 3);  // shades 3-11
+  rect(x, standY + row, w, 1, metal[shadeIndex]);
+}
+
+// ---- KEYBOARD (chunky with smooth gradient) ----
+const kbY = standY + 10;
+const kbW = 80;
+const kbX = (MW - kbW) / 2;
+// Keyboard base with smooth gradient
+for (let y = 0; y < 12; y++) {
+  const shadeIndex = Math.round((y / 11) * 8 + 4);  // shades 4-12
+  hline(kbX, kbY + y, kbW, metal[shadeIndex]);
+}
+// Keyboard edges
+vline(kbX, kbY, 12, metal[1]);
+vline(kbX + kbW - 1, kbY, 12, metal[12]);
+
+// ---- CHUNKY KEYBOARD KEYS (4x3 with 4-shade bevel) ----
+for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < 14; col++) {
+    const kx = kbX + 3 + col * 5;
+    const ky = kbY + 2 + row * 3;
+    // Key cap base (mid tone)
+    rect(kx, ky, 4, 2, metal[7]);
+    // Bright top-left bevel (light edge)
+    px(kx, ky, metal[2]);
+    px(kx + 1, ky, metal[2]);
+    // Mid-light top edge
+    px(kx + 2, ky, metal[5]);
+    // Dark bottom-right shadow
+    px(kx + 3, ky + 1, metal[11]);
+    px(kx + 2, ky + 1, metal[10]);
+  }
+}
+
+// ---- RED LED ON BEZEL (validation active, chunky and glowing) ----
+rect(MW - 7, bezelH - 7, 3, 3, C.red);
+px(MW - 6, bezelH - 8, '#dd2233');  // glow edge
+
+</script>
+</body>
+</html>

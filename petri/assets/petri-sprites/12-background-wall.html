@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 12 — Background Wall Panels</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 4;  // Changed from 3 to 4 for chunkier SNES-style
+const W = 160;  // Adjusted for new scale
+const H = 120;
+
+canvas.width = W * S;
+canvas.height = H * S;
+canvas.style.width = canvas.width + 'px';
+canvas.style.height = canvas.height + 'px';
+ctx.imageSmoothingEnabled = false;
+
+function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+
+// Expanded dark wall palette (10+ shades)
+const wallPalette = ['#4a5a6a', '#405268', '#38485c', '#303e52', '#2a3648', '#243040', '#1e2838', '#182230', '#131c28', '#0f1820', '#0a1018'];
+
+const m1 = wallPalette[0];  // lightest (highlights)
+const m3 = wallPalette[1];  // mid-light
+const m4 = wallPalette[2];  // mid
+const m5 = wallPalette[4];  // mid-dark
+const m6 = wallPalette[10]; // darkest (borders)
+
+// Tileable pattern: Dark wall panels in a grid
+const panelTileW = 20;  // Tile width in pixels
+const panelTileH = 15;  // Tile height in pixels
+
+// Fill entire wall with row-by-row gradation and panel grid
+for (let y = 0; y < H; y++) {
+  for (let x = 0; x < W; x++) {
+    // Position within current panel
+    const panelX = x % panelTileW;
+    const panelY = y % panelTileH;
+
+    // Row-by-row gradation through palette based on Y position
+    const normalizedY = y / H;  // 0 at top, 1 at bottom
+    const shadeIndex = Math.floor(normalizedY * 10);  // Map to 0-10 in palette
+    const baseShade = wallPalette[Math.min(shadeIndex, 10)];
+    const nextShade = wallPalette[Math.min(shadeIndex + 1, 10)];
+
+    // Dither between adjacent shades
+    let panelColor;
+    if ((x + y) % 2 === 0) {
+      panelColor = baseShade;
+    } else {
+      panelColor = nextShade;
+    }
+
+    // Panel border detection
+    const isPanelBorderX = (panelX === 0);
+    const isPanelBorderY = (panelY === 0);
+
+    if (isPanelBorderX || isPanelBorderY) {
+      // Panel border (darkest 2 shades)
+      px(x, y, wallPalette[10]);
+    } else {
+      // Panel interior with dithered gradation
+      px(x, y, panelColor);
+    }
+
+    // Add subtle 1-pixel texture variations using adjacent shades
+    if ((x + y) % 13 === 0) {  // Sparse texture detail
+      px(x, y, nextShade);
+    }
+  }
+}
+
+// Add small accent details: vent grates with 3-shade depth
+const vents = [
+  { x: 25, y: 20 },
+  { x: 85, y: 35 },
+  { x: 50, y: 70 },
+  { x: 120, y: 55 },
+];
+
+for (const vent of vents) {
+  // 2x3 vent grate with depth
+  for (let vy = 0; vy < 3; vy++) {
+    for (let vx = 0; vx < 2; vx++) {
+      // Bright top edge, mid body, dark bottom
+      if (vy === 0) {
+        px(vent.x + vx, vent.y + vy, wallPalette[3]);  // bright edge
+      } else if (vy === 1) {
+        px(vent.x + vx, vent.y + vy, wallPalette[6]);  // mid
+      } else {
+        px(vent.x + vx, vent.y + vy, wallPalette[9]);  // dark
+      }
+    }
+  }
+}
+
+// Add wall-mounted pipe brackets with 2-shade highlight
+const brackets = [
+  { x: 40, y: 25 },
+  { x: 110, y: 45 },
+  { x: 60, y: 85 },
+];
+
+for (const bracket of brackets) {
+  // Small L-bracket with highlight on top-left
+  px(bracket.x, bracket.y, wallPalette[2]);      // highlight
+  px(bracket.x + 1, bracket.y, wallPalette[4]);  // face
+  px(bracket.x, bracket.y + 1, wallPalette[4]);  // face
+}
+
+// Add occasional highlight pixels for extra texture (sparse)
+const highlights = [
+  { x: 30, y: 18 },
+  { x: 95, y: 32 },
+  { x: 65, y: 72 },
+  { x: 125, y: 50 },
+  { x: 45, y: 88 },
+  { x: 15, y: 60 },
+];
+
+for (const hl of highlights) {
+  px(hl.x, hl.y, wallPalette[1]);  // Single bright pixel for texture
+}
+</script>
+</body>
+</html>

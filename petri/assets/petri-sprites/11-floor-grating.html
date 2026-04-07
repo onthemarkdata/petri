@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 11 — Floor Grating</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; align-items: flex-end; justify-content: center; min-height: 100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 4;
+const W = 200;
+const H = 24;
+
+canvas.width = W * S;
+canvas.height = H * S;
+canvas.style.width = canvas.width + 'px';
+canvas.style.height = canvas.height + 'px';
+ctx.imageSmoothingEnabled = false;
+
+function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+
+const metal = [
+  '#b8c8d8', '#a0b4c4', '#8a9eb0', '#7a8ea0', '#6a7e90',
+  '#5c6e82', '#4e6074', '#405268', '#34465c', '#2a3a50',
+  '#223246', '#1a2a3c', '#142234', '#0f1a2c', '#0a1220',
+];
+
+const C = {
+  m1: metal[0],
+  m2: metal[2],
+  m3: metal[4],
+  m4: metal[6],
+  m5: metal[9],
+  m6: metal[14],
+  gap: '#080c15',
+};
+
+// Top border: bright metal edge
+rect(0, 0, W, 1, metal[0]);
+rect(0, 1, W, 1, metal[1]);
+
+// Grating pattern: vertical bars with row-by-row progression through palette
+const barWidth = 8;
+const gapWidth = 2;
+const pattern = barWidth + gapWidth;
+
+for (let y = 2; y < H; y++) {
+  // Row-by-row progression through expanded palette
+  const shadeIndex = Math.floor(((y - 2) / (H - 2)) * 14);
+
+  for (let x = 0; x < W; x++) {
+    const xMod = x % pattern;
+
+    if (xMod >= barWidth) {
+      // Gap between vertical bars
+      px(x, y, C.gap);
+    } else {
+      // Each bar has mini-gradient across its 8px width
+      const barShadeIndex = Math.floor((xMod / barWidth) * 8);
+      const barShades = [metal[1], metal[3], metal[5], metal[7], metal[8], metal[10], metal[12], metal[13]];
+      px(x, y, barShades[Math.min(barShadeIndex, 7)]);
+    }
+  }
+}
+
+// Horizontal cross-bars with 3-shade depth (bright top, mid body, dark shadow)
+for (let y = 4; y < H; y += 5) {
+  for (let x = 0; x < W; x++) {
+    const xMod = x % pattern;
+    if (xMod < barWidth) {
+      const rowShadeIndex = Math.floor(((y - 2) / (H - 2)) * 14);
+      px(x, y, metal[Math.min(rowShadeIndex, 14)]);        // mid body
+      if (y + 1 < H) px(x, y + 1, metal[14]);              // dark shadow below
+    }
+  }
+}
+
+// Rivet dots along the top edge with 4-shade depth
+for (let x = 4; x < W; x += pattern) {
+  px(x, 0, metal[0]);      // highlight
+  px(x + 1, 0, metal[1]);  // secondary highlight
+}
+</script>
+</body>
+</html>

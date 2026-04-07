@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 04 — Green Vortex Portal</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 3;
+const SIZE = 120;
+
+canvas.width = SIZE * S;
+canvas.height = SIZE * S;
+canvas.style.width = canvas.width + 'px';
+canvas.style.height = canvas.height + 'px';
+ctx.imageSmoothingEnabled = false;
+
+function px(x, y, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x * S, y * S, S, S);
+}
+
+const cx = SIZE / 2;
+const cy = SIZE / 2;
+
+// Expanded green palette: 12 shades from bright to dark (inspired by Super Metroid)
+const greenPalette = [
+  '#ccffdd',  // Brightest green
+  '#aaffcc',  // Bright
+  '#88eebb',  // Bright-med
+  '#66ddaa',  // Light-mid
+  '#44cc99',  // Mid
+  '#33bb88',  // Mid-light
+  '#228866',  // Mid
+  '#116644',  // Medium-dark
+  '#0a4a2a',  // Dark
+  '#063318',  // Darker
+  '#042210',  // Very dark
+  '#020f08',  // Darkest
+];
+
+function getGreenByDistance(dist, maxR) {
+  // Map distance to hard palette bands
+  const t = dist / maxR;
+  const bandIndex = Math.floor(t * (greenPalette.length - 1));
+  return greenPalette[Math.min(bandIndex, greenPalette.length - 1)];
+}
+
+// Vortex with hard color bands
+function drawVortex(time) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Background with hard concentric rings (bullseye bands)
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const maxR = SIZE / 2;
+
+      if (dist > maxR) continue;
+
+      const color = getGreenByDistance(dist, maxR);
+      px(x, y, color);
+    }
+  }
+
+  // Swirling energy bands (hard-colored arcs) - use more varied shades
+  for (let ring = 0; ring < 6; ring++) {
+    const radius = 10 + ring * 12;
+    const points = Math.round(radius * 3);
+    const angleOffset = time * (ring % 2 === 0 ? 1 : -1) * 0.5 + ring * 0.3;
+    // Alternate between more varied shades instead of linear progression
+    const bandColor = greenPalette[ring < 3 ? (ring + 1) % greenPalette.length : (greenPalette.length - 3 + ring) % greenPalette.length];
+
+    for (let i = 0; i < points; i++) {
+      const angle = (i / points) * Math.PI * 2 + angleOffset;
+      const swirlAngle = angle + radius * 0.02;
+      const rx = radius * (1 + Math.sin(angle * 3 + time) * 0.1);
+      const ry = radius * (1 + Math.cos(angle * 2 + time) * 0.08);
+
+      const x = Math.round(cx + Math.cos(swirlAngle) * rx);
+      const y = Math.round(cy + Math.sin(swirlAngle) * ry);
+
+      if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
+        px(x, y, bandColor);
+      }
+    }
+  }
+
+  // Central bright core - cycle through 3-4 shades for richer pulsing
+  const corePulse = Math.sin(time * 3);
+  let coreColor;
+  if (corePulse > 0.5) {
+    coreColor = greenPalette[0];  // brightest
+  } else if (corePulse > 0) {
+    coreColor = greenPalette[1];  // bright
+  } else if (corePulse > -0.5) {
+    coreColor = greenPalette[2];  // bright-med
+  } else {
+    coreColor = greenPalette[3];  // light-mid
+  }
+
+  for (let y = -5; y <= 5; y++) {
+    for (let x = -5; x <= 5; x++) {
+      const dist = Math.sqrt(x * x + y * y);
+      if (dist <= 5) {
+        px(cx + x, cy + y, coreColor);
+      }
+    }
+  }
+
+  // Bright center pixel with surrounding shades
+  px(cx, cy, greenPalette[0]);
+  px(cx - 1, cy, greenPalette[1]);
+  px(cx + 1, cy, greenPalette[1]);
+  px(cx, cy - 1, greenPalette[1]);
+  px(cx, cy + 1, greenPalette[1]);
+
+  // Energy wisps spiraling outward (use 4-5 different green shades for richness)
+  for (let w = 0; w < 5; w++) {
+    const baseAngle = time * 0.8 + w * (Math.PI * 2 / 5);
+    // Use varied shades: 2, 3, 4, 5, 6
+    const wispColor = greenPalette[2 + (w % 5)];
+
+    for (let seg = 0; seg < 15; seg++) {
+      const t = seg / 15;
+      const r = 12 + t * 35;
+      const angle = baseAngle + t * 2;
+      const x = Math.round(cx + Math.cos(angle) * r);
+      const y = Math.round(cy + Math.sin(angle) * r);
+
+      if (x >= 0 && x < SIZE && y >= 0 && y < SIZE && t < 0.7) {
+        // Add subtle fade by mixing with adjacent darker shade
+        const fadeColor = t > 0.5 ? greenPalette[(2 + (w % 5) + 1) % greenPalette.length] : wispColor;
+        px(x, y, fadeColor);
+      }
+    }
+  }
+}
+
+let t = 0;
+function animate() {
+  drawVortex(t);
+  t += 0.03;
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>

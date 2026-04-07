@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 09 — Neon Light Strips</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; align-items: center; justify-content: center; min-height: 100vh; gap: 80px; }
+  canvas { image-rendering: pixelated; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .label { color: #445; font-family: monospace; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="col">
+  <canvas id="vblue"></canvas>
+  <div class="label">Vertical Blue</div>
+</div>
+<div class="col">
+  <canvas id="vgreen"></canvas>
+  <div class="label">Vertical Green</div>
+</div>
+<div class="col">
+  <canvas id="hblue"></canvas>
+  <div class="label">Horizontal Blue</div>
+</div>
+
+<script>
+const S = 4;
+
+function drawNeonStrip(canvasId, orientation, color, length) {
+  const c = document.getElementById(canvasId);
+  const ctx = c.getContext('2d');
+
+  // Chunky neon: 3px bright core, 1px dim glow on each side (hard steps)
+  const coreWidth = 3;
+  const glowWidth = 1;
+  const totalWidth = coreWidth + glowWidth * 2;
+
+  let W, H;
+  if (orientation === 'v') {
+    W = totalWidth;
+    H = length;
+  } else {
+    W = length;
+    H = totalWidth;
+  }
+
+  c.width = W * S;
+  c.height = H * S;
+  c.style.width = c.width + 'px';
+  c.style.height = c.height + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  function px(x, y, col) { ctx.fillStyle = col; ctx.fillRect(x * S, y * S, S, S); }
+
+  // Define hard color palettes for each neon type
+  const neonColors = {
+    blue: {
+      bright: '#00cfff',  // bright cyan core
+      dim: '#0077aa',     // dim blue glow
+      bg: '#080a14'
+    },
+    green: {
+      bright: '#00ff88',  // bright green core
+      dim: '#007744',     // dim green glow
+      bg: '#080a14'
+    }
+  };
+
+  const colors = neonColors[color];
+
+  if (orientation === 'v') {
+    // Vertical strip: glow on sides
+    for (let row = 0; row < H; row++) {
+      // Left glow
+      px(0, row, colors.dim);
+      // Bright core
+      for (let col = 1; col < 1 + coreWidth; col++) {
+        px(col, row, colors.bright);
+      }
+      // Right glow
+      px(glowWidth + coreWidth, row, colors.dim);
+    }
+  } else {
+    // Horizontal strip: glow on top and bottom
+    for (let col = 0; col < W; col++) {
+      // Top glow
+      px(col, 0, colors.dim);
+      // Bright core
+      for (let row = 1; row < 1 + coreWidth; row++) {
+        px(col, row, colors.bright);
+      }
+      // Bottom glow
+      px(col, glowWidth + coreWidth, colors.dim);
+    }
+  }
+}
+
+drawNeonStrip('vblue', 'v', 'blue', 100);
+drawNeonStrip('vgreen', 'v', 'green', 100);
+drawNeonStrip('hblue', 'h', 'blue', 100);
+</script>
+</body>
+</html>

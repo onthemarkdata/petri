@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PETRI Sprite 07 — Containment Chamber + Pedestal</title>
+<style>
+  body { margin: 0; background: #080a14; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const S = 4; // bigger pixel scale for chunkier look
+const W = 100;
+const H = 140;
+
+canvas.width = W * S;
+canvas.height = H * S;
+canvas.style.width = canvas.width + 'px';
+canvas.style.height = canvas.height + 'px';
+ctx.imageSmoothingEnabled = false;
+
+function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+function hline(x, y, w, color) { rect(x, y, w, 1, color); }
+function vline(x, y, h, color) { rect(x, y, 1, h, color); }
+
+// ====== COLOR PALETTE (explicit pixel art palette) ======
+// Expanded metal palette: 15 shades for rich depth (inspired by Super Metroid)
+const metal = [
+  '#b8c8d8', '#a0b4c4', '#8a9eb0', '#7a8ea0', '#6a7e90',
+  '#5c6e82', '#4e6074', '#405268', '#34465c', '#2a3a50',
+  '#223246', '#1a2a3c', '#142234', '#0f1a2c', '#0a1220',
+];
+
+// Expanded glass palette: 10 shades for radial depth
+const glass = [
+  '#2a6a4a', '#246040', '#1e5538', '#1a4a30', '#164028',
+  '#123520', '#0e2a18', '#0a2012', '#07180c', '#040f08',
+];
+
+const P = {
+  // Metal (using expanded palette)
+  m1: metal[0],   // brightest highlight
+  m2: metal[2],   // light
+  m3: metal[4],   // light-mid
+  m4: metal[6],   // mid
+  m5: metal[8],   // mid-dark
+  m6: metal[10],  // dark
+  m7: metal[12],  // darker
+  m8: metal[14],  // darkest
+
+  // Glass (using expanded palette)
+  g1: glass[0],   // light glass
+  g2: glass[1],   // light-mid
+  g3: glass[2],   // mid-light
+  g4: glass[3],   // mid
+  g5: glass[4],   // mid-dark
+  g6: glass[5],   // dark
+  g7: glass[6],   // darker
+  g8: glass[7],   // dark-mid
+  g9: glass[8],   // darker
+  g10: glass[9],  // near black glass
+
+  // Neon
+  nBlue: '#00cfff',
+  nBlueDim: '#006888',
+  nBlueDark: '#003444',
+  nGreen: '#00ff88',
+  nGreenDim: '#008844',
+
+  // Accents
+  rivet: '#7a8a9a',
+  rivetShadow: '#1a2030',
+  black: '#060a10',
+};
+
+const chamberX = 16;
+const chamberW = 68;
+
+// ====================================================================
+// TOP CAP — chunky metallic cap with clear pixel banding
+// ====================================================================
+const capY = 4;
+
+// Row-by-row pixel shading for the cap (12 rows, each with unique metal shade for depth)
+const capRows = [
+  { inset: 4, c: metal[0] },   // 0: rounded top highlight - brightest
+  { inset: 2, c: metal[1] },   // 1: highlight
+  { inset: 1, c: metal[2] },   // 2: light
+  { inset: 0, c: metal[3] },   // 3: light-mid
+  { inset: 0, c: metal[4] },   // 4: mid
+  { inset: 0, c: metal[5] },   // 5: mid
+  { inset: 0, c: metal[6] },   // 6: mid-dark
+  { inset: 0, c: metal[7] },   // 7: dark
+  { inset: 0, c: metal[8] },   // 8: darker
+  { inset: 0, c: metal[9] },   // 9: darker
+  { inset: 0, c: metal[10] },  // 10: dark
+  { inset: 0, c: metal[11] },  // 11: darkest + neon line
+];
+
+for (let i = 0; i < capRows.length; i++) {
+  const r = capRows[i];
+  rect(chamberX + r.inset, capY + i, chamberW - r.inset * 2, 1, r.c);
+}
+
+// Left edge highlight on cap - use brightest 3 shades alternating
+for (let i = 0; i < capRows.length; i++) {
+  const ins = capRows[i].inset;
+  const edgeColor = metal[i % 3];  // alternate between first 3 shades
+  px(chamberX + ins, capY + i, edgeColor);
+}
+// Right edge shadow on cap - use darkest 3 shades alternating
+for (let i = 0; i < capRows.length; i++) {
+  const ins = capRows[i].inset;
+  const edgeColor = metal[14 - (i % 3)];  // alternate between last 3 shades
+  px(chamberX + chamberW - 1 - ins, capY + i, edgeColor);
+}
+
+// Neon blue strip under cap
+hline(chamberX + 12, capY + 11, chamberW - 24, P.nBlue);
+hline(chamberX + 14, capY + 12, chamberW - 28, P.nBlueDim);
+
+// Bolt details on cap face
+px(chamberX + 6, capY + 4, P.rivet);
+px(chamberX + 7, capY + 4, P.rivetShadow);
+px(chamberX + chamberW - 7, capY + 4, P.rivet);
+px(chamberX + chamberW - 6, capY + 4, P.rivetShadow);
+
+// ====================================================================
+// GLASS BODY — visible pixel dithering for depth
+// ====================================================================
+const glassY = capY + 13;
+const glassH = 65;
+const frameW = 4; // metal frame on each side
+
+// Left frame (4 pixels wide, top-to-bottom gradient per column)
+for (let y = 0; y < glassH; y++) {
+  px(chamberX, glassY + y, metal[2]);        // outer highlight
+  px(chamberX + 1, glassY + y, metal[4]);
+  px(chamberX + 2, glassY + y, metal[6]);
+  px(chamberX + 3, glassY + y, metal[8]);    // inner shadow
+
+  // Rivets every 12px
+  if (y % 12 === 3) {
+    px(chamberX + 1, glassY + y, P.rivet);
+    px(chamberX + 2, glassY + y, P.rivetShadow);
+  }
+}
+
+// Right frame (mirror)
+for (let y = 0; y < glassH; y++) {
+  px(chamberX + chamberW - 1, glassY + y, metal[12]);  // outer shadow
+  px(chamberX + chamberW - 2, glassY + y, metal[10]);
+  px(chamberX + chamberW - 3, glassY + y, metal[8]);
+  px(chamberX + chamberW - 4, glassY + y, metal[6]);   // inner highlight
+
+  if (y % 12 === 3) {
+    px(chamberX + chamberW - 2, glassY + y, P.rivet);
+    px(chamberX + chamberW - 3, glassY + y, P.rivetShadow);
+  }
+}
+
+// Glass interior with dithered shading
+const innerX = chamberX + frameW;
+const innerW = chamberW - frameW * 2;
+
+for (let y = 0; y < glassH; y++) {
+  for (let x = 0; x < innerW; x++) {
+    const nx = x / innerW;        // 0 to 1 across
+    const ny = y / glassH;        // 0 to 1 down
+
+    // Distance from center for radial shading
+    const dx = nx - 0.5;
+    const dy = ny - 0.5;
+    const dist = Math.sqrt(dx * dx + dy * dy) * 2; // 0 to ~1
+
+    // Add per-pixel variation: subtle vertical scanline-like effect
+    const verticalVar = (x % 2) * 0.08;
+
+    // Base color selection using dithering with more intermediate colors
+    // Center is lighter, edges are darker
+    const threshold = dist + ((x + y) % 2) * 0.12 + verticalVar; // checkerboard dither + vertical variation
+
+    let color;
+    if (threshold < 0.25) {
+      color = glass[0];  // brightest center
+    } else if (threshold < 0.35) {
+      color = glass[1];
+    } else if (threshold < 0.45) {
+      color = glass[2];
+    } else if (threshold < 0.55) {
+      color = glass[3];
+    } else if (threshold < 0.65) {
+      color = glass[4];
+    } else if (threshold < 0.72) {
+      color = glass[5];
+    } else if (threshold < 0.8) {
+      color = glass[6];
+    } else if (threshold < 0.88) {
+      color = glass[7];
+    } else if (threshold < 0.95) {
+      color = glass[8];
+    } else {
+      color = glass[9];  // darkest edges
+    }
+
+    px(innerX + x, glassY + y, color);
+  }
+}
+
+// Glass reflection streak (left side, diagonal) - use 4 glass shades for depth
+for (let i = 0; i < 20; i++) {
+  const rx = innerX + 3 + Math.floor(i * 0.3);
+  const ry = glassY + 8 + i;
+  if (ry < glassY + glassH) {
+    px(rx, ry, glass[0]);
+    px(rx + 1, ry, glass[1]);
+    px(rx + 2, ry, glass[2]);
+    if (i % 3 === 0 && rx + 3 < innerX + innerW) {
+      px(rx + 3, ry, glass[3]);
+    }
+  }
+}
+
+// Horizontal metal band across glass middle - use 3 shades for panel depth
+const bandY = glassY + Math.floor(glassH / 2) - 1;
+hline(chamberX, bandY, chamberW, metal[6]);
+hline(chamberX, bandY + 1, chamberW, metal[8]);
+hline(chamberX, bandY + 2, chamberW, metal[10]);
+// Highlight on top of band
+hline(chamberX + 1, bandY, chamberW - 2, metal[4]);
+
+// ====================================================================
+// PEDESTAL — chunky octagonal base with clear pixel steps
+// ====================================================================
+const pedY = glassY + glassH + 2;
+const pedW = chamberW + 16;
+const pedX = chamberX - 8;
+
+// Pedestal top surface (2 rows, bright)
+hline(pedX + 3, pedY, pedW - 6, metal[2]);
+hline(pedX + 2, pedY + 1, pedW - 4, metal[3]);
+
+// Main pedestal body rows with explicit pixel banding - each row unique metal shade for depth (16 rows)
+const pedRows = [
+  { inset: 1, c: metal[0] },   // 0: top highlight edge
+  { inset: 0, c: metal[1] },   // 1
+  { inset: 0, c: metal[2] },   // 2
+  { inset: 0, c: metal[3] },   // 3
+  { inset: 0, c: metal[4] },   // 4
+  { inset: 0, c: metal[5] },   // 5
+  { inset: 0, c: metal[6] },   // 6
+  { inset: 0, c: metal[7] },   // 7
+  { inset: 0, c: metal[8] },   // 8
+  { inset: 0, c: metal[9] },   // 9
+  { inset: 0, c: metal[10] },  // 10
+  { inset: 0, c: metal[11] },  // 11
+  { inset: 0, c: metal[12] },  // 12
+  { inset: 0, c: metal[13] },  // 13
+  { inset: 1, c: metal[14] },  // 14: bottom rounded
+  { inset: 2, c: P.black },    // 15: shadow
+];
+
+const pedTopOff = pedY + 2;
+for (let i = 0; i < pedRows.length; i++) {
+  const r = pedRows[i];
+  rect(pedX + r.inset, pedTopOff + i, pedW - r.inset * 2, 1, r.c);
+}
+
+// Left highlight edge - alternate brightest 2 shades
+for (let i = 0; i < pedRows.length - 1; i++) {
+  const edgeColor = i % 2 === 0 ? metal[0] : metal[1];
+  px(pedX + pedRows[i].inset, pedTopOff + i, edgeColor);
+}
+// Right shadow edge - alternate darkest 2 shades
+for (let i = 0; i < pedRows.length - 1; i++) {
+  const edgeColor = i % 2 === 0 ? metal[14] : metal[13];
+  px(pedX + pedW - 1 - pedRows[i].inset, pedTopOff + i, edgeColor);
+}
+
+// Horizontal neon accent line on pedestal
+const accentY = pedTopOff + 4;
+hline(pedX + 10, accentY, pedW - 20, P.nBlueDim);
+hline(pedX + 12, accentY + 1, pedW - 24, P.nBlueDark);
+
+// Pedestal bolts
+const boltY = pedTopOff + 2;
+px(pedX + 4, boltY, P.rivet); px(pedX + 5, boltY, P.rivetShadow);
+px(pedX + pedW - 5, boltY, P.rivet); px(pedX + pedW - 4, boltY, P.rivetShadow);
+px(pedX + 4, boltY + 8, P.rivet); px(pedX + 5, boltY + 8, P.rivetShadow);
+px(pedX + pedW - 5, boltY + 8, P.rivet); px(pedX + pedW - 4, boltY + 8, P.rivetShadow);
+
+// Vertical panel lines on pedestal - use 3 shades for depth (highlight, gap, shadow)
+const panelX1 = pedX + Math.floor(pedW * 0.3);
+const panelX2 = pedX + Math.floor(pedW * 0.7);
+for (let i = 1; i < pedRows.length - 2; i++) {
+  // Left panel with depth
+  px(panelX1, pedTopOff + i, metal[5]);      // gap light
+  px(panelX1 + 1, pedTopOff + i, metal[9]);  // gap dark
+  px(panelX1 - 1, pedTopOff + i, metal[2]);  // highlight edge
+
+  // Right panel with depth
+  px(panelX2, pedTopOff + i, metal[5]);      // gap light
+  px(panelX2 + 1, pedTopOff + i, metal[9]);  // gap dark
+  px(panelX2 - 1, pedTopOff + i, metal[2]);  // highlight edge
+}
+
+// ====================================================================
+// BOTTOM BASE — wider step, segmented ring
+// ====================================================================
+const baseY = pedTopOff + pedRows.length + 2;
+const baseW = pedW + 12;
+const baseX = pedX - 6;
+
+// Segmented circular base (like floor tiles in original) - each row unique shade for depth (10 rows)
+const baseRows = [
+  { inset: 5, c: metal[1] },  // rounded top
+  { inset: 3, c: metal[2] },
+  { inset: 2, c: metal[3] },
+  { inset: 1, c: metal[4] },
+  { inset: 1, c: metal[5] },
+  { inset: 0, c: metal[6] },
+  { inset: 0, c: metal[7] },
+  { inset: 0, c: metal[8] },
+  { inset: 1, c: metal[9] },
+  { inset: 2, c: P.black },  // shadow
+];
+
+for (let i = 0; i < baseRows.length; i++) {
+  const r = baseRows[i];
+  rect(baseX + r.inset, baseY + i, baseW - r.inset * 2, 1, r.c);
+}
+
+// Segment lines on base (radial divisions) - use darkest 2 shades alternating
+const segCount = 10;
+for (let s = 0; s < segCount; s++) {
+  const sx = baseX + Math.round((s / segCount) * baseW);
+  for (let i = 0; i < baseRows.length - 1; i++) {
+    if (sx >= baseX + baseRows[i].inset && sx < baseX + baseW - baseRows[i].inset) {
+      const segColor = (s + i) % 2 === 0 ? metal[12] : metal[14];
+      px(sx, baseY + i, segColor);
+    }
+  }
+}
+
+// Top surface highlight of base
+hline(baseX + 5, baseY, baseW - 10, metal[0]);
+
+// Green glow on top of pedestal (reflected from vortex above)
+for (let i = 0; i < 4; i++) {
+  const alpha = 0.12 - i * 0.03;
+  for (let x = 8; x < pedW - 8; x++) {
+    if ((x + i) % 2 === 0) { // dithered glow
+      px(pedX + x, pedTopOff + i, `rgba(0, 255, 136, ${alpha})`);
+    }
+  }
+}
+
+// Green glow on bottom of glass (dithered)
+for (let i = 0; i < 3; i++) {
+  for (let x = 0; x < innerW; x++) {
+    if ((x + i) % 3 === 0) {
+      px(innerX + x, glassY + glassH - 1 - i, `rgba(0, 255, 136, 0.08)`);
+    }
+  }
+}
+</script>
+</body>
+</html>

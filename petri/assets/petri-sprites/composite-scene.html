@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PETRI Composite Splash Screen</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #050810;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: monospace;
+      padding: 20px 0;
+      overflow: auto;
+    }
+    .scene {
+      position: relative;
+      width: 1380px;
+      height: 768px;
+      background: #050810;
+      overflow: hidden;
+      margin: 0 auto;
+      box-shadow: 0 0 60px rgba(0, 255, 136, 0.1);
+      transform-origin: top center;
+    }
+    canvas {
+      position: absolute;
+      image-rendering: pixelated;
+    }
+  </style>
+</head>
+<body>
+
+<div class="scene" id="scene">
+  <!-- All canvases positioned absolutely within this container -->
+</div>
+
+<script>
+// Auto-scale to fit viewport
+function fitScene() {
+  const scene = document.getElementById('scene');
+  const scaleX = (window.innerWidth - 40) / 1380;
+  const scaleY = (window.innerHeight - 40) / 768;
+  const scale = Math.min(scaleX, scaleY, 1);
+  scene.style.transform = `scale(${scale})`;
+  scene.style.marginBottom = -(768 * (1 - scale)) + 'px';
+}
+fitScene();
+window.addEventListener('resize', fitScene);
+</script>
+
+<script>
+const S = 3;
+
+function createCanvas(id, width, height, x, y, zIndex) {
+  const canvas = document.createElement('canvas');
+  canvas.id = id;
+  canvas.width = width * S;
+  canvas.height = height * S;
+  canvas.style.left = (x * S) + 'px';
+  canvas.style.top = (y * S) + 'px';
+  canvas.style.zIndex = zIndex;
+  canvas.style.imageRendering = 'pixelated';
+  const scene = document.getElementById('scene');
+  scene.appendChild(canvas);
+  return canvas;
+}
+
+// ========== PALETTES (reused from individual sprites) ==========
+const chromePalette = ['#e8f0ff','#d0e4ff','#b4dcff','#9ccfff','#84c0f0','#6caee4','#5898d0','#4682c8','#3870b8','#2e5ca0','#1e4888','#1a3c78','#142850','#0f1e3c','#0a1428'];
+const metal = ['#b8c8d8','#a0b4c4','#8a9eb0','#7a8ea0','#6a7e90','#5c6e82','#4e6074','#405268','#34465c','#2a3a50','#223246','#1a2a3c','#142234','#0f1a2c','#0a1220'];
+const glass = ['#2a6a4a','#246040','#1e5538','#1a4a30','#164028','#123520','#0e2a18','#0a2012','#07180c','#040f08'];
+const greenPalette = ['#ccffdd','#aaffcc','#88eebb','#66ddaa','#44cc99','#33bb88','#228866','#116644','#0a4a2a','#063318','#042210','#020f08'];
+const wallPalette = ['#4a5a6a','#405268','#38485c','#303e52','#2a3648','#243040','#1e2838','#182230','#131c28','#0f1820','#0a1018'];
+
+// ========== BACKGROUND WALL (fills entire scene) ==========
+{
+  const canvas = createCanvas('wall', 460, 256, 0, 0, 0);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+  function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+
+  const panelTileW = 20, panelTileH = 15, W = 460, H = 256;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const panelX = x % panelTileW, panelY = y % panelTileH, normalizedY = y / H, shadeIndex = Math.floor(normalizedY * 10);
+      const baseShade = wallPalette[Math.min(shadeIndex, 10)], nextShade = wallPalette[Math.min(shadeIndex + 1, 10)];
+      let panelColor = (x + y) % 2 === 0 ? baseShade : nextShade;
+      const isPanelBorderX = (panelX === 0), isPanelBorderY = (panelY === 0);
+      if (isPanelBorderX || isPanelBorderY) px(x, y, wallPalette[10]); else px(x, y, panelColor);
+      if ((x + y) % 13 === 0) px(x, y, nextShade);
+    }
+  }
+}
+
+// ========== FLOOR GRATING ==========
+{
+  const canvas = createCanvas('floor', 460, 24, 0, 228, 2);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+  function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+  function hline(x, y, w, color) { rect(x, y, w, 1, color); }
+
+  const W = 460, H = 24;
+  rect(0, 0, W, 1, metal[0]);
+  rect(0, 1, W, 1, metal[1]);
+
+  const barWidth = 8, gapWidth = 2, pattern = barWidth + gapWidth;
+  for (let y = 2; y < H; y++) {
+    const shadeIndex = Math.floor(((y - 2) / (H - 2)) * 14);
+    for (let x = 0; x < W; x++) {
+      const xMod = x % pattern;
+      if (xMod >= barWidth) {
+        px(x, y, '#080c15');
+      } else {
+        const barShadeIndex = Math.floor((xMod / barWidth) * 8);
+        const barShades = [metal[1], metal[3], metal[5], metal[7], metal[8], metal[10], metal[12], metal[13]];
+        px(x, y, barShades[Math.min(barShadeIndex, 7)]);
+      }
+    }
+  }
+
+  for (let y = 4; y < H; y += 5) {
+    for (let x = 0; x < W; x++) {
+      const xMod = x % pattern;
+      if (xMod < barWidth) {
+        const rowShadeIndex = Math.floor(((y - 2) / (H - 2)) * 14);
+        px(x, y, metal[Math.min(rowShadeIndex, 14)]);
+        if (y + 1 < H) px(x, y + 1, metal[14]);
+      }
+    }
+  }
+}
+
+// ========== NEON HORIZONTAL STRIP (top wall) ==========
+{
+  const canvas = createCanvas('neon-h', 140, 5, 160, 30, 3);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  const W = 140, H = 5;
+  for (let col = 0; col < W; col++) {
+    px(col, 0, '#0077aa');      // top glow
+    px(col, 1, '#00cfff');      // bright core
+    px(col, 2, '#00cfff');      // bright core
+    px(col, 3, '#00cfff');      // bright core
+    px(col, 4, '#0077aa');      // bottom glow
+  }
+}
+
+// ========== NEON VERTICAL LEFT ==========
+{
+  const canvas = createCanvas('neon-vl', 5, 63, 33, 35, 3);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  const W = 5, H = 63;
+  for (let row = 0; row < H; row++) {
+    px(0, row, '#0077aa');      // left glow
+    px(1, row, '#00cfff');      // bright core
+    px(2, row, '#00cfff');      // bright core
+    px(3, row, '#00cfff');      // bright core
+    px(4, row, '#0077aa');      // right glow
+  }
+}
+
+// ========== NEON VERTICAL RIGHT ==========
+{
+  const canvas = createCanvas('neon-vr', 5, 63, 427, 35, 3);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  const W = 5, H = 63;
+  for (let row = 0; row < H; row++) {
+    px(0, row, '#0077aa');      // left glow
+    px(1, row, '#00cfff');      // bright core
+    px(2, row, '#00cfff');      // bright core
+    px(3, row, '#00cfff');      // bright core
+    px(4, row, '#0077aa');      // right glow
+  }
+}
+
+// ========== TITLE "PETRI" (centered at top) ==========
+{
+  const letters = {
+    P: ["111111111111111100","111111111111111110","111100000000011111","111100000000001111","111100000000001111","111100000000001111","111100000000011111","111111111111111110","111111111111111100","111111111111110000","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111100000000000000"],
+    E: ["111111111111111111","111111111111111111","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111111111111111100","111111111111111100","111111111111111100","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111100000000000000","111111111111111111","111111111111111111"],
+    T: ["111111111111111111","111111111111111111","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000","000000011110000000"],
+    R: ["111111111111111100","111111111111111110","111100000000011111","111100000000001111","111100000000001111","111100000000001111","111100000000011111","111111111111111110","111111111111111100","111111111110000000","111100011111000000","111100001111100000","111100000111110000","111100000011111000","111100000001111100","111100000000111110","111100000000011111","111100000000001111"],
+    I: ["111111111111","111111111111","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","000011110000","111111111111","111111111111"]
+  };
+
+  function getChromeColorByRow(row, totalRows, col, totalCols) {
+    const rowIndex = Math.floor((row / totalRows) * chromePalette.length);
+    let baseIndex = Math.min(rowIndex, chromePalette.length - 1);
+    const colRatio = col / totalCols;
+    const colBias = Math.floor(colRatio * 3) - 1;
+    let finalIndex = baseIndex + colBias;
+    finalIndex = Math.max(0, Math.min(finalIndex, chromePalette.length - 1));
+    return chromePalette[finalIndex];
+  }
+
+  const word = "PETRI";
+  const letterSpacing = 4;
+  let totalWidth = 0;
+  for (const ch of word) {
+    totalWidth += letters[ch][0].length;
+  }
+  totalWidth += (word.length - 1) * letterSpacing;
+  const totalHeight = 18;
+
+  const canvas = createCanvas('title', totalWidth + 8, totalHeight + 8, 145, 8, 10);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  // Draw glow
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = totalWidth + 8;
+  tempCanvas.height = totalHeight + 8;
+  const tctx = tempCanvas.getContext('2d');
+  let xOff = 4;
+  for (const ch of word) {
+    const grid = letters[ch];
+    for (let row = 0; row < grid.length; row++) {
+      for (let col = 0; col < grid[row].length; col++) {
+        if (grid[row][col] === '1') {
+          tctx.fillStyle = '#3c8cff';
+          tctx.fillRect(xOff + col, 4 + row, 1, 1);
+        }
+      }
+    }
+    xOff += grid[0].length + letterSpacing;
+  }
+  ctx.save();
+  ctx.filter = `blur(${8 * S}px)`;
+  ctx.globalAlpha = 0.6;
+  ctx.drawImage(tempCanvas, 0, 0, tempCanvas.width, tempCanvas.height, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // Draw letters
+  xOff = 4;
+  for (const ch of word) {
+    const grid = letters[ch];
+    const gridWidth = grid[0].length;
+    for (let row = 0; row < grid.length; row++) {
+      for (let col = 0; col < grid[row].length; col++) {
+        if (grid[row][col] === '1') {
+          const isTop = row === 0 || grid[row - 1]?.[col] !== '1';
+          const isBottom = row === grid.length - 1 || grid[row + 1]?.[col] !== '1';
+          const isLeft = col === 0 || grid[row][col - 1] !== '1';
+          const isRight = col === grid[row].length - 1 || grid[row][col + 1] !== '1';
+          const isEdge = isTop || isBottom || isLeft || isRight;
+          let color = getChromeColorByRow(row, grid.length, col, gridWidth);
+          if (isEdge) {
+            const baseIndex = Math.floor((row / grid.length) * chromePalette.length);
+            if (isTop) {
+              const edgeIndex = Math.max(0, baseIndex - 2);
+              color = chromePalette[edgeIndex];
+            } else if (isLeft) {
+              const edgeIndex = Math.max(0, baseIndex - 1);
+              color = chromePalette[edgeIndex];
+            } else if (isRight || isBottom) {
+              const edgeIndex = Math.min(chromePalette.length - 1, baseIndex + 1);
+              color = chromePalette[edgeIndex];
+            }
+          }
+          px(xOff + col, 4 + row, color);
+        }
+      }
+    }
+    xOff += grid[0].length + letterSpacing;
+  }
+}
+
+// ========== CRT MONITOR LEFT ==========
+{
+  const canvas = createCanvas('crt-left', 30, 40, 10, 50, 6);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+  function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+  function hline(x, y, w, color) { rect(x, y, w, 1, color); }
+  function vline(x, y, h, color) { rect(x, y, 1, h, color); }
+
+  const MW = 30, MH = 40, SCREEN_X = 3, SCREEN_Y = 3, SCREEN_W = 24, SCREEN_H = 18;
+
+  const bezelTop = 23;
+  for (let y = 0; y < bezelTop; y++) {
+    const baseShade = Math.round((y / bezelTop) * 14);
+    for (let x = 0; x < MW; x++) {
+      const ditherPattern = (x + y) % 2;
+      const edgeFade = Math.max(0, 2 - Math.floor(x / 8));
+      let shadeIndex = baseShade + edgeFade;
+      if (x > MW - 8) {
+        const shadowFade = Math.floor((x - (MW - 8)) / 2);
+        shadeIndex = baseShade + 8 + shadowFade;
+      }
+      if (ditherPattern === 1 && x % 4 === 0) {
+        shadeIndex = Math.max(0, shadeIndex - 1);
+      }
+      shadeIndex = Math.max(0, Math.min(14, shadeIndex));
+      px(x, y, metal[shadeIndex]);
+    }
+  }
+
+  hline(0, 0, MW, metal[0]);
+  hline(1, 1, MW - 2, metal[1]);
+  vline(0, 0, bezelTop, metal[0]);
+  vline(1, 1, bezelTop - 2, metal[1]);
+  vline(MW - 1, 0, bezelTop, metal[14]);
+  vline(MW - 2, 1, bezelTop - 2, metal[12]);
+  hline(0, bezelTop - 1, MW, metal[14]);
+  hline(1, bezelTop - 2, MW - 2, metal[12]);
+
+  rect(SCREEN_X - 1, SCREEN_Y - 1, SCREEN_W + 2, SCREEN_H + 2, metal[14]);
+  hline(SCREEN_X - 1, SCREEN_Y - 1, SCREEN_W + 2, metal[12]);
+  vline(SCREEN_X - 1, SCREEN_Y - 1, SCREEN_H + 2, metal[12]);
+
+  rect(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, '#020a0a');
+  hline(SCREEN_X, SCREEN_Y, SCREEN_W, '#0a1510');
+  hline(SCREEN_X, SCREEN_Y + SCREEN_H - 1, SCREEN_W, '#0a1510');
+  vline(SCREEN_X, SCREEN_Y, SCREEN_H, '#0a1510');
+  vline(SCREEN_X + SCREEN_W - 1, SCREEN_Y, SCREEN_H, '#0a1510');
+
+  for (let y = SCREEN_Y + 1; y < SCREEN_Y + SCREEN_H - 1; y++) {
+    for (let x = SCREEN_X + 1; x < SCREEN_X + SCREEN_W - 1; x++) {
+      if ((x + y) % 2 === 0) {
+        px(x, y, '#0a1a10');
+      }
+    }
+  }
+
+  for (let y = SCREEN_Y + 2; y < SCREEN_Y + SCREEN_H - 2; y += 2) {
+    hline(SCREEN_X + 1, y, SCREEN_W - 2, '#000000');
+  }
+
+  rect((MW - 20) / 2, 26, 20, 2, metal[6]);
+  rect((MW - 18) / 2, 28, 18, 4, metal[8]);
+}
+
+// ========== CRT MONITOR RIGHT ==========
+{
+  const canvas = createCanvas('crt-right', 30, 40, 420, 50, 6);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+  function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+  function hline(x, y, w, color) { rect(x, y, w, 1, color); }
+  function vline(x, y, h, color) { rect(x, y, 1, h, color); }
+
+  const MW = 30, MH = 40, SCREEN_X = 3, SCREEN_Y = 3, SCREEN_W = 24, SCREEN_H = 19;
+
+  const bezelH = 24;
+  for (let y = 0; y < bezelH; y++) {
+    const baseShade = Math.round((y / bezelH) * 14);
+    for (let x = 0; x < MW; x++) {
+      const ditherPattern = (x + y) % 2;
+      const edgeFade = Math.max(0, 2 - Math.floor(x / 8));
+      let shadeIndex = baseShade + edgeFade;
+      if (x > MW - 8) {
+        const shadowFade = Math.floor((x - (MW - 8)) / 2);
+        shadeIndex = baseShade + 8 + shadowFade;
+      }
+      if (ditherPattern === 1 && x % 4 === 0) {
+        shadeIndex = Math.max(0, shadeIndex - 1);
+      }
+      shadeIndex = Math.max(0, Math.min(14, shadeIndex));
+      px(x, y, metal[shadeIndex]);
+    }
+  }
+
+  hline(0, 0, MW, metal[0]);
+  hline(1, 1, MW - 2, metal[1]);
+  vline(0, 0, bezelH, metal[0]);
+  vline(1, 1, bezelH - 2, metal[1]);
+  vline(MW - 1, 0, bezelH, metal[14]);
+  vline(MW - 2, 1, bezelH - 2, metal[12]);
+  hline(0, bezelH - 1, MW, metal[14]);
+  hline(1, bezelH - 2, MW - 2, metal[12]);
+
+  rect(SCREEN_X - 1, SCREEN_Y - 1, SCREEN_W + 2, SCREEN_H + 2, metal[14]);
+  hline(SCREEN_X - 1, SCREEN_Y - 1, SCREEN_W + 2, metal[12]);
+  vline(SCREEN_X - 1, SCREEN_Y - 1, SCREEN_H + 2, metal[12]);
+
+  rect(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H, '#020a0a');
+  hline(SCREEN_X, SCREEN_Y, SCREEN_W, '#0a1510');
+  hline(SCREEN_X, SCREEN_Y + SCREEN_H - 1, SCREEN_W, '#0a1510');
+  vline(SCREEN_X, SCREEN_Y, SCREEN_H, '#0a1510');
+  vline(SCREEN_X + SCREEN_W - 1, SCREEN_Y, SCREEN_H, '#0a1510');
+
+  for (let y = SCREEN_Y + 1; y < SCREEN_Y + SCREEN_H - 1; y++) {
+    for (let x = SCREEN_X + 1; x < SCREEN_X + SCREEN_W - 1; x++) {
+      if ((x + y) % 2 === 0) {
+        px(x, y, '#0a1a10');
+      }
+    }
+  }
+
+  for (let y = SCREEN_Y + 2; y < SCREEN_Y + SCREEN_H - 2; y += 2) {
+    hline(SCREEN_X + 1, y, SCREEN_W - 2, '#000000');
+  }
+
+  rect((MW - 20) / 2, 27, 20, 2, metal[6]);
+  rect((MW - 18) / 2, 29, 18, 4, metal[8]);
+}
+
+// ========== CONTAINMENT CHAMBER ==========
+{
+  const canvas = createCanvas('chamber', 100, 155, 180, 50, 5);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+  function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+  function hline(x, y, w, color) { rect(x, y, w, 1, color); }
+
+  const W = 100, H = 155;
+  const chamberX = 16, chamberW = 68;
+  const capY = 4;
+  const capRows = [
+    { inset: 4, c: metal[0] }, { inset: 2, c: metal[1] }, { inset: 1, c: metal[2] },
+    { inset: 0, c: metal[3] }, { inset: 0, c: metal[4] }, { inset: 0, c: metal[5] },
+    { inset: 0, c: metal[6] }, { inset: 0, c: metal[7] }, { inset: 0, c: metal[8] },
+    { inset: 0, c: metal[9] }, { inset: 0, c: metal[10] }, { inset: 0, c: metal[11] },
+  ];
+  for (let i = 0; i < capRows.length; i++) {
+    const r = capRows[i];
+    rect(chamberX + r.inset, capY + i, chamberW - r.inset * 2, 1, r.c);
+  }
+  for (let i = 0; i < capRows.length; i++) {
+    const ins = capRows[i].inset;
+    px(chamberX + ins, capY + i, metal[i % 3]);
+    px(chamberX + chamberW - 1 - ins, capY + i, metal[14 - (i % 3)]);
+  }
+  hline(chamberX + 12, capY + 11, chamberW - 24, '#00cfff');
+  hline(chamberX + 14, capY + 12, chamberW - 28, '#0077aa');
+
+  const glassY = capY + 13, glassH = 65, frameW = 4;
+  for (let y = 0; y < glassH; y++) {
+    px(chamberX, glassY + y, metal[2]);
+    px(chamberX + 1, glassY + y, metal[4]);
+    px(chamberX + 2, glassY + y, metal[6]);
+    px(chamberX + 3, glassY + y, metal[8]);
+    if (y % 12 === 3) {
+      px(chamberX + 1, glassY + y, '#7a8a9a');
+      px(chamberX + 2, glassY + y, '#1a2030');
+    }
+  }
+  for (let y = 0; y < glassH; y++) {
+    px(chamberX + chamberW - 1, glassY + y, metal[12]);
+    px(chamberX + chamberW - 2, glassY + y, metal[10]);
+    px(chamberX + chamberW - 3, glassY + y, metal[8]);
+    px(chamberX + chamberW - 4, glassY + y, metal[6]);
+    if (y % 12 === 3) {
+      px(chamberX + chamberW - 2, glassY + y, '#7a8a9a');
+      px(chamberX + chamberW - 3, glassY + y, '#1a2030');
+    }
+  }
+
+  const innerX = chamberX + frameW, innerW = chamberW - frameW * 2;
+  for (let y = 0; y < glassH; y++) {
+    for (let x = 0; x < innerW; x++) {
+      const nx = x / innerW, ny = y / glassH;
+      const dx = nx - 0.5, dy = ny - 0.5;
+      const dist = Math.sqrt(dx * dx + dy * dy) * 2;
+      const verticalVar = (x % 2) * 0.08;
+      const threshold = dist + ((x + y) % 2) * 0.12 + verticalVar;
+      let color;
+      if (threshold < 0.25) color = glass[0];
+      else if (threshold < 0.35) color = glass[1];
+      else if (threshold < 0.45) color = glass[2];
+      else if (threshold < 0.55) color = glass[3];
+      else if (threshold < 0.65) color = glass[4];
+      else if (threshold < 0.72) color = glass[5];
+      else if (threshold < 0.8) color = glass[6];
+      else if (threshold < 0.88) color = glass[7];
+      else if (threshold < 0.95) color = glass[8];
+      else color = glass[9];
+      px(innerX + x, glassY + y, color);
+    }
+  }
+
+  for (let i = 0; i < 12; i++) {
+    const rx = innerX + 3 + Math.floor(i * 0.3);
+    const ry = glassY + 8 + i;
+    if (ry < glassY + glassH) {
+      px(rx, ry, glass[0]);
+      px(rx + 1, ry, glass[1]);
+      if (i % 3 === 0 && rx + 2 < innerX + innerW) px(rx + 2, ry, glass[2]);
+    }
+  }
+
+  const bandY = glassY + Math.floor(glassH / 2) - 1;
+  hline(chamberX, bandY, chamberW, metal[6]);
+  hline(chamberX, bandY + 1, chamberW, metal[8]);
+  hline(chamberX, bandY + 2, chamberW, metal[10]);
+  hline(chamberX + 1, bandY, chamberW - 2, metal[4]);
+
+  const pedY = glassY + glassH + 2, pedW = chamberW + 16, pedX = chamberX - 8;
+  hline(pedX + 3, pedY, pedW - 6, metal[2]);
+  hline(pedX + 2, pedY + 1, pedW - 4, metal[3]);
+
+  const pedRows = [
+    { inset: 1, c: metal[0] }, { inset: 0, c: metal[1] }, { inset: 0, c: metal[2] },
+    { inset: 0, c: metal[3] }, { inset: 0, c: metal[4] }, { inset: 0, c: metal[5] },
+    { inset: 0, c: metal[6] }, { inset: 0, c: metal[7] }, { inset: 0, c: metal[8] },
+    { inset: 0, c: metal[9] }, { inset: 0, c: metal[10] }, { inset: 0, c: metal[11] },
+    { inset: 0, c: metal[12] }, { inset: 0, c: metal[13] }, { inset: 1, c: metal[14] },
+    { inset: 2, c: '#060a10' },
+  ];
+
+  const pedTopOff = pedY + 2;
+  for (let i = 0; i < pedRows.length; i++) {
+    const r = pedRows[i];
+    rect(pedX + r.inset, pedTopOff + i, pedW - r.inset * 2, 1, r.c);
+  }
+
+  for (let i = 0; i < pedRows.length - 1; i++) {
+    const edgeColor = i % 2 === 0 ? metal[0] : metal[1];
+    px(pedX + pedRows[i].inset, pedTopOff + i, edgeColor);
+    const edgeColor2 = i % 2 === 0 ? metal[14] : metal[13];
+    px(pedX + pedW - 1 - pedRows[i].inset, pedTopOff + i, edgeColor2);
+  }
+
+  hline(pedX + 5, pedTopOff + 2, pedW - 10, metal[4]);
+  hline(pedX + 6, pedTopOff + 3, pedW - 12, metal[6]);
+}
+
+// ========== GREEN VORTEX (animated, smaller inside chamber) ==========
+{
+  const canvas = createCanvas('vortex', 70, 70, 205, 82, 6);
+  canvas.style.opacity = '0.9';
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  const SIZE = 70, cx = SIZE / 2, cy = SIZE / 2;
+
+  function drawVortex(time) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const dx = x - cx, dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const maxR = SIZE / 2;
+        if (dist > maxR) continue;
+        const t = dist / maxR;
+        const bandIndex = Math.floor(t * (greenPalette.length - 1));
+        const color = greenPalette[Math.min(bandIndex, greenPalette.length - 1)];
+        px(x, y, color);
+      }
+    }
+
+    for (let ring = 0; ring < 4; ring++) {
+      const radius = 8 + ring * 10;
+      const points = Math.round(radius * 3);
+      const angleOffset = time * (ring % 2 === 0 ? 1 : -1) * 0.5 + ring * 0.3;
+      const bandColor = greenPalette[ring < 2 ? (ring + 1) % greenPalette.length : (greenPalette.length - 3 + ring) % greenPalette.length];
+      for (let i = 0; i < points; i++) {
+        const angle = (i / points) * Math.PI * 2 + angleOffset;
+        const swirlAngle = angle + radius * 0.02;
+        const rx = radius * (1 + Math.sin(angle * 3 + time) * 0.1);
+        const ry = radius * (1 + Math.cos(angle * 2 + time) * 0.08);
+        const x = Math.round(cx + Math.cos(swirlAngle) * rx);
+        const y = Math.round(cy + Math.sin(swirlAngle) * ry);
+        if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) px(x, y, bandColor);
+      }
+    }
+
+    const corePulse = Math.sin(time * 3);
+    let coreColor;
+    if (corePulse > 0.5) coreColor = greenPalette[0];
+    else if (corePulse > 0) coreColor = greenPalette[1];
+    else if (corePulse > -0.5) coreColor = greenPalette[2];
+    else coreColor = greenPalette[3];
+
+    for (let y = -4; y <= 4; y++) {
+      for (let x = -4; x <= 4; x++) {
+        const dist = Math.sqrt(x * x + y * y);
+        if (dist <= 4) px(cx + x, cy + y, coreColor);
+      }
+    }
+
+    px(cx, cy, greenPalette[0]);
+    px(cx - 1, cy, greenPalette[1]);
+    px(cx + 1, cy, greenPalette[1]);
+    px(cx, cy - 1, greenPalette[1]);
+    px(cx, cy + 1, greenPalette[1]);
+
+    for (let w = 0; w < 4; w++) {
+      const baseAngle = time * 0.8 + w * (Math.PI * 2 / 4);
+      const wispColor = greenPalette[2 + (w % 4)];
+      for (let seg = 0; seg < 12; seg++) {
+        const t = seg / 12;
+        const r = 10 + t * 25;
+        const angle = baseAngle + t * 2;
+        const x = Math.round(cx + Math.cos(angle) * r);
+        const y = Math.round(cy + Math.sin(angle) * r);
+        if (x >= 0 && x < SIZE && y >= 0 && y < SIZE && t < 0.7) {
+          const fadeColor = t > 0.5 ? greenPalette[(2 + (w % 4) + 1) % greenPalette.length] : wispColor;
+          px(x, y, fadeColor);
+        }
+      }
+    }
+  }
+
+  let t = 0;
+  function animate() {
+    drawVortex(t);
+    t += 0.03;
+    requestAnimationFrame(animate);
+  }
+  animate();
+}
+
+// ========== AGENT NETWORK ==========
+{
+  const canvas = createCanvas('network', 60, 55, 200, 85, 7);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+  function rect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, w * S, h * S); }
+
+  const SIZE = 60;
+  const nodes = [
+    { x: 28, y: 6, type: 'agent' },
+    { x: 18, y: 16, type: 'agent' },
+    { x: 28, y: 16, type: 'agent' },
+    { x: 38, y: 16, type: 'agent' },
+    { x: 28, y: 28, type: 'hub' },
+    { x: 18, y: 38, type: 'agent' },
+    { x: 28, y: 38, type: 'agent' },
+    { x: 38, y: 38, type: 'agent' },
+  ];
+
+  const edges = [
+    [0, 1], [0, 2], [0, 3], [1, 4], [2, 4], [3, 4],
+    [4, 5], [4, 6], [4, 7], [5, 6], [6, 7],
+  ];
+
+  const colors = {
+    nodeFill: '#1a4a2a',
+    nodeStroke: '#00ff88',
+    hubFill: '#0d3a1a',
+    hubStroke: '#00cc66',
+    edge: '#00ff88',
+  };
+
+  function drawThickLine(x0, y0, x1, y1, color) {
+    function drawSingleLine(sx, sy, ex, ey) {
+      const dx = Math.abs(ex - sx);
+      const dy = Math.abs(ey - sy);
+      const xdx = sx < ex ? 1 : -1;
+      const ydy = sy < ey ? 1 : -1;
+      let err = dx - dy;
+      while (true) {
+        px(sx, sy, color);
+        if (sx === ex && sy === ey) break;
+        const e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; sx += xdx; }
+        if (e2 < dx) { err += dx; sy += ydy; }
+      }
+    }
+    drawSingleLine(x0, y0, x1, y1);
+    const dx = x1 - x0, dy = y1 - y0;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const px_offset = len > 0 ? -dy / len : 0;
+    const py_offset = len > 0 ? dx / len : 0;
+    drawSingleLine(
+      Math.round(x0 + px_offset), Math.round(y0 + py_offset),
+      Math.round(x1 + px_offset), Math.round(y1 + py_offset)
+    );
+  }
+
+  for (const [a, b] of edges) {
+    drawThickLine(nodes[a].x, nodes[a].y, nodes[b].x, nodes[b].y, colors.edge);
+  }
+
+  for (const node of nodes) {
+    const isHub = node.type === 'hub';
+    const fill = isHub ? colors.hubFill : colors.nodeFill;
+    const stroke = isHub ? colors.hubStroke : colors.nodeStroke;
+    const size = 4;
+    rect(node.x, node.y, size, size, fill);
+    for (let i = 0; i < size; i++) {
+      px(node.x + i, node.y, stroke);
+      px(node.x + i, node.y + size - 1, stroke);
+      px(node.x, node.y + i, stroke);
+      px(node.x + size - 1, node.y + i, stroke);
+    }
+    px(node.x + 2, node.y + 2, stroke);
+  }
+}
+
+// ========== SPINNER / AGENTS:13 ==========
+{
+  const canvas = createCanvas('spinner', 40, 25, 210, 145, 7);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  const W = 40, H = 25;
+  const BRIGHT_GREEN = '#00ff88';
+  const DIM_GREEN = '#0a3a1a';
+
+  function drawFrame(time) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const spinCx = 20, spinCy = 10, spinR = 6, segCount = 8;
+    const activeSegment = Math.floor(time * 3) % segCount;
+
+    for (let i = 0; i < segCount; i++) {
+      const angle = (i / segCount) * Math.PI * 2 - Math.PI / 2;
+      const nextAngle = ((i + 1) / segCount) * Math.PI * 2 - Math.PI / 2;
+      const steps = 3;
+      for (let s = 0; s < steps; s++) {
+        const a = angle + (s / steps) * (nextAngle - angle);
+        const x = Math.round(spinCx + Math.cos(a) * spinR);
+        const y = Math.round(spinCy + Math.sin(a) * spinR);
+        const dist = Math.min(Math.abs(i - activeSegment), segCount - Math.abs(i - activeSegment));
+        const isBright = dist <= 1;
+        px(x, y, isBright ? BRIGHT_GREEN : DIM_GREEN);
+      }
+    }
+
+    const blink = Math.floor(time * 3) % 2 === 0 ? 1 : 0;
+    if (blink) px(spinCx, spinCy, BRIGHT_GREEN);
+
+    requestAnimationFrame(() => drawFrame(performance.now() / 1000));
+  }
+
+  drawFrame(0);
+}
+
+// ========== VERTICAL PIPES (left and right) ==========
+{
+  const canvas = createCanvas('pipe-vl', 8, 80, 60, 130, 4);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  const W = 8, H = 80;
+  const pipeColors = [metal[0], metal[2], metal[4], metal[6], metal[7], metal[9], metal[11], metal[13]];
+
+  for (let row = 0; row < H; row++) {
+    for (let col = 0; col < W; col++) {
+      px(col, row, pipeColors[col]);
+    }
+  }
+
+  for (let y = 15; y < H; y += 20) {
+    px(2, y, metal[0]);
+    px(2, y + 1, metal[0]);
+    px(3, y, metal[3]);
+    px(3, y + 1, metal[3]);
+    px(4, y, metal[10]);
+    px(4, y + 1, metal[13]);
+  }
+}
+
+{
+  const canvas = createCanvas('pipe-vr', 8, 80, 392, 130, 4);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  const W = 8, H = 80;
+  const pipeColors = [metal[0], metal[2], metal[4], metal[6], metal[7], metal[9], metal[11], metal[13]];
+
+  for (let row = 0; row < H; row++) {
+    for (let col = 0; col < W; col++) {
+      px(col, row, pipeColors[col]);
+    }
+  }
+
+  for (let y = 15; y < H; y += 20) {
+    px(2, y, metal[0]);
+    px(2, y + 1, metal[0]);
+    px(3, y, metal[3]);
+    px(3, y + 1, metal[3]);
+    px(4, y, metal[10]);
+    px(4, y + 1, metal[13]);
+  }
+}
+
+// ========== HORIZONTAL PIPE ==========
+{
+  const canvas = createCanvas('pipe-h', 160, 8, 150, 218, 4);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  function px(x, y, color) { ctx.fillStyle = color; ctx.fillRect(x * S, y * S, S, S); }
+
+  const W = 160, H = 8;
+  const pipeColors = [metal[0], metal[2], metal[4], metal[6], metal[7], metal[9], metal[11], metal[13]];
+
+  for (let row = 0; row < H; row++) {
+    for (let col = 0; col < W; col++) {
+      px(col, row, pipeColors[row]);
+    }
+  }
+
+  for (let x = 15; x < W; x += 20) {
+    px(x, 2, metal[0]);
+    px(x + 1, 2, metal[0]);
+    px(x, 3, metal[3]);
+    px(x + 1, 3, metal[3]);
+    px(x, 4, metal[10]);
+    px(x + 1, 4, metal[13]);
+  }
+}
+
+// ========== TAGLINE ==========
+{
+  const font = {
+    'A': [[0,1,0],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+    'C': [[0,1,1],[1,0,0],[1,0,0],[1,0,0],[0,1,1]],
+    'E': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
+    'G': [[0,1,1],[1,0,0],[1,0,1],[1,0,1],[0,1,1]],
+    'H': [[1,0,1],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+    'I': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[1,1,1]],
+    'L': [[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+    'N': [[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+    'O': [[0,1,0],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+    'P': [[1,1,0],[1,0,1],[1,1,0],[1,0,0],[1,0,0]],
+    'R': [[1,1,0],[1,0,1],[1,1,0],[1,0,1],[1,0,1]],
+    'S': [[0,1,1],[1,0,0],[0,1,0],[0,0,1],[1,1,0]],
+    'T': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[0,1,0]],
+    'U': [[1,0,1],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+    'V': [[1,0,1],[1,0,1],[1,0,1],[0,1,0],[0,1,0]],
+    'W': [[1,0,1],[1,0,1],[1,0,1],[1,1,1],[1,0,1]],
+    'X': [[1,0,1],[1,0,1],[0,1,0],[1,0,1],[1,0,1]],
+    'Y': [[1,0,1],[1,0,1],[0,1,0],[0,1,0],[0,1,0]],
+    '0': [[0,1,0],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+    '2': [[1,1,0],[0,0,1],[0,1,0],[1,0,0],[1,1,1]],
+    '.': [[0],[0],[0],[0],[1]],
+    ' ': [[0,0],[0,0],[0,0],[0,0],[0,0]],
+  };
+
+  function measureText(text) {
+    let w = 0;
+    for (const ch of text) {
+      const g = font[ch.toUpperCase()] || font[' '];
+      w += g[0].length + 1;
+    }
+    return w - 1;
+  }
+
+  const line1 = 'GROW YOUR OWN AI CONTEXT.';
+  const line2 = 'APACHE LICENSE 2.0';
+  const w1 = measureText(line1);
+  const w2 = measureText(line2);
+  const maxW = Math.max(w1, w2);
+  const W = maxW + 8, H = 20;
+
+  const canvas = createCanvas('tagline', W, H, (460 - W) / 2, 240, 10);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  function drawText(text, startX, startY, color) {
+    let cx = startX;
+    for (const ch of text) {
+      const glyph = font[ch.toUpperCase()] || font[' '];
+      for (let row = 0; row < glyph.length; row++) {
+        for (let col = 0; col < glyph[row].length; col++) {
+          if (glyph[row][col] === 1) {
+            ctx.fillStyle = color;
+            ctx.fillRect((cx + col) * S, (startY + row) * S, S, S);
+          }
+        }
+      }
+      cx += glyph[0].length + 1;
+    }
+  }
+
+  const x1 = Math.round((W - w1) / 2);
+  drawText(line1, x1, 4, '#aabbcc');
+  const x2 = Math.round((W - w2) / 2);
+  drawText(line2, x2, 12, '#667788');
+}
+
+</script>
+
+</body>
+</html>
