@@ -11,18 +11,16 @@ An agent orchestration framework to grow your AI's context. Decomposes claims in
 
 ## Cost Warning
 
-Petri's multi-agent pipeline can be **expensive with paid LLM models**. Each node goes through multiple agents across multiple iterations, generating significant token usage.
+**Petri uses Claude via Claude Code, which costs money.** Each node goes through 13 agents across multiple iterations, generating significant token usage. A single colony with 10+ nodes can produce **thousands of LLM calls** across Socratic analysis, research, critique, debate, red team, and evaluation phases.
 
-**By default, Petri uses `gemma4:e4b` — a free, local model** that requires no API keys or billing. This protects you from unexpected costs while you explore the framework.
-
-All inference routes through [Claude Code](https://claude.com/claude-code), which handles model routing automatically — local models via Ollama, cloud models via the Anthropic API. Switching models is **opt-in** via `petri.yaml` or the setup wizard:
+The default model is `claude-sonnet-4-6`. You can switch models in `petri.yaml` or the setup wizard:
 
 ```yaml
 model:
-  name: claude-sonnet-4-6
+  name: claude-opus-4-6  # most capable, higher cost
 ```
 
-Understand the cost implications before switching to cloud models: a single colony with 10+ nodes can generate thousands of LLM calls across Socratic analysis, research, critique, debate, red team, and evaluation phases.
+**Monitor your usage.** Start with small claims to understand the cost profile before running large colonies.
 
 ## Prerequisites
 
@@ -58,21 +56,6 @@ Verify it's working:
 claude --version
 ```
 
-### 3. Ollama (for local models)
-
-[Ollama](https://ollama.com) is required for local models (the default). Claude Code connects to Ollama automatically ([setup guide](https://docs.ollama.com/integrations/claude-code)).
-
-```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-
-# macOS: you may need to open the app after install
-# open /Applications/Ollama.app
-
-# Pull the default model (~10GB)
-ollama pull gemma4:e4b
-```
-
 ### Verify everything
 
 ```bash
@@ -91,7 +74,7 @@ uv pip install petri-grow
 pip install petri-grow
 ```
 
-This installs the CLI and core library. No API keys required for local models.
+This installs the CLI and core library. Claude Code must be authenticated (see above).
 
 ## Quickstart
 
@@ -100,7 +83,7 @@ This installs the CLI and core library. No API keys required for local models.
 mkdir my-research && cd my-research
 petri init
 # → Initialized petri dish 'my-research' at /path/to/my-research
-#   Model: gemma4:e4b
+#   Model: claude-sonnet-4-6
 
 # 2. Seed a colony from a claim
 petri seed "A hotdog is a sandwich" --no-questions

@@ -9,9 +9,7 @@ Petri — a colony-based research orchestration framework that decomposes claims
 ## Build & Install
 
 ```bash
-# Prerequisite: Ollama with the default model from petri/defaults/petri.yaml
-ollama pull gemma4:e4b
-
+# Prerequisite: Claude Code CLI (authenticated)
 # Install (everything included — no extras needed)
 uv pip install -e "."
 ```
@@ -59,7 +57,7 @@ petri/
 │   ├── processor.py       # Pipeline processor (queue-driven, concurrent)
 │   ├── propagation.py     # Evidence re-entry, dependency propagation
 │   ├── load_balancer.py   # Adaptive concurrency control
-│   └── preflight.py       # Prerequisite checks (Python, Claude Code, Ollama)
+│   └── preflight.py       # Prerequisite checks (Python, Claude Code)
 │
 ├── storage/               # File-based persistence
 │   ├── event_log.py       # Append-only JSONL per node
@@ -98,4 +96,4 @@ petri/
 - Two-store separation: event log (JSONL) + queue (JSON) — no data duplication
 - 13 agents: 3 leads (non-blocking orchestrators) + 10 specialists (6 blocking)
 - Convergence = all 6 blocking verdicts in pass set (mechanical, no LLM)
-- Default LLM: gemma4:e4b (local, free) — paid models opt-in via petri.yaml
+- Default LLM: claude-sonnet-4-6 via Claude Code CLI

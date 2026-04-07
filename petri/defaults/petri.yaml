@@ -4,15 +4,12 @@
 name: petri
 
 # ── Model & Harness ─────────────────────────────────────────────────────
-# WARNING: The multi-agent pipeline is expensive with paid models.
-# Petri defaults to a free local model to protect you from unexpected costs.
+# WARNING: The multi-agent pipeline generates significant token usage.
+# A single colony with 10+ nodes can produce thousands of LLM calls.
 
 model:
-  name: gemma4:e4b
-  # Claude Code handles all model routing:
-  #   - Local models (e.g. gemma4:e4b) via Ollama integration
-  #   - Cloud models (e.g. claude-opus-4-6) via Anthropic API
-  # See: https://docs.ollama.com/integrations/claude-code
+  name: claude-sonnet-4-6
+  # All inference routes through Claude Code CLI → Anthropic API.
 
 harness: claude-code
 

@@ -32,7 +32,7 @@ def _resolve_provider(petri_dir: Path):
     """Resolve an InferenceProvider from petri.yaml config.
 
     All inference routes through Claude Code CLI, which handles auth
-    and model routing (cloud models via API, local models via Ollama).
+    and model routing via the Anthropic API.
     """
     config = _load_dish_config(petri_dir)
     model_cfg = config.get("model", {})
@@ -163,15 +163,11 @@ def init(
             "Inference model:",
             choices=[
                 questionary.Choice(
-                    f"{LLM_INFERENCE_MODEL}  (local via Ollama — free, no API key)",
-                    value=LLM_INFERENCE_MODEL,
-                ),
-                questionary.Choice(
-                    "claude-sonnet-4-6  (cloud via Claude Code — fast, cost-effective)",
+                    "claude-sonnet-4-6  (fast, cost-effective — default)",
                     value="claude-sonnet-4-6",
                 ),
                 questionary.Choice(
-                    "claude-opus-4-6  (cloud via Claude Code — most capable)",
+                    "claude-opus-4-6  (most capable, higher cost)",
                     value="claude-opus-4-6",
                 ),
                 questionary.Choice(
@@ -275,7 +271,7 @@ def init(
         # Non-blocking preflight warnings
         from petri.engine.preflight import run_preflight
 
-        results = run_preflight(model_name)
+        results = run_preflight()
         warnings = [result for result in results if not result.passed]
         if warnings:
             typer.echo("\n  Prerequisites:")
@@ -1147,18 +1143,7 @@ def inspect() -> None:
     """Check that all prerequisites are installed and working."""
     from petri.engine.preflight import run_preflight
 
-    # Try to load model name from local config, fall back to package default.
-    model_name = LLM_INFERENCE_MODEL
-    petri_dir = Path.cwd() / ".petri"
-    if petri_dir.exists():
-        config = _load_dish_config(petri_dir)
-        model_cfg = config.get("model", {})
-        if isinstance(model_cfg, dict):
-            model_name = model_cfg.get("name", model_name)
-        elif model_cfg:
-            model_name = str(model_cfg)
-
-    results = run_preflight(model_name)
+    results = run_preflight()
 
     typer.echo("\n  Petri Environment Check\n")
     all_passed = True

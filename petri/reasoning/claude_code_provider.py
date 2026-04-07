@@ -1,9 +1,7 @@
 """Claude Code harness-based InferenceProvider for Petri.
 
 Routes inference through the ``claude`` CLI in print mode.
-Claude Code handles all authentication and model routing
-(cloud models via API, local models via Ollama).
-See: https://docs.ollama.com/integrations/claude-code
+Claude Code handles authentication and model routing via the Anthropic API.
 """
 
 from __future__ import annotations
@@ -112,7 +110,7 @@ class ClaudeCodeProvider:
             if "model" in stderr.lower() and "not found" in stderr.lower():
                 logger.warning(
                     "Model '%s' may not be available. "
-                    "Check with: ollama list (local) or verify API access (cloud).",
+                    "Verify the model name and your Claude Code authentication.",
                     self.model,
                 )
         return result.stdout.strip()
