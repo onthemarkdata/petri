@@ -16,15 +16,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
-from petri.convergence import (
+from petri.analysis.convergence import (
     check_convergence,
     compute_circuit_breaker,
     evaluate_short_circuits,
     identify_weakest_link,
     load_agent_roles,
 )
-from petri.debate import load_debate_pairings, log_debate, mediate_debate
-from petri.event_log import append_event, get_verdicts
+from petri.reasoning.debate import load_debate_pairings, log_debate, mediate_debate
+from petri.storage.event_log import append_event, get_verdicts
 from petri.models import (
     ConvergenceOutcome,
     EvaluationResult,
@@ -34,7 +34,7 @@ from petri.models import (
     QueueProcessingResult,
     QueueState,
 )
-from petri.queue import (
+from petri.storage.queue import (
     add_to_queue,
     get_next,
     list_queue,
@@ -44,7 +44,7 @@ from petri.queue import (
     set_weakest_link,
     update_state,
 )
-from petri.validators import validate_terminal_sources
+from petri.analysis.validators import validate_terminal_sources
 
 logger = logging.getLogger(__name__)
 
@@ -1035,7 +1035,7 @@ def process_node(
     events_before = len(get_verdicts(events_file, node_id=node_id))
 
     # Load queue entry
-    from petri.queue import load_queue
+    from petri.storage.queue import load_queue
 
     queue = load_queue(queue_file)
     if node_id not in queue.get("entries", {}):
@@ -1163,7 +1163,7 @@ def find_eligible_nodes(
     When *colony_filter* is provided, only nodes from that colony are scanned.
     When *all_nodes* is True, all colonies are scanned.
     """
-    from petri.colony import deserialize_colony
+    from petri.graph.colony import deserialize_colony
 
     dishes_dir = petri_dir / "petri-dishes"
     if not dishes_dir.exists():
@@ -1296,7 +1296,7 @@ def process_queue(
                 error=str(exc),
             )
 
-    from petri.load_balancer import AdaptiveLoadBalancer
+    from petri.engine.load_balancer import AdaptiveLoadBalancer
 
     balancer = AdaptiveLoadBalancer(
         max_workers=max_concurrent,

@@ -13,12 +13,20 @@ from pathlib import Path
 
 import yaml
 
-from petri.event_log import append_event
+from petri.storage.event_log import append_event
 from petri.models import Debate, DebateExchange, DebateResult, InferenceProvider
+
+
+def _field(obj: dict | object, key: str, default: str = "") -> str:
+    """Extract a field from a dict or Pydantic model (or any object)."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
 
 # ── Defaults ──────────────────────────────────────────────────────────────
 
-_DEFAULTS_DIR = Path(__file__).parent / "defaults"
+_DEFAULTS_DIR = Path(__file__).parent.parent / "defaults"
 
 
 # ── Config Loaders ────────────────────────────────────────────────────────
@@ -76,8 +84,8 @@ def mediate_debate(
     -------
     DebateResult with pair, rounds, purpose, exchanges, summary.
     """
-    agent_a = agent_a_output.get("agent", debate.pair[0])
-    agent_b = agent_b_output.get("agent", debate.pair[1])
+    agent_a = getattr(agent_a_output, "agent", None) or debate.pair[0]
+    agent_b = getattr(agent_b_output, "agent", None) or debate.pair[1]
 
     exchanges: list[DebateExchange] = []
 
@@ -191,9 +199,9 @@ def _build_presentation(
         # initial presentation we always use the agent's own arguments.
         pass
 
-    summary = output.get("summary", "")
-    arguments = output.get("arguments", "")
-    verdict = output.get("verdict", "")
+    summary = _field(output, "summary")
+    arguments = _field(output, "arguments")
+    verdict = _field(output, "verdict")
 
     parts = []
     if verdict:
@@ -217,9 +225,9 @@ def _build_response(
         # For now, fall through to the static formatter.
         pass
 
-    summary = responder_output.get("summary", "")
-    arguments = responder_output.get("arguments", "")
-    verdict = responder_output.get("verdict", "")
+    summary = _field(responder_output, "summary")
+    arguments = _field(responder_output, "arguments")
+    verdict = _field(responder_output, "verdict")
 
     parts = []
     if verdict:
@@ -243,11 +251,11 @@ def _build_rebuttal(
         # directly addresses the opponent's response.
         pass
 
-    verdict = original_output.get("verdict", "")
-    arguments = original_output.get("arguments", "")
+    verdict = _field(original_output, "verdict")
+    arguments = _field(original_output, "arguments")
 
-    opp_verdict = opponent_output.get("verdict", "")
-    opp_summary = opponent_output.get("summary", "")
+    opp_verdict = _field(opponent_output, "verdict")
+    opp_summary = _field(opponent_output, "summary")
 
     parts = []
     if opp_verdict:
@@ -270,8 +278,8 @@ def _build_summary(
     debate: Debate,
 ) -> str:
     """Build a concise summary of the debate exchange."""
-    a_verdict = agent_a_output.get("verdict", "unknown")
-    b_verdict = agent_b_output.get("verdict", "unknown")
+    a_verdict = _field(agent_a_output, "verdict", "unknown")
+    b_verdict = _field(agent_b_output, "verdict", "unknown")
     rounds_label = f"{debate.rounds} round{'s' if debate.rounds != 1 else ''}"
 
     return (

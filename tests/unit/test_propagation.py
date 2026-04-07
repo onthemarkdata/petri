@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from petri.colony import ColonyGraph, serialize_colony
-from petri.event_log import append_event, load_events
+from petri.graph.colony import ColonyGraph, serialize_colony
+from petri.storage.event_log import append_event, load_events
 from petri.models import Colony, NodeStatus, build_node_key
-from petri.propagation import get_impact_report, propagate_upward, reopen_node
-from petri.queue import add_to_queue, load_queue
+from petri.engine.propagation import get_impact_report, propagate_upward, reopen_node
+from petri.storage.queue import add_to_queue, load_queue
 
 from tests.conftest import make_edge, make_node
 

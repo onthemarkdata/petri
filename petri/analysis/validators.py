@@ -15,7 +15,7 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-from petri.event_log import load_events
+from petri.storage.event_log import load_events
 
 
 def load_source_hierarchy(config_path: Path) -> dict:

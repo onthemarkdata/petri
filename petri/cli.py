@@ -1,7 +1,7 @@
 """Typer CLI for the Petri Research Orchestration Framework.
 
-7 commands: init, seed, check, analyze, grow, stop, feed.
-All commands except ``init`` require a ``.petri/`` directory to exist.
+8 commands: init, seed, check, analyze, grow, stop, feed, inspect.
+All commands except ``init`` and ``inspect`` require a ``.petri/`` directory to exist.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _resolve_provider(petri_dir: Path):
     if not model_name:
         return None
 
-    from petri.claude_code_provider import ClaudeCodeProvider
+    from petri.reasoning.claude_code_provider import ClaudeCodeProvider
     return ClaudeCodeProvider(model=model_name)
 
 
@@ -91,7 +91,7 @@ def _get_dish_id(petri_dir: Path) -> str:
 
 def _load_colonies(petri_dir: Path, dish_id: str) -> list[tuple]:
     """Load all colonies from the petri-dishes directory."""
-    from petri.colony import deserialize_colony
+    from petri.graph.colony import deserialize_colony
 
     colonies = []
     dishes_dir = petri_dir / "petri-dishes"
@@ -272,6 +272,17 @@ def init(
         typer.echo(f"  Max concurrent: {max_concurrent}")
         typer.echo(f"  Max iterations: {max_iterations}")
 
+        # Non-blocking preflight warnings
+        from petri.engine.preflight import run_preflight
+
+        results = run_preflight(model_name)
+        warnings = [result for result in results if not result.passed]
+        if warnings:
+            typer.echo("\n  Prerequisites:")
+            for result in warnings:
+                typer.echo(f"  [x] {result.name}: {result.message}")
+            typer.echo("\n  Run 'petri inspect' for details.\n")
+
     except OSError as exc:
         typer.echo(f"Error creating petri dish: {exc}", err=True)
         raise typer.Exit(code=2)
@@ -291,13 +302,13 @@ def seed(
     petri_dir = _find_petri_dir()
     dish_id = _get_dish_id(petri_dir)
 
-    from petri.decomposer import (
+    from petri.reasoning.decomposer import (
         decompose_claim,
         format_colony_display,
         generate_clarifying_questions,
         generate_colony_name,
     )
-    from petri.ingest import ingest
+    from petri.reasoning.ingest import ingest
 
     # Ingest the source to extract content
     ingested = ingest(source)
@@ -401,8 +412,8 @@ def seed(
         raise typer.Exit(code=1)
 
     # Serialize colony to filesystem
-    from petri.colony import ColonyGraph, serialize_colony
-    from petri.event_log import append_event
+    from petri.graph.colony import ColonyGraph, serialize_colony
+    from petri.storage.event_log import append_event
     from petri.models import Colony, Edge, Node
 
     now = datetime.now(timezone.utc).isoformat()
@@ -480,7 +491,7 @@ def check(
         raise typer.Exit(code=0)
 
     # Load queue for state info
-    from petri.queue import load_queue
+    from petri.storage.queue import load_queue
 
     queue_path = petri_dir / "queue.json"
     queue = load_queue(queue_path)
@@ -523,7 +534,7 @@ def check(
                     typer.echo(f"  Iteration:    {q_entry.get('iteration', 0)}")
 
                 # Show events
-                from petri.event_log import load_events
+                from petri.storage.event_log import load_events
 
                 colony_slug = n.colony_id.replace(f"{dish_id}-", "", 1)
                 colony_base = petri_dir / "petri-dishes" / colony_slug
@@ -653,9 +664,9 @@ def analyze(
 
     # --scan
     if scan:
-        from petri.scanner import auto_fix as scanner_auto_fix
-        from petri.scanner import scan as run_scan
-        from petri.scanner import scan_loop
+        from petri.analysis.scanner import auto_fix as scanner_auto_fix
+        from petri.analysis.scanner import scan as run_scan
+        from petri.analysis.scanner import scan_loop
 
         # Determine generated config dir (default: .claude/ in project root)
         generated_dir = petri_dir.parent / ".claude"
@@ -729,7 +740,7 @@ def analyze(
         colonies = _load_colonies(petri_dir, dish_id)
 
         # Find the nodes across colonies
-        from petri.colony import serialize_colony
+        from petri.graph.colony import serialize_colony
         from petri.models import Edge
 
         source_graph = None
@@ -781,7 +792,7 @@ def analyze(
 
 def _render_text_tree(graph, colony) -> None:
     """Render a colony as an indented text tree."""
-    from petri.colony import ColonyGraph
+    from petri.graph.colony import ColonyGraph
 
     typer.echo(f"\nColony: {colony.id}")
     typer.echo(f"Center: {colony.center_claim}")
@@ -848,7 +859,16 @@ def grow(
     petri_dir = _find_petri_dir()
     dish_id = _get_dish_id(petri_dir)
 
-    from petri.processor import NoProviderError, process_queue
+    # Preflight: check claude CLI before attempting processing
+    from petri.engine.preflight import check_claude_cli
+
+    claude_check = check_claude_cli()
+    if not claude_check.passed:
+        typer.echo(f"Error: {claude_check.message}", err=True)
+        typer.echo("Run 'petri inspect' to check all prerequisites.", err=True)
+        raise typer.Exit(code=1)
+
+    from petri.engine.processor import NoProviderError, process_queue
 
     # Resolve the inference provider from petri.yaml config
     provider = _resolve_provider(petri_dir)
@@ -909,9 +929,9 @@ def stop(
     """Gracefully stop all running tasks."""
     petri_dir = _find_petri_dir()
 
-    from petri.processor import request_stop
-    from petri.queue import list_queue, update_state
-    from petri.event_log import append_event
+    from petri.engine.processor import request_stop
+    from petri.storage.queue import list_queue, update_state
+    from petri.storage.event_log import append_event
 
     queue_path = petri_dir / "queue.json"
 
@@ -1063,7 +1083,7 @@ def feed(
         typer.echo(f"  {i}. [{status_val}] {n.id}: {n.claim_text}")
 
     # Re-open nodes
-    from petri.propagation import (
+    from petri.engine.propagation import (
         get_impact_report,
         propagate_upward,
         reopen_node,
@@ -1117,6 +1137,43 @@ def feed(
             raise typer.Exit(code=0)
 
     typer.echo("\nEvidence feed complete.")
+
+
+# ── Inspect ───────────────────────────────────────────────────────────────
+
+
+@app.command()
+def inspect() -> None:
+    """Check that all prerequisites are installed and working."""
+    from petri.engine.preflight import run_preflight
+
+    # Try to load model name from local config, fall back to package default.
+    model_name = LLM_INFERENCE_MODEL
+    petri_dir = Path.cwd() / ".petri"
+    if petri_dir.exists():
+        config = _load_dish_config(petri_dir)
+        model_cfg = config.get("model", {})
+        if isinstance(model_cfg, dict):
+            model_name = model_cfg.get("name", model_name)
+        elif model_cfg:
+            model_name = str(model_cfg)
+
+    results = run_preflight(model_name)
+
+    typer.echo("\n  Petri Environment Check\n")
+    all_passed = True
+    for result in results:
+        icon = "+" if result.passed else "x"
+        typer.echo(f"  [{icon}] {result.name:<22} {result.message}")
+        if not result.passed:
+            all_passed = False
+
+    typer.echo("")
+    if all_passed:
+        typer.echo("  All checks passed.\n")
+    else:
+        typer.echo("  Some checks failed. Fix the issues above before running 'petri grow'.\n")
+        raise typer.Exit(code=1)
 
 
 # ── Entry Point ──────────────────────────────────────────────────────────

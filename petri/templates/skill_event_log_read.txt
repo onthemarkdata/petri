@@ -9,7 +9,7 @@ Query events from a node's event log.
 ## Usage
 
 ```python
-from petri.event_log import query_events, get_verdicts, load_events
+from petri.storage.event_log import query_events, get_verdicts, load_events
 from pathlib import Path
 
 events_path = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}/events.jsonl")

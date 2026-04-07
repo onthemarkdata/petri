@@ -9,7 +9,7 @@ Read a node's current state, metadata, and evidence.
 ## Usage
 
 ```python
-from petri.colony import deserialize_colony
+from petri.graph.colony import deserialize_colony
 from pathlib import Path
 import json
 

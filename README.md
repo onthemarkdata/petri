@@ -13,7 +13,7 @@ An agent orchestration framework to grow your AI's context. Decomposes claims in
 
 Petri's multi-agent pipeline can be **expensive with paid LLM models**. Each node goes through multiple agents across multiple iterations, generating significant token usage.
 
-**By default, Petri uses `gemma4:4b` — a free, local model** that requires no API keys or billing. This protects you from unexpected costs while you explore the framework.
+**By default, Petri uses `gemma4:e4b` — a free, local model** that requires no API keys or billing. This protects you from unexpected costs while you explore the framework.
 
 All inference routes through [Claude Code](https://claude.com/claude-code), which handles model routing automatically — local models via Ollama, cloud models via the Anthropic API. Switching models is **opt-in** via `petri.yaml` or the setup wizard:
 
@@ -26,43 +26,93 @@ Understand the cost implications before switching to cloud models: a single colo
 
 ## Prerequisites
 
-1. **[Claude Code](https://claude.com/claude-code)** — Petri uses Claude Code as its agentic harness.
-2. **[Ollama](https://ollama.com)** — Required for local models. Claude Code connects to Ollama automatically ([setup guide](https://docs.ollama.com/integrations/claude-code)).
+### 1. Python 3.11+
+
+Petri requires Python 3.11 or later. Check your version:
 
 ```bash
-# Install Ollama and pull the default model
-ollama pull gemma4:4b
+python3 --version
 ```
+
+If you need a newer version, [uv](https://docs.astral.sh/uv/) can install one for you:
+
+```bash
+# Install uv (package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create a virtual environment with Python 3.11
+uv venv --python 3.11 .venv
+source .venv/bin/activate    # macOS/Linux
+# .venv\Scripts\activate     # Windows
+```
+
+### 2. Claude Code
+
+Petri uses [Claude Code](https://claude.com/claude-code) as its agentic harness for inference.
+
+Install: https://docs.anthropic.com/en/docs/claude-code
+
+Verify it's working:
+
+```bash
+claude --version
+```
+
+### 3. Ollama (for local models)
+
+[Ollama](https://ollama.com) is required for local models (the default). Claude Code connects to Ollama automatically ([setup guide](https://docs.ollama.com/integrations/claude-code)).
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# macOS: you may need to open the app after install
+# open /Applications/Ollama.app
+
+# Pull the default model (~10GB)
+ollama pull gemma4:e4b
+```
+
+### Verify everything
+
+```bash
+petri inspect
+```
+
+This checks all prerequisites and reports what's missing.
 
 ## Install
 
 ```bash
+# Recommended (with uv)
 uv pip install petri-grow
+
+# Or with pip
+pip install petri-grow
 ```
 
 This installs the CLI and core library. No API keys required for local models.
 
-Fallback (pip):
-
-```bash
-pip install petri-grow
-```
-
 ## Quickstart
 
 ```bash
-# 1. Initialize
+# 1. Initialize a petri dish
 mkdir my-research && cd my-research
 petri init
+# → Initialized petri dish 'my-research' at /path/to/my-research
+#   Model: gemma4:e4b
 
 # 2. Seed a colony from a claim
-petri seed "A hotdog is a sandwich"
+petri seed "A hotdog is a sandwich" --no-questions
+# → Colony 'hotdog-sandwich' created with 6 nodes across 3 levels
 
 # 3. Check status
 petri check
+# → Shows a table of all nodes with status PENDING
 
 # 4. Grow nodes through the validation pipeline
 petri grow --all
+# → Processes nodes bottom-up: Socratic → Research → Critique → Red Team → Evaluation
 
 # 5. Feed new evidence
 petri feed https://arxiv.org/abs/2026.12345
@@ -93,6 +143,7 @@ petri --help
 | `petri feed <source>` | Ingest new evidence and flag affected nodes | `--colony`, `--auto-reopen` |
 | `petri analyze` | Visualization and diagnostics | `--graph`, `--dashboard`, `--scan`, `--fix` |
 | `petri stop` | Gracefully halt active processing | `--force` |
+| `petri inspect` | Check that all prerequisites are installed | |
 
 **Typical workflow:**
 

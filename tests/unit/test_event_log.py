@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from petri.event_log import (
+from petri.storage.event_log import (
     append_event,
     get_searches,
     get_sources,

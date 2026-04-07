@@ -13,9 +13,9 @@ import pytest
 
 from petri.adapters.claude_code import ClaudeCodeAdapter
 from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
-from petri.convergence import load_agent_roles
+from petri.analysis.convergence import load_agent_roles
 from petri.models import PetriConfig
-from petri.scanner import scan
+from petri.analysis.scanner import scan
 
 
 @pytest.fixture

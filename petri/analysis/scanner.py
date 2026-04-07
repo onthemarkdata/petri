@@ -13,9 +13,9 @@ from pathlib import Path
 
 import yaml
 
-from petri.convergence import load_agent_roles
+from petri.analysis.convergence import load_agent_roles
 from petri.models import AgentRole, EventType, NodeStatus, QueueState
-from petri.queue import VALID_TRANSITIONS
+from petri.storage.queue import VALID_TRANSITIONS
 
 # ── Authority Hierarchy ─────────────────────────────────────────────────
 # Higher number = higher authority.  Constitution is the highest.

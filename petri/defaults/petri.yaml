@@ -8,9 +8,9 @@ name: petri
 # Petri defaults to a free local model to protect you from unexpected costs.
 
 model:
-  name: gemma4:4b
+  name: gemma4:e4b
   # Claude Code handles all model routing:
-  #   - Local models (e.g. gemma4:4b) via Ollama integration
+  #   - Local models (e.g. gemma4:e4b) via Ollama integration
   #   - Cloud models (e.g. claude-opus-4-6) via Anthropic API
   # See: https://docs.ollama.com/integrations/claude-code
 

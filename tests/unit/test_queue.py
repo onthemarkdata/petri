@@ -16,7 +16,7 @@ import pytest
 
 from tests.conftest import CANONICAL_NODE_IDS
 
-from petri.queue import (
+from petri.storage.queue import (
     VALID_TRANSITIONS,
     add_to_queue,
     get_next,

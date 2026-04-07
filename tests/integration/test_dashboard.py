@@ -19,8 +19,8 @@ from petri.dashboard.migrate import (
     init_db,
     rebuild_sqlite,
 )
-from petri.event_log import append_event, rollup_to_combined
-from petri.queue import add_to_queue
+from petri.storage.event_log import append_event, rollup_to_combined
+from petri.storage.queue import add_to_queue
 
 
 @pytest.fixture

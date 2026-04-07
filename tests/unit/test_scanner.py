@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from petri.scanner import ScanIssue, auto_fix, scan, scan_loop
+from petri.analysis.scanner import ScanIssue, auto_fix, scan, scan_loop
 
 from tests.conftest import CANONICAL_NODE_IDS
 
@@ -56,7 +56,7 @@ class TestAgentNameConsistency:
         agents_dir.mkdir(parents=True)
 
         # Create all 13 + one extra
-        from petri.convergence import load_agent_roles
+        from petri.analysis.convergence import load_agent_roles
 
         for name in load_agent_roles():
             (agents_dir / f"{name}.md").write_text(f"# {name}\n")
@@ -293,7 +293,7 @@ class TestAuthorityHierarchy:
     """Test that authority levels are correctly defined."""
 
     def test_authority_levels_are_ordered(self):
-        from petri.scanner import AUTHORITY_LEVELS
+        from petri.analysis.scanner import AUTHORITY_LEVELS
 
         assert AUTHORITY_LEVELS["constitution"] > AUTHORITY_LEVELS["code"]
         assert AUTHORITY_LEVELS["code"] > AUTHORITY_LEVELS["rules"]
@@ -302,6 +302,6 @@ class TestAuthorityHierarchy:
         assert AUTHORITY_LEVELS["agents"] > AUTHORITY_LEVELS["overview"]
 
     def test_six_authority_levels(self):
-        from petri.scanner import AUTHORITY_LEVELS
+        from petri.analysis.scanner import AUTHORITY_LEVELS
 
         assert len(AUTHORITY_LEVELS) == 6

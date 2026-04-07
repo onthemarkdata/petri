@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from petri.colony import ColonyGraph, deserialize_colony, serialize_colony
+from petri.graph.colony import ColonyGraph, deserialize_colony, serialize_colony
 from petri.models import Colony, NodeStatus
 
 from tests.conftest import make_edge, make_node

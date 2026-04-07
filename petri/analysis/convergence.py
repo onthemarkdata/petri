@@ -16,7 +16,7 @@ from petri.models import AgentRole, ConvergenceCheckResult, Debate, ShortCircuit
 
 # ── Defaults ──────────────────────────────────────────────────────────────
 
-_DEFAULTS_DIR = Path(__file__).parent / "defaults"
+_DEFAULTS_DIR = Path(__file__).parent.parent / "defaults"
 
 
 # ── Config Loaders ────────────────────────────────────────────────────────

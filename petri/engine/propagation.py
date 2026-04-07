@@ -11,10 +11,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from petri.colony import ColonyGraph, deserialize_colony
-from petri.event_log import append_event
+from petri.graph.colony import ColonyGraph, deserialize_colony
+from petri.storage.event_log import append_event
 from petri.models import NodeStatus
-from petri.queue import add_to_queue, load_queue
+from petri.storage.queue import add_to_queue, load_queue
 
 
 # ── Re-openable statuses ────────────────────────────────────────────────
@@ -153,7 +153,7 @@ def reopen_node(
     queue_path = petri_dir / "queue.json"
     queue = load_queue(queue_path)
     if node_id in queue.get("entries", {}):
-        from petri.queue import remove_from_queue
+        from petri.storage.queue import remove_from_queue
         remove_from_queue(queue_path, node_id)
     add_to_queue(queue_path, node_id)
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from petri.convergence import (
+from petri.analysis.convergence import (
     check_convergence,
     compute_circuit_breaker,
     evaluate_short_circuits,

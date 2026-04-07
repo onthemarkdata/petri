@@ -12,7 +12,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from petri.event_log import rollup_to_combined
+from petri.storage.event_log import rollup_to_combined
 
 # ── Schema ────────────────────────────────────────────────────────────────
 

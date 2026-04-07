@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import subprocess
 
 from petri.config import LLM_INFERENCE_MODEL
@@ -76,22 +77,44 @@ class ClaudeCodeProvider:
 
     def __init__(self, model: str = LLM_INFERENCE_MODEL):
         self.model = model
+        if shutil.which("claude") is None:
+            raise FileNotFoundError(
+                "Claude Code CLI ('claude') not found on PATH. "
+                "Petri requires it for inference.\n"
+                "Install: https://docs.anthropic.com/en/docs/claude-code\n"
+                "Run 'petri inspect' to check all prerequisites."
+            )
 
     def _ask(self, prompt: str) -> str:
         """Send a prompt to claude CLI in print mode."""
-        result = subprocess.run(
-            [
-                "claude",
-                "--print",
-                "--model", self.model,
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "claude",
+                    "--print",
+                    "--model", self.model,
+                    prompt,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "Claude Code CLI ('claude') not found on PATH. "
+                "Install: https://docs.anthropic.com/en/docs/claude-code"
+            ) from None
         if result.returncode != 0:
-            logger.warning("claude CLI error: %s", result.stderr[:500])
+            stderr = result.stderr.strip()
+            logger.warning(
+                "claude CLI error (exit %d): %s", result.returncode, stderr[:1000]
+            )
+            if "model" in stderr.lower() and "not found" in stderr.lower():
+                logger.warning(
+                    "Model '%s' may not be available. "
+                    "Check with: ollama list (local) or verify API access (cloud).",
+                    self.model,
+                )
         return result.stdout.strip()
 
     def generate_clarifying_questions(

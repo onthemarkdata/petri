@@ -10,7 +10,7 @@ Petri — a colony-based research orchestration framework that decomposes claims
 
 ```bash
 # Prerequisite: Ollama with the default model from petri/defaults/petri.yaml
-ollama pull gemma4:4b
+ollama pull gemma4:e4b
 
 # Install (everything included — no extras needed)
 uv pip install -e "."
@@ -44,28 +44,45 @@ petri feed <source>     # Feed new evidence
 petri analyze --graph   # Visualize colony structure
 petri analyze --dashboard  # Launch REST+SSE dashboard (port 8090)
 petri analyze --scan    # Run contradiction scanner
+petri inspect           # Check prerequisites
 ```
 
 ## Architecture
 
 ```
 petri/
-├── models.py          # Pydantic models: Node, Colony, Event, QueueEntry, AgentRole
-├── cli.py             # Typer CLI (7 commands)
-├── colony.py          # DAG operations, cycle detection, level computation
-├── decomposer.py      # Claim → colony decomposition
-├── event_log.py       # Append-only JSONL per node
-├── queue.py           # 13-state machine with fcntl file locking
-├── processor.py       # Pipeline processor (queue-driven, concurrent)
-├── convergence.py     # Verdict matrix, blocking check, circuit breaker
-├── debate.py          # 4 structured debate pairings
-├── propagation.py     # Evidence re-entry, dependency propagation
-├── validators.py      # Source hierarchy enforcement
-├── scanner.py         # Contradiction scanner (10 categories, 6-level authority)
-├── defaults/          # Opinionated config (13 agents, 4 debates, constitution)
-├── templates/         # Plain-text templates for adapter config generation
-├── dashboard/         # FastAPI REST+SSE, SQLite migration
-└── adapters/          # Harness adapters (Claude Code adapter)
+├── models.py              # Pydantic models: Node, Colony, Event, QueueEntry, AgentRole
+├── config.py              # Centralized config loader (petri.yaml)
+├── cli.py                 # Typer CLI (8 commands)
+│
+├── engine/                # Core pipeline orchestration
+│   ├── processor.py       # Pipeline processor (queue-driven, concurrent)
+│   ├── propagation.py     # Evidence re-entry, dependency propagation
+│   ├── load_balancer.py   # Adaptive concurrency control
+│   └── preflight.py       # Prerequisite checks (Python, Claude Code, Ollama)
+│
+├── storage/               # File-based persistence
+│   ├── event_log.py       # Append-only JSONL per node
+│   └── queue.py           # 13-state machine with fcntl file locking
+│
+├── analysis/              # Validation, convergence, scanning
+│   ├── convergence.py     # Verdict matrix, blocking check, circuit breaker
+│   ├── validators.py      # Source hierarchy enforcement
+│   └── scanner.py         # Contradiction scanner (10 categories, 6-level authority)
+│
+├── reasoning/             # LLM-driven logic
+│   ├── decomposer.py      # Claim → colony decomposition
+│   ├── debate.py          # 4 structured debate pairings
+│   ├── ingest.py          # Content ingestion (URL, file, text)
+│   └── claude_code_provider.py  # InferenceProvider via Claude Code CLI
+│
+├── graph/                 # DAG structure
+│   └── colony.py          # DAG operations, cycle detection, level computation
+│
+├── defaults/              # Opinionated config (13 agents, 4 debates, constitution)
+├── templates/             # Plain-text templates for adapter config generation
+├── dashboard/             # FastAPI REST+SSE, SQLite migration
+└── adapters/              # Harness adapters (Claude Code adapter)
 ```
 
 ## Active Technologies
@@ -81,4 +98,4 @@ petri/
 - Two-store separation: event log (JSONL) + queue (JSON) — no data duplication
 - 13 agents: 3 leads (non-blocking orchestrators) + 10 specialists (6 blocking)
 - Convergence = all 6 blocking verdicts in pass set (mechanical, no LLM)
-- Default LLM: gemma-3-4b-it (local, free) — paid models opt-in via petri.yaml
+- Default LLM: gemma4:e4b (local, free) — paid models opt-in via petri.yaml

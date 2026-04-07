@@ -260,7 +260,7 @@ def generate_skill(name: str, petri_dir: str, config: dict | None = None) -> str
         event_types = "\n".join(f"- `{e.value}`" for e in EventType)
         subs["event_types"] = event_types
     elif name == "queue_update":
-        from petri.queue import VALID_TRANSITIONS
+        from petri.storage.queue import VALID_TRANSITIONS
 
         lines = []
         for state, targets in VALID_TRANSITIONS.items():

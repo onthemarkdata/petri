@@ -18,8 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from petri.dashboard.migrate import incremental_sync, rebuild_sqlite
-from petri.event_log import rollup_to_combined
-from petri.queue import list_queue, load_queue
+from petri.storage.event_log import rollup_to_combined
+from petri.storage.queue import list_queue, load_queue
 
 
 # ── SQLite connection ─────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     @app.get("/api/nodes")
     def get_nodes():
         """Return all nodes with colony graph data."""
-        from petri.colony import deserialize_colony
+        from petri.graph.colony import deserialize_colony
 
         dishes_dir = petri_dir / "petri-dishes"
         if not dishes_dir.is_dir():
@@ -183,7 +183,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     @app.get("/api/node/{node_id}")
     def get_node_detail(node_id: str):
         """Full detail for one node: metadata + events."""
-        from petri.colony import deserialize_colony
+        from petri.graph.colony import deserialize_colony
 
         dishes_dir = petri_dir / "petri-dishes"
         dish_id = _get_dish_id(petri_dir)

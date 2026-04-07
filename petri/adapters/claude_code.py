@@ -25,7 +25,7 @@ from petri.adapters.generators import (
     generate_research_methodology_rule,
     generate_skill,
 )
-from petri.convergence import load_agent_roles
+from petri.analysis.convergence import load_agent_roles
 from petri.models import AgentRole, PetriConfig
 
 # Skills to generate
@@ -116,7 +116,7 @@ class ClaudeCodeAdapter(AbstractAdapter):
 
     def validate(self, config_dir: Path) -> list[str]:
         """Check generated files for consistency."""
-        from petri.scanner import scan
+        from petri.analysis.scanner import scan
 
         issues = scan(self.petri_dir, config_dir)
         return [f"[{i.category}] {i.description}" for i in issues]

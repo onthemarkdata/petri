@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from petri.debate import (
+from petri.reasoning.debate import (
     get_held_messages,
     load_debate_pairings,
     log_debate,
     mediate_debate,
 )
-from petri.event_log import load_events
+from petri.storage.event_log import load_events
 from petri.models import Debate
 
 from tests.conftest import CANONICAL_NODE_IDS

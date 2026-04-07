@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from petri.colony import ColonyGraph, serialize_colony
+from petri.graph.colony import ColonyGraph, serialize_colony
 from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
 from petri.models import Colony, Edge, Node, NodeStatus, Verdict, build_node_key
 
