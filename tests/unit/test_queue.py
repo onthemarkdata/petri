@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import CANONICAL_NODE_IDS
+
 from petri.queue import (
     VALID_TRANSITIONS,
     add_to_queue,
@@ -32,12 +34,14 @@ from petri.queue import (
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+NODE_ID = CANONICAL_NODE_IDS["premise1"]
+
 
 def _queue_path(tmp_path: Path) -> Path:
     return tmp_path / "queue.json"
 
 
-def _add_node(tmp_path: Path, node_id: str = "dish-colony-001-001") -> None:
+def _add_node(tmp_path: Path, node_id: str = NODE_ID) -> None:
     """Add a node and return the queue path."""
     add_to_queue(_queue_path(tmp_path), node_id)
 
@@ -49,35 +53,40 @@ def _transition_to(tmp_path: Path, node_id: str, target: str) -> None:
     """
     chain: dict[str, list[str]] = {
         "queued": [],
-        "phase1_active": ["phase1_active"],
-        "phase2_active": ["phase1_active", "phase2_active"],
-        "mediating": ["phase1_active", "phase2_active", "mediating"],
+        "socratic_active": ["socratic_active"],
+        "research_active": ["socratic_active", "research_active"],
+        "critique_active": ["socratic_active", "research_active", "critique_active"],
+        "mediating": ["socratic_active", "research_active", "critique_active", "mediating"],
         "converged": [
-            "phase1_active",
-            "phase2_active",
+            "socratic_active",
+            "research_active",
+            "critique_active",
             "mediating",
             "converged",
         ],
-        "stalled": ["phase1_active", "stalled"],
-        "needs_human": ["phase1_active", "stalled", "needs_human"],
+        "stalled": ["socratic_active", "stalled"],
+        "needs_human": ["socratic_active", "stalled", "needs_human"],
         "red_team_active": [
-            "phase1_active",
-            "phase2_active",
+            "socratic_active",
+            "research_active",
+            "critique_active",
             "mediating",
             "converged",
             "red_team_active",
         ],
         "evaluating": [
-            "phase1_active",
-            "phase2_active",
+            "socratic_active",
+            "research_active",
+            "critique_active",
             "mediating",
             "converged",
             "red_team_active",
             "evaluating",
         ],
         "done": [
-            "phase1_active",
-            "phase2_active",
+            "socratic_active",
+            "research_active",
+            "critique_active",
             "mediating",
             "converged",
             "red_team_active",
@@ -85,15 +94,17 @@ def _transition_to(tmp_path: Path, node_id: str, target: str) -> None:
             "done",
         ],
         "deferred_open": [
-            "phase1_active",
-            "phase2_active",
+            "socratic_active",
+            "research_active",
+            "critique_active",
             "mediating",
             "converged",
             "deferred_open",
         ],
         "deferred_closed": [
-            "phase1_active",
-            "phase2_active",
+            "socratic_active",
+            "research_active",
+            "critique_active",
             "mediating",
             "converged",
             "deferred_closed",
@@ -110,21 +121,21 @@ def _transition_to(tmp_path: Path, node_id: str, target: str) -> None:
 
 class TestAddToQueue:
     def test_add_returns_queue_entry_with_default_state(self, tmp_path):
-        entry = add_to_queue(_queue_path(tmp_path), "dish-colony-001-001")
+        entry = add_to_queue(_queue_path(tmp_path), NODE_ID)
         assert entry.queue_state.value == "queued"
-        assert entry.node_id == "dish-colony-001-001"
+        assert entry.node_id == NODE_ID
 
     def test_duplicate_add_raises(self, tmp_path):
         qp = _queue_path(tmp_path)
-        add_to_queue(qp, "dish-colony-001-001")
+        add_to_queue(qp, NODE_ID)
         with pytest.raises(ValueError, match="already in the queue"):
-            add_to_queue(qp, "dish-colony-001-001")
+            add_to_queue(qp, NODE_ID)
 
     def test_node_id_stored_in_queue_file(self, tmp_path):
         qp = _queue_path(tmp_path)
-        add_to_queue(qp, "dish-colony-001-001")
+        add_to_queue(qp, NODE_ID)
         raw = json.loads(qp.read_text())
-        assert "dish-colony-001-001" in raw["entries"]
+        assert NODE_ID in raw["entries"]
 
 
 # ── update_state Tests ─────────────────────────────────────────────────────
@@ -133,83 +144,42 @@ class TestAddToQueue:
 class TestUpdateStateValidTransitions:
     """Every valid transition listed in the spec must succeed."""
 
-    def test_queued_to_phase1_active(self, tmp_path):
-        _add_node(tmp_path)
-        update_state(_queue_path(tmp_path), "dish-colony-001-001", "phase1_active")
-        entry = load_queue(_queue_path(tmp_path))["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "phase1_active"
-
-    def test_phase1_active_to_phase2_active(self, tmp_path):
-        _add_node(tmp_path)
-        qp = _queue_path(tmp_path)
-        update_state(qp, "dish-colony-001-001", "phase1_active")
-        update_state(qp, "dish-colony-001-001", "phase2_active")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "phase2_active"
-
-    def test_phase2_active_to_mediating(self, tmp_path):
-        _add_node(tmp_path)
-        qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "phase2_active")
-        update_state(qp, "dish-colony-001-001", "mediating")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "mediating"
-
-    def test_mediating_to_converged(self, tmp_path):
-        _add_node(tmp_path)
-        qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "mediating")
-        update_state(qp, "dish-colony-001-001", "converged")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "converged"
-
-    def test_mediating_to_phase1_active_iterate(self, tmp_path):
-        _add_node(tmp_path)
-        qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "mediating")
-        update_state(qp, "dish-colony-001-001", "phase1_active")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "phase1_active"
-
-    def test_converged_to_red_team_active(self, tmp_path):
+    @pytest.mark.parametrize(
+        "from_state,to_state",
+        [
+            ("queued", "socratic_active"),
+            ("socratic_active", "research_active"),
+            ("research_active", "critique_active"),
+            ("critique_active", "mediating"),
+            ("mediating", "converged"),
+            ("mediating", "research_active"),
+            ("converged", "red_team_active"),
+            ("red_team_active", "evaluating"),
+            ("evaluating", "done"),
+            ("done", "queued"),
+            ("deferred_open", "queued"),
+        ],
+        ids=[
+            "queued->socratic_active",
+            "socratic_active->research_active",
+            "research_active->critique_active",
+            "critique_active->mediating",
+            "mediating->converged",
+            "mediating->research_active(iterate)",
+            "converged->red_team_active",
+            "red_team_active->evaluating",
+            "evaluating->done",
+            "done->queued(reentry)",
+            "deferred_open->queued",
+        ],
+    )
+    def test_valid_transition(self, tmp_path, from_state, to_state):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "converged")
-        update_state(qp, "dish-colony-001-001", "red_team_active")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "red_team_active"
-
-    def test_red_team_active_to_evaluating(self, tmp_path):
-        _add_node(tmp_path)
-        qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "red_team_active")
-        update_state(qp, "dish-colony-001-001", "evaluating")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "evaluating"
-
-    def test_evaluating_to_done(self, tmp_path):
-        _add_node(tmp_path)
-        qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "evaluating")
-        update_state(qp, "dish-colony-001-001", "done")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "done"
-
-    def test_done_to_queued_reentry(self, tmp_path):
-        _add_node(tmp_path)
-        qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "done")
-        update_state(qp, "dish-colony-001-001", "queued")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "queued"
-
-    def test_deferred_open_to_queued(self, tmp_path):
-        _add_node(tmp_path)
-        qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "deferred_open")
-        update_state(qp, "dish-colony-001-001", "queued")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "queued"
+        _transition_to(tmp_path, NODE_ID, from_state)
+        update_state(qp, NODE_ID, to_state)
+        entry = load_queue(qp)["entries"][NODE_ID]
+        assert entry["queue_state"] == to_state
 
 
 class TestUpdateStateInvalidTransitions:
@@ -218,39 +188,39 @@ class TestUpdateStateInvalidTransitions:
     def test_queued_to_done_raises(self, tmp_path):
         _add_node(tmp_path)
         with pytest.raises(ValueError, match="Invalid transition"):
-            update_state(_queue_path(tmp_path), "dish-colony-001-001", "done")
+            update_state(_queue_path(tmp_path), NODE_ID, "done")
 
     def test_deferred_closed_is_terminal(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        _transition_to(tmp_path, "dish-colony-001-001", "deferred_closed")
+        _transition_to(tmp_path, NODE_ID, "deferred_closed")
         with pytest.raises(ValueError, match="terminal state"):
-            update_state(qp, "dish-colony-001-001", "queued")
+            update_state(qp, NODE_ID, "queued")
 
-    def test_phase1_active_to_converged_skip_raises(self, tmp_path):
+    def test_research_active_to_converged_skip_raises(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        update_state(qp, "dish-colony-001-001", "phase1_active")
+        _transition_to(tmp_path, NODE_ID, "research_active")
         with pytest.raises(ValueError, match="Invalid transition"):
-            update_state(qp, "dish-colony-001-001", "converged")
+            update_state(qp, NODE_ID, "converged")
 
     def test_nonexistent_node_raises(self, tmp_path):
         qp = _queue_path(tmp_path)
         # Ensure queue file exists (empty)
-        add_to_queue(qp, "dish-colony-001-001")
+        add_to_queue(qp, NODE_ID)
         with pytest.raises(ValueError, match="not in the queue"):
-            update_state(qp, "dish-colony-999-999", "phase1_active")
+            update_state(qp, "test-dish-colony-999-999", "socratic_active")
 
 
 class TestUpdateStateTimestamp:
     def test_last_activity_updated_on_transition(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        before = load_queue(qp)["entries"]["dish-colony-001-001"]["last_activity"]
+        before = load_queue(qp)["entries"][NODE_ID]["last_activity"]
         # Small sleep to ensure timestamp differs
         time.sleep(0.01)
-        update_state(qp, "dish-colony-001-001", "phase1_active")
-        after = load_queue(qp)["entries"]["dish-colony-001-001"]["last_activity"]
+        update_state(qp, NODE_ID, "socratic_active")
+        after = load_queue(qp)["entries"][NODE_ID]["last_activity"]
         assert after >= before
 
 
@@ -261,42 +231,42 @@ class TestSetWeakestLink:
     def test_sets_value(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        set_weakest_link(qp, "dish-colony-001-001", "weak-source-42")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        set_weakest_link(qp, NODE_ID, "weak-source-42")
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["weakest_link"] == "weak-source-42"
 
     def test_raises_on_nonexistent_node(self, tmp_path):
         qp = _queue_path(tmp_path)
         with pytest.raises(ValueError, match="not in the queue"):
-            set_weakest_link(qp, "dish-colony-999-999", "anything")
+            set_weakest_link(qp, "test-dish-colony-999-999", "anything")
 
 
 class TestSetFocusedDirective:
     def test_sets_value(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        set_focused_directive(qp, "dish-colony-001-001", "focus on dates")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        set_focused_directive(qp, NODE_ID, "focus on dates")
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["focused_directive"] == "focus on dates"
 
     def test_raises_on_nonexistent_node(self, tmp_path):
         qp = _queue_path(tmp_path)
         with pytest.raises(ValueError, match="not in the queue"):
-            set_focused_directive(qp, "dish-colony-999-999", "anything")
+            set_focused_directive(qp, "test-dish-colony-999-999", "anything")
 
 
 class TestSetIteration:
     def test_sets_value(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        set_iteration(qp, "dish-colony-001-001", 5)
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        set_iteration(qp, NODE_ID, 5)
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["iteration"] == 5
 
     def test_raises_on_nonexistent_node(self, tmp_path):
         qp = _queue_path(tmp_path)
         with pytest.raises(ValueError, match="not in the queue"):
-            set_iteration(qp, "dish-colony-999-999", 1)
+            set_iteration(qp, "test-dish-colony-999-999", 1)
 
 
 # ── new_cycle Tests ────────────────────────────────────────────────────────
@@ -306,33 +276,33 @@ class TestNewCycle:
     def test_increments_iteration(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        entry_before = load_queue(qp)["entries"]["dish-colony-001-001"]
+        entry_before = load_queue(qp)["entries"][NODE_ID]
         old_iter = entry_before["iteration"]
-        new_cycle(qp, "dish-colony-001-001")
-        entry_after = load_queue(qp)["entries"]["dish-colony-001-001"]
+        new_cycle(qp, NODE_ID)
+        entry_after = load_queue(qp)["entries"][NODE_ID]
         assert entry_after["iteration"] == old_iter + 1
 
     def test_sets_cycle_start_iteration(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        new_cycle(qp, "dish-colony-001-001")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        new_cycle(qp, NODE_ID)
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["cycle_start_iteration"] == entry["iteration"]
 
     def test_clears_weakest_link(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        set_weakest_link(qp, "dish-colony-001-001", "something")
-        new_cycle(qp, "dish-colony-001-001")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        set_weakest_link(qp, NODE_ID, "something")
+        new_cycle(qp, NODE_ID)
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["weakest_link"] is None
 
     def test_clears_focused_directive(self, tmp_path):
         _add_node(tmp_path)
         qp = _queue_path(tmp_path)
-        set_focused_directive(qp, "dish-colony-001-001", "some directive")
-        new_cycle(qp, "dish-colony-001-001")
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        set_focused_directive(qp, NODE_ID, "some directive")
+        new_cycle(qp, NODE_ID)
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["focused_directive"] is None
 
 
@@ -342,10 +312,10 @@ class TestNewCycle:
 class TestGetNext:
     def test_returns_first_resumable(self, tmp_path):
         qp = _queue_path(tmp_path)
-        add_to_queue(qp, "dish-colony-001-001")
+        add_to_queue(qp, NODE_ID)
         result = get_next(qp)
         assert result is not None
-        assert result["node_id"] == "dish-colony-001-001"
+        assert result["node_id"] == NODE_ID
         assert result["queue_state"] == "queued"
 
     def test_returns_none_when_empty(self, tmp_path):
@@ -354,31 +324,31 @@ class TestGetNext:
 
     def test_returns_none_when_all_non_resumable(self, tmp_path):
         qp = _queue_path(tmp_path)
-        add_to_queue(qp, "dish-colony-001-001")
-        _transition_to(tmp_path, "dish-colony-001-001", "done")
-        add_to_queue(qp, "dish-colony-001-002")
-        _transition_to(tmp_path, "dish-colony-001-002", "deferred_closed")
+        add_to_queue(qp, NODE_ID)
+        _transition_to(tmp_path, NODE_ID, "done")
+        add_to_queue(qp, CANONICAL_NODE_IDS["premise2"])
+        _transition_to(tmp_path, CANONICAL_NODE_IDS["premise2"], "deferred_closed")
         assert get_next(qp) is None
 
     def test_skips_non_resumable_returns_resumable(self, tmp_path):
         qp = _queue_path(tmp_path)
         # First node goes to done (non-resumable)
-        add_to_queue(qp, "dish-colony-001-001")
-        _transition_to(tmp_path, "dish-colony-001-001", "done")
+        add_to_queue(qp, NODE_ID)
+        _transition_to(tmp_path, NODE_ID, "done")
         # Second node stays queued (resumable)
-        add_to_queue(qp, "dish-colony-001-002")
+        add_to_queue(qp, CANONICAL_NODE_IDS["premise2"])
         result = get_next(qp)
         assert result is not None
-        assert result["node_id"] == "dish-colony-001-002"
+        assert result["node_id"] == CANONICAL_NODE_IDS["premise2"]
 
     @pytest.mark.parametrize(
         "target_state",
-        ["queued", "phase1_active", "phase2_active", "mediating"],
+        ["queued", "socratic_active", "research_active", "critique_active", "mediating"],
     )
     def test_each_resumable_state_is_returned(self, tmp_path, target_state):
         qp = _queue_path(tmp_path)
-        add_to_queue(qp, "dish-colony-001-001")
-        _transition_to(tmp_path, "dish-colony-001-001", target_state)
+        add_to_queue(qp, NODE_ID)
+        _transition_to(tmp_path, NODE_ID, target_state)
         result = get_next(qp)
         assert result is not None
         assert result["queue_state"] == target_state
@@ -390,12 +360,12 @@ class TestGetNext:
 class TestListQueue:
     def test_returns_all_entries(self, tmp_path):
         qp = _queue_path(tmp_path)
-        add_to_queue(qp, "dish-colony-001-001")
-        add_to_queue(qp, "dish-colony-001-002")
+        add_to_queue(qp, NODE_ID)
+        add_to_queue(qp, CANONICAL_NODE_IDS["premise2"])
         entries = list_queue(qp)
         assert len(entries) == 2
         ids = {e["node_id"] for e in entries}
-        assert ids == {"dish-colony-001-001", "dish-colony-001-002"}
+        assert ids == {NODE_ID, CANONICAL_NODE_IDS["premise2"]}
 
     def test_empty_queue_returns_empty_list(self, tmp_path):
         qp = _queue_path(tmp_path)
@@ -408,14 +378,14 @@ class TestListQueue:
 class TestRemoveFromQueue:
     def test_removes_entry(self, tmp_path):
         qp = _queue_path(tmp_path)
-        add_to_queue(qp, "dish-colony-001-001")
-        remove_from_queue(qp, "dish-colony-001-001")
+        add_to_queue(qp, NODE_ID)
+        remove_from_queue(qp, NODE_ID)
         assert list_queue(qp) == []
 
     def test_raises_on_nonexistent_node(self, tmp_path):
         qp = _queue_path(tmp_path)
         with pytest.raises(ValueError, match="not in the queue"):
-            remove_from_queue(qp, "dish-colony-999-999")
+            remove_from_queue(qp, "test-dish-colony-999-999")
 
 
 # ── sync_check Tests ───────────────────────────────────────────────────────
@@ -428,20 +398,19 @@ class TestSyncCheck:
         nodes_dir = tmp_path / "nodes"
         nodes_dir.mkdir()
 
-        add_to_queue(qp, "dish-colony-001-001")
+        add_to_queue(qp, NODE_ID)
         # Transition away from queued so it doesn't stay in the initial state
-        # (sync_check skips done/deferred_closed, but processes everything else)
-        update_state(qp, "dish-colony-001-001", "phase1_active")
+        update_state(qp, NODE_ID, "socratic_active")
 
         report = sync_check(qp, nodes_dir)
         assert not report["synced"]
         assert len(report["conflicts"]) >= 1
         conflict = report["conflicts"][0]
-        assert conflict["node_id"] == "dish-colony-001-001"
+        assert conflict["node_id"] == NODE_ID
         assert conflict["issue"] == "metadata_not_found"
 
         # Verify the entry was flagged as sync_conflict in the queue
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["queue_state"] == "sync_conflict"
 
     def test_reconciles_terminal_file_status(self, tmp_path):
@@ -449,13 +418,13 @@ class TestSyncCheck:
         qp = _queue_path(tmp_path)
         nodes_dir = tmp_path / "nodes"
 
-        add_to_queue(qp, "dish-colony-001-001")
-        update_state(qp, "dish-colony-001-001", "phase1_active")
+        add_to_queue(qp, NODE_ID)
+        update_state(qp, NODE_ID, "socratic_active")
 
         # Create metadata on disk that says VALIDATED
-        # rsplit("-", 2) on "dish-colony-001-001" -> ["dish-colony", "001", "001"]
-        # path: nodes_dir / "dish-colony" / "001-001" / "metadata.json"
-        meta_dir = nodes_dir / "dish-colony" / "001-001"
+        # rsplit("-", 2) on NODE_ID -> ["test-dish-colony", "001", "001"]
+        # path: nodes_dir / "test-dish-colony" / "001-001" / "metadata.json"
+        meta_dir = nodes_dir / "test-dish-colony" / "001-001"
         meta_dir.mkdir(parents=True)
         (meta_dir / "metadata.json").write_text(
             json.dumps({"status": "VALIDATED"})
@@ -467,7 +436,7 @@ class TestSyncCheck:
         assert report["reconciled"][0]["new_queue_state"] == "done"
 
         # Verify queue was actually updated
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["queue_state"] == "done"
 
     def test_no_status_in_metadata_is_ok(self, tmp_path):
@@ -475,10 +444,10 @@ class TestSyncCheck:
         qp = _queue_path(tmp_path)
         nodes_dir = tmp_path / "nodes"
 
-        add_to_queue(qp, "dish-colony-001-001")
-        update_state(qp, "dish-colony-001-001", "phase1_active")
+        add_to_queue(qp, NODE_ID)
+        update_state(qp, NODE_ID, "socratic_active")
 
-        meta_dir = nodes_dir / "dish-colony" / "001-001"
+        meta_dir = nodes_dir / "test-dish-colony" / "001-001"
         meta_dir.mkdir(parents=True)
         (meta_dir / "metadata.json").write_text(json.dumps({"claim": "test"}))
 
@@ -493,8 +462,8 @@ class TestSyncCheck:
         nodes_dir = tmp_path / "nodes"
         nodes_dir.mkdir()
 
-        add_to_queue(qp, "dish-colony-001-001")
-        _transition_to(tmp_path, "dish-colony-001-001", "done")
+        add_to_queue(qp, NODE_ID)
+        _transition_to(tmp_path, NODE_ID, "done")
 
         report = sync_check(qp, nodes_dir)
         assert report["synced"]
@@ -504,10 +473,10 @@ class TestSyncCheck:
         qp = _queue_path(tmp_path)
         nodes_dir = tmp_path / "nodes"
 
-        add_to_queue(qp, "dish-colony-001-001")
-        update_state(qp, "dish-colony-001-001", "phase1_active")
+        add_to_queue(qp, NODE_ID)
+        update_state(qp, NODE_ID, "socratic_active")
 
-        meta_dir = nodes_dir / "dish-colony" / "001-001"
+        meta_dir = nodes_dir / "test-dish-colony" / "001-001"
         meta_dir.mkdir(parents=True)
         (meta_dir / "metadata.json").write_text("NOT VALID JSON {{{")
 
@@ -516,7 +485,7 @@ class TestSyncCheck:
         assert len(report["conflicts"]) == 1
         assert report["conflicts"][0]["issue"] == "metadata_unreadable"
 
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
+        entry = load_queue(qp)["entries"][NODE_ID]
         assert entry["queue_state"] == "sync_conflict"
 
 
@@ -537,7 +506,7 @@ class TestConcurrentAccess:
 
         threads = [
             threading.Thread(
-                target=add_node, args=(f"dish-colony-001-{i:03d}",)
+                target=add_node, args=(f"test-dish-colony-001-{i:03d}",)
             )
             for i in range(10)
         ]
@@ -553,21 +522,21 @@ class TestConcurrentAccess:
     def test_concurrent_state_updates_same_node(self, tmp_path):
         """5 threads racing to update state on the same node.
 
-        Start the node in 'queued' state. All threads attempt queued->phase1_active.
+        Start the node in 'queued' state. All threads attempt queued->socratic_active.
         Exactly one should succeed; the rest should either succeed (if they happen
         to acquire the lock while it is still in 'queued') or fail with ValueError
-        (if the state already changed to 'phase1_active' and phase1_active->phase1_active
+        (if the state already changed to 'socratic_active' and socratic_active->socratic_active
         is not a valid transition).  No data corruption should occur.
         """
         qp = _queue_path(tmp_path)
-        add_to_queue(qp, "dish-colony-001-001")
+        add_to_queue(qp, NODE_ID)
 
         successes: list[int] = []
         failures: list[tuple[int, str]] = []
 
         def try_update(thread_id: int) -> None:
             try:
-                update_state(qp, "dish-colony-001-001", "phase1_active")
+                update_state(qp, NODE_ID, "socratic_active")
                 successes.append(thread_id)
             except ValueError as e:
                 failures.append((thread_id, str(e)))
@@ -585,13 +554,13 @@ class TestConcurrentAccess:
         # Total should be 5
         assert len(successes) + len(failures) == 5
         # Queue should still be valid JSON with exactly one entry
-        entry = load_queue(qp)["entries"]["dish-colony-001-001"]
-        assert entry["queue_state"] == "phase1_active"
+        entry = load_queue(qp)["entries"][NODE_ID]
+        assert entry["queue_state"] == "socratic_active"
 
     def test_concurrent_add_no_data_loss(self, tmp_path):
         """Verify no data loss under concurrent writes -- check every node_id."""
         qp = _queue_path(tmp_path)
-        node_ids = [f"dish-colony-002-{i:03d}" for i in range(10)]
+        node_ids = [f"test-dish-colony-002-{i:03d}" for i in range(10)]
         errors: list[tuple[str, str]] = []
 
         def add_node(node_id: str) -> None:

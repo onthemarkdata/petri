@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from petri.models import AgentRole, Debate
+from petri.models import AgentRole, ConvergenceCheckResult, Debate, ShortCircuitCondition, Verdict
 
 # ── Defaults ──────────────────────────────────────────────────────────────
 
@@ -48,29 +48,28 @@ def load_agent_roles(config_path: Path | None = None) -> dict[str, AgentRole]:
 
 
 def check_convergence(
-    verdicts: list[dict],
+    verdicts: list[Verdict],
     agent_roles: dict[str, AgentRole],
-) -> dict:
+) -> ConvergenceCheckResult:
     """Check if all blocking verdicts are in their pass set.
 
     Parameters
     ----------
     verdicts:
-        List of verdict dicts with at least ``{agent, verdict}`` keys
-        (as returned by ``get_verdicts``).
+        List of ``Verdict`` models (as returned by ``get_verdicts``).
     agent_roles:
         Dict of agent name -> AgentRole (from ``load_agent_roles``).
 
     Returns
     -------
-    dict with keys: converged, blocking_results, non_blocking_results,
-    missing_blocking, weakest_link.
+    ConvergenceCheckResult with converged, blocking_results,
+    non_blocking_results, missing_blocking, weakest_link.
     """
     # Index verdicts by agent — use latest verdict per agent.
     verdict_by_agent: dict[str, str] = {}
-    for v in verdicts:
-        agent = v.get("agent", "")
-        verdict_str = v.get("verdict", "")
+    for verdict_entry in verdicts:
+        agent = verdict_entry.agent
+        verdict_str = verdict_entry.verdict
         if agent and verdict_str:
             verdict_by_agent[agent] = verdict_str
 
@@ -109,41 +108,38 @@ def check_convergence(
                 non_blocking_results[name] = {"verdict": None, "passes": False}
 
     # Determine overall convergence.
-    all_blocking_pass = all(r["passes"] for r in blocking_results.values())
+    all_blocking_pass = all(result["passes"] for result in blocking_results.values())
     converged = all_blocking_pass and len(missing_blocking) == 0
 
     # Identify the weakest link.
-    weakest_link = identify_weakest_link(
-        {
-            "blocking_results": blocking_results,
-            "missing_blocking": missing_blocking,
-        }
-    )
+    weakest_link = identify_weakest_link(blocking_results, missing_blocking)
 
-    return {
-        "converged": converged,
-        "blocking_results": blocking_results,
-        "non_blocking_results": non_blocking_results,
-        "missing_blocking": missing_blocking,
-        "weakest_link": weakest_link,
-    }
+    return ConvergenceCheckResult(
+        converged=converged,
+        blocking_results=blocking_results,
+        non_blocking_results=non_blocking_results,
+        missing_blocking=missing_blocking,
+        weakest_link=weakest_link,
+    )
 
 
 # ── Weakest Link ──────────────────────────────────────────────────────────
 
 
-def identify_weakest_link(convergence_result: dict) -> str | None:
+def identify_weakest_link(
+    blocking_results: dict[str, dict],
+    missing_blocking: list[str],
+) -> str | None:
     """Find the first blocking agent that failed.
 
     Returns the agent name or ``None`` if all blocking agents pass.
     """
     # Check missing blocking agents first — they are the most critical gap.
-    missing = convergence_result.get("missing_blocking", [])
-    if missing:
-        return missing[0]
+    if missing_blocking:
+        return missing_blocking[0]
 
     # Then check for explicit failures among blocking results.
-    for name, entry in convergence_result.get("blocking_results", {}).items():
+    for name, entry in blocking_results.items():
         if not entry.get("passes", False):
             return name
 
@@ -154,54 +150,46 @@ def identify_weakest_link(convergence_result: dict) -> str | None:
 
 
 def evaluate_short_circuits(
-    verdicts: list[dict],
+    verdicts: list[Verdict],
     agent_roles: dict[str, AgentRole],
-) -> dict | None:
+) -> ShortCircuitCondition | None:
     """Check for short-circuit conditions.
 
-    Two short-circuit paths:
+    Derives short-circuit rules from agent config (redirect_on_block and
+    CANNOT_DETERMINE verdicts) rather than hardcoding agent names.
 
-    1. **NEEDS_EXPERIMENT**: investigator issues ``CANNOT_DETERMINE`` and all
-       other blocking agents pass.
-    2. **DEFER_OPEN**: triage issues ``LOW_VALUE_DEFER`` and all other blocking
-       agents pass.
+    A short-circuit fires when one agent issues a triggering verdict AND
+    all other blocking agents pass.
 
-    Returns ``None`` if no short-circuit applies, otherwise a dict:
-    ``{"type": ..., "agent": ..., "verdict": ...}``.
+    Returns ``None`` if no short-circuit applies, otherwise a
+    ``ShortCircuitCondition``.
     """
-    # Build a quick convergence snapshot for inspection.
-    result = check_convergence(verdicts, agent_roles)
-    blocking = result["blocking_results"]
+    from petri.config import get_short_circuit_rules
 
-    # Short-circuit 1: investigator CANNOT_DETERMINE.
-    inv = blocking.get("investigator")
-    if inv and inv["verdict"] == "CANNOT_DETERMINE":
-        others_pass = all(
-            entry["passes"]
-            for name, entry in blocking.items()
-            if name != "investigator"
-        )
-        if others_pass and not result["missing_blocking"]:
-            return {
-                "type": "needs_experiment",
-                "agent": "investigator",
-                "verdict": "CANNOT_DETERMINE",
-            }
+    convergence = check_convergence(verdicts, agent_roles)
+    blocking = convergence.blocking_results
 
-    # Short-circuit 2: triage LOW_VALUE_DEFER.
-    tri = blocking.get("triage")
-    if tri and tri["verdict"] == "LOW_VALUE_DEFER":
-        others_pass = all(
-            entry["passes"]
-            for name, entry in blocking.items()
-            if name != "triage"
-        )
-        if others_pass and not result["missing_blocking"]:
-            return {
-                "type": "defer_open",
-                "agent": "triage",
-                "verdict": "LOW_VALUE_DEFER",
-            }
+    if convergence.missing_blocking:
+        return None
+
+    for rule in get_short_circuit_rules():
+        triggering_agent = rule["agent"]
+        triggering_verdict = rule["verdict"]
+        circuit_type = rule["type"]
+
+        agent_result = blocking.get(triggering_agent)
+        if agent_result and agent_result["verdict"] == triggering_verdict:
+            others_pass = all(
+                entry["passes"]
+                for agent_name, entry in blocking.items()
+                if agent_name != triggering_agent
+            )
+            if others_pass:
+                return ShortCircuitCondition(
+                    type=circuit_type,
+                    agent=triggering_agent,
+                    verdict=triggering_verdict,
+                )
 
     return None
 

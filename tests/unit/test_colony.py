@@ -1,4 +1,4 @@
-"""Comprehensive unit tests for petri/colony.py — ColonyGraph and serialization."""
+"""Unit tests for petri/colony.py — ColonyGraph and serialization."""
 
 from __future__ import annotations
 
@@ -7,36 +7,12 @@ import json
 import pytest
 
 from petri.colony import ColonyGraph, deserialize_colony, serialize_colony
-from petri.models import Colony, Edge, Node, NodeStatus, build_node_key
+from petri.models import Colony, NodeStatus
+
+from tests.conftest import make_edge, make_node
 
 
-# ── Helpers / fixtures ────────────────────────────────────────────────────
-
-
-def _node(
-    dish: str,
-    colony: str,
-    level: int,
-    seq: int,
-    claim: str = "",
-    status: NodeStatus = NodeStatus.NEW,
-    dependencies: list[str] | None = None,
-) -> Node:
-    """Shorthand factory for building a test Node."""
-    nid = build_node_key(dish, colony, level, seq)
-    colony_id = f"{dish}-{colony}"
-    return Node(
-        id=nid,
-        colony_id=colony_id,
-        claim_text=claim or f"claim-{level}-{seq}",
-        level=level,
-        status=status,
-        dependencies=dependencies or [],
-    )
-
-
-def _edge(from_id: str, to_id: str, edge_type: str = "intra_colony") -> Edge:
-    return Edge(from_node=from_id, to_node=to_id, edge_type=edge_type)
+# ── Local fixtures ───────────────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -45,48 +21,17 @@ def colony_graph() -> ColonyGraph:
     return ColonyGraph(colony_id="test-dish-colony")
 
 
-@pytest.fixture
-def realistic_graph() -> ColonyGraph:
-    """Build the reference DAG described in the spec.
-
-    Level 0: center (thesis)
-      Level 1: premise1, premise2
-        Level 2: sub1 (dep of premise1), sub2 (dep of premise1 AND premise2)
-    """
-    g = ColonyGraph(colony_id="test-dish-colony")
-
-    center = _node("test-dish", "colony", 0, 0, "Central thesis")
-    premise1 = _node("test-dish", "colony", 1, 1, "First premise")
-    premise2 = _node("test-dish", "colony", 1, 2, "Second premise")
-    sub1 = _node("test-dish", "colony", 2, 3, "Sub-premise of P1")
-    sub2 = _node("test-dish", "colony", 2, 4, "Shared sub-premise")
-
-    for n in [center, premise1, premise2, sub1, sub2]:
-        g.add_node(n)
-
-    # center depends on premise1, premise2
-    g.add_edge(_edge(center.id, premise1.id))
-    g.add_edge(_edge(center.id, premise2.id))
-    # premise1 depends on sub1, sub2
-    g.add_edge(_edge(premise1.id, sub1.id))
-    g.add_edge(_edge(premise1.id, sub2.id))
-    # premise2 depends on sub2 (shared)
-    g.add_edge(_edge(premise2.id, sub2.id))
-
-    return g
-
-
 # ── ColonyGraph Basic Operations ─────────────────────────────────────────
 
 
 class TestAddNode:
     def test_add_and_get(self, colony_graph: ColonyGraph) -> None:
-        node = _node("test-dish", "colony", 0, 0)
+        node = make_node("test-dish", "colony", 0, 0)
         colony_graph.add_node(node)
         assert colony_graph.get_node(node.id) is node
 
     def test_duplicate_raises(self, colony_graph: ColonyGraph) -> None:
-        node = _node("test-dish", "colony", 0, 0)
+        node = make_node("test-dish", "colony", 0, 0)
         colony_graph.add_node(node)
         with pytest.raises(ValueError, match="already exists"):
             colony_graph.add_node(node)
@@ -94,19 +39,18 @@ class TestAddNode:
 
 class TestRemoveNode:
     def test_remove_clears_node_and_edges(self, colony_graph: ColonyGraph) -> None:
-        a = _node("test-dish", "colony", 0, 0)
-        b = _node("test-dish", "colony", 1, 1)
-        colony_graph.add_node(a)
-        colony_graph.add_node(b)
-        colony_graph.add_edge(_edge(a.id, b.id))
+        node_a = make_node("test-dish", "colony", 0, 0)
+        node_b = make_node("test-dish", "colony", 1, 1)
+        colony_graph.add_node(node_a)
+        colony_graph.add_node(node_b)
+        colony_graph.add_edge(make_edge(node_a.id, node_b.id))
 
-        colony_graph.remove_node(b.id)
+        colony_graph.remove_node(node_b.id)
 
         assert colony_graph.get_edges() == []
         with pytest.raises(KeyError):
-            colony_graph.get_node(b.id)
-        # a still exists
-        assert colony_graph.get_node(a.id) is a
+            colony_graph.get_node(node_b.id)
+        assert colony_graph.get_node(node_a.id) is node_a
 
     def test_remove_missing_raises(self, colony_graph: ColonyGraph) -> None:
         with pytest.raises(KeyError, match="not found"):
@@ -114,11 +58,11 @@ class TestRemoveNode:
 
 
 class TestGetNodes:
-    def test_sorted_by_level_then_id(self, realistic_graph: ColonyGraph) -> None:
-        nodes = realistic_graph.get_nodes()
-        keys = [n.id for n in nodes]
-        # Level 0 first, then level 1 (sorted by id), then level 2
-        assert keys == [
+    def test_sorted_by_level_then_id(self, canonical_colony) -> None:
+        graph = canonical_colony["graph"]
+        nodes = graph.get_nodes()
+        node_ids = [n.id for n in nodes]
+        assert node_ids == [
             "test-dish-colony-000-000",
             "test-dish-colony-001-001",
             "test-dish-colony-001-002",
@@ -128,9 +72,8 @@ class TestGetNodes:
 
 
 class TestGetEdges:
-    def test_returns_all_edges(self, realistic_graph: ColonyGraph) -> None:
-        edges = realistic_graph.get_edges()
-        assert len(edges) == 5
+    def test_returns_all_edges(self, canonical_colony) -> None:
+        assert len(canonical_colony["graph"].get_edges()) == 5
 
 
 # ── Edge Operations ──────────────────────────────────────────────────────
@@ -138,57 +81,56 @@ class TestGetEdges:
 
 class TestAddEdge:
     def test_creates_directed_dependency(self, colony_graph: ColonyGraph) -> None:
-        a = _node("test-dish", "colony", 0, 0)
-        b = _node("test-dish", "colony", 1, 1)
-        colony_graph.add_node(a)
-        colony_graph.add_node(b)
-        colony_graph.add_edge(_edge(a.id, b.id))
+        node_a = make_node("test-dish", "colony", 0, 0)
+        node_b = make_node("test-dish", "colony", 1, 1)
+        colony_graph.add_node(node_a)
+        colony_graph.add_node(node_b)
+        colony_graph.add_edge(make_edge(node_a.id, node_b.id))
 
-        assert colony_graph.get_dependencies(a.id) == [b.id]
-        assert colony_graph.get_dependents(b.id) == [a.id]
+        assert colony_graph.get_dependencies(node_a.id) == [node_b.id]
+        assert colony_graph.get_dependents(node_b.id) == [node_a.id]
 
     def test_short_cycle_raises(self, colony_graph: ColonyGraph) -> None:
-        a = _node("test-dish", "colony", 0, 0)
-        b = _node("test-dish", "colony", 1, 1)
-        colony_graph.add_node(a)
-        colony_graph.add_node(b)
-        colony_graph.add_edge(_edge(a.id, b.id))
+        node_a = make_node("test-dish", "colony", 0, 0)
+        node_b = make_node("test-dish", "colony", 1, 1)
+        colony_graph.add_node(node_a)
+        colony_graph.add_node(node_b)
+        colony_graph.add_edge(make_edge(node_a.id, node_b.id))
 
         with pytest.raises(ValueError, match="cycle"):
-            colony_graph.add_edge(_edge(b.id, a.id))
+            colony_graph.add_edge(make_edge(node_b.id, node_a.id))
 
     def test_long_cycle_raises(self, colony_graph: ColonyGraph) -> None:
-        a = _node("test-dish", "colony", 0, 0)
-        b = _node("test-dish", "colony", 1, 1)
-        c = _node("test-dish", "colony", 2, 2)
-        colony_graph.add_node(a)
-        colony_graph.add_node(b)
-        colony_graph.add_node(c)
-        colony_graph.add_edge(_edge(a.id, b.id))
-        colony_graph.add_edge(_edge(b.id, c.id))
+        node_a = make_node("test-dish", "colony", 0, 0)
+        node_b = make_node("test-dish", "colony", 1, 1)
+        node_c = make_node("test-dish", "colony", 2, 2)
+        colony_graph.add_node(node_a)
+        colony_graph.add_node(node_b)
+        colony_graph.add_node(node_c)
+        colony_graph.add_edge(make_edge(node_a.id, node_b.id))
+        colony_graph.add_edge(make_edge(node_b.id, node_c.id))
 
         with pytest.raises(ValueError, match="cycle"):
-            colony_graph.add_edge(_edge(c.id, a.id))
+            colony_graph.add_edge(make_edge(node_c.id, node_a.id))
 
     def test_self_loop_raises(self, colony_graph: ColonyGraph) -> None:
-        a = _node("test-dish", "colony", 0, 0)
-        colony_graph.add_node(a)
+        node_a = make_node("test-dish", "colony", 0, 0)
+        colony_graph.add_node(node_a)
 
         with pytest.raises(ValueError, match="cycle"):
-            colony_graph.add_edge(_edge(a.id, a.id))
+            colony_graph.add_edge(make_edge(node_a.id, node_a.id))
 
     def test_valid_acyclic_accepted(self, colony_graph: ColonyGraph) -> None:
-        a = _node("test-dish", "colony", 0, 0)
-        b = _node("test-dish", "colony", 1, 1)
-        c = _node("test-dish", "colony", 2, 2)
-        colony_graph.add_node(a)
-        colony_graph.add_node(b)
-        colony_graph.add_node(c)
+        node_a = make_node("test-dish", "colony", 0, 0)
+        node_b = make_node("test-dish", "colony", 1, 1)
+        node_c = make_node("test-dish", "colony", 2, 2)
+        colony_graph.add_node(node_a)
+        colony_graph.add_node(node_b)
+        colony_graph.add_node(node_c)
 
-        # Diamond: a -> b, a -> c, b -> c  (no cycles)
-        colony_graph.add_edge(_edge(a.id, b.id))
-        colony_graph.add_edge(_edge(a.id, c.id))
-        colony_graph.add_edge(_edge(b.id, c.id))
+        colony_graph.add_edge(make_edge(node_a.id, node_b.id))
+        colony_graph.add_edge(make_edge(node_a.id, node_c.id))
+        colony_graph.add_edge(make_edge(node_b.id, node_c.id))
 
         assert len(colony_graph.get_edges()) == 3
 
@@ -197,27 +139,29 @@ class TestAddEdge:
 
 
 class TestComputeLevels:
-    def test_center_is_level_zero(self, realistic_graph: ColonyGraph) -> None:
-        levels = realistic_graph.compute_levels("test-dish-colony-000-000")
-        assert levels["test-dish-colony-000-000"] == 0
+    def test_center_is_level_zero(self, canonical_colony) -> None:
+        graph = canonical_colony["graph"]
+        levels = graph.compute_levels(canonical_colony["center"].id)
+        assert levels[canonical_colony["center"].id] == 0
 
-    def test_direct_deps_are_level_one(self, realistic_graph: ColonyGraph) -> None:
-        levels = realistic_graph.compute_levels("test-dish-colony-000-000")
-        assert levels["test-dish-colony-001-001"] == 1
-        assert levels["test-dish-colony-001-002"] == 1
+    def test_direct_deps_are_level_one(self, canonical_colony) -> None:
+        graph = canonical_colony["graph"]
+        levels = graph.compute_levels(canonical_colony["center"].id)
+        assert levels[canonical_colony["premise1"].id] == 1
+        assert levels[canonical_colony["premise2"].id] == 1
 
-    def test_transitive_deps_are_level_two(self, realistic_graph: ColonyGraph) -> None:
-        levels = realistic_graph.compute_levels("test-dish-colony-000-000")
-        assert levels["test-dish-colony-002-003"] == 2
-        assert levels["test-dish-colony-002-004"] == 2
+    def test_transitive_deps_are_level_two(self, canonical_colony) -> None:
+        graph = canonical_colony["graph"]
+        levels = graph.compute_levels(canonical_colony["center"].id)
+        assert levels[canonical_colony["cell1"].id] == 2
+        assert levels[canonical_colony["cell2"].id] == 2
 
     def test_three_plus_levels(self, colony_graph: ColonyGraph) -> None:
-        nodes = [_node("test-dish", "colony", i, i) for i in range(4)]
-        for n in nodes:
-            colony_graph.add_node(n)
-        # Chain: 0 -> 1 -> 2 -> 3
-        for i in range(3):
-            colony_graph.add_edge(_edge(nodes[i].id, nodes[i + 1].id))
+        nodes = [make_node("test-dish", "colony", idx, idx) for idx in range(4)]
+        for node in nodes:
+            colony_graph.add_node(node)
+        for idx in range(3):
+            colony_graph.add_edge(make_edge(nodes[idx].id, nodes[idx + 1].id))
 
         levels = colony_graph.compute_levels(nodes[0].id)
         assert levels[nodes[0].id] == 0
@@ -225,38 +169,36 @@ class TestComputeLevels:
         assert levels[nodes[2].id] == 2
         assert levels[nodes[3].id] == 3
 
-    def test_diamond_dependency(self, realistic_graph: ColonyGraph) -> None:
+    def test_diamond_dependency(self, canonical_colony) -> None:
         """sub2 is reachable through both premise1 and premise2.
-
-        BFS should assign level 2 because it is first reached at depth 2
-        regardless of path.
+        BFS should assign level 2 regardless of path.
         """
-        levels = realistic_graph.compute_levels("test-dish-colony-000-000")
-        assert levels["test-dish-colony-002-004"] == 2
+        graph = canonical_colony["graph"]
+        levels = graph.compute_levels(canonical_colony["center"].id)
+        assert levels[canonical_colony["cell2"].id] == 2
 
 
 # ── Cell Nodes ───────────────────────────────────────────────────────────
 
 
 class TestCellNodes:
-    def test_cells_have_no_dependencies(self, realistic_graph: ColonyGraph) -> None:
-        cells = realistic_graph.get_cell_nodes()
+    def test_cells_have_no_dependencies(self, canonical_colony) -> None:
+        cells = canonical_colony["graph"].get_cell_nodes()
         cell_ids = {n.id for n in cells}
         assert cell_ids == {
-            "test-dish-colony-002-003",
-            "test-dish-colony-002-004",
+            canonical_colony["cell1"].id,
+            canonical_colony["cell2"].id,
         }
 
-    def test_non_cells_excluded(self, realistic_graph: ColonyGraph) -> None:
-        cells = realistic_graph.get_cell_nodes()
+    def test_non_cells_excluded(self, canonical_colony) -> None:
+        cells = canonical_colony["graph"].get_cell_nodes()
         cell_ids = {n.id for n in cells}
-        # center, premise1, premise2 all have deps
-        assert "test-dish-colony-000-000" not in cell_ids
-        assert "test-dish-colony-001-001" not in cell_ids
-        assert "test-dish-colony-001-002" not in cell_ids
+        assert canonical_colony["center"].id not in cell_ids
+        assert canonical_colony["premise1"].id not in cell_ids
+        assert canonical_colony["premise2"].id not in cell_ids
 
     def test_center_only_colony(self, colony_graph: ColonyGraph) -> None:
-        center = _node("test-dish", "colony", 0, 0)
+        center = make_node("test-dish", "colony", 0, 0)
         colony_graph.add_node(center)
         cells = colony_graph.get_cell_nodes()
         assert [n.id for n in cells] == [center.id]
@@ -266,44 +208,41 @@ class TestCellNodes:
 
 
 class TestEligibleForValidation:
-    def test_cell_new_is_eligible(self, realistic_graph: ColonyGraph) -> None:
-        statuses = {n.id: NodeStatus.NEW for n in realistic_graph.get_nodes()}
-        eligible = realistic_graph.get_eligible_for_validation(statuses)
+    def test_cell_new_is_eligible(self, canonical_colony) -> None:
+        graph = canonical_colony["graph"]
+        statuses = {n.id: NodeStatus.NEW for n in graph.get_nodes()}
+        eligible = graph.get_eligible_for_validation(statuses)
         eligible_ids = {n.id for n in eligible}
-        # Only the two cell nodes qualify
         assert eligible_ids == {
-            "test-dish-colony-002-003",
-            "test-dish-colony-002-004",
+            canonical_colony["cell1"].id,
+            canonical_colony["cell2"].id,
         }
 
-    def test_all_deps_validated_makes_parent_eligible(
-        self, realistic_graph: ColonyGraph
-    ) -> None:
-        statuses = {n.id: NodeStatus.NEW for n in realistic_graph.get_nodes()}
-        # Validate both sub-premises
-        statuses["test-dish-colony-002-003"] = NodeStatus.VALIDATED
-        statuses["test-dish-colony-002-004"] = NodeStatus.VALIDATED
+    def test_all_deps_validated_makes_parent_eligible(self, canonical_colony) -> None:
+        graph = canonical_colony["graph"]
+        statuses = {n.id: NodeStatus.NEW for n in graph.get_nodes()}
+        statuses[canonical_colony["cell1"].id] = NodeStatus.VALIDATED
+        statuses[canonical_colony["cell2"].id] = NodeStatus.VALIDATED
 
-        eligible = realistic_graph.get_eligible_for_validation(statuses)
+        eligible = graph.get_eligible_for_validation(statuses)
         eligible_ids = {n.id for n in eligible}
-        # premise1 and premise2 should now be eligible
-        assert "test-dish-colony-001-001" in eligible_ids
-        assert "test-dish-colony-001-002" in eligible_ids
+        assert canonical_colony["premise1"].id in eligible_ids
+        assert canonical_colony["premise2"].id in eligible_ids
 
-    def test_unresolved_deps_blocks(self, realistic_graph: ColonyGraph) -> None:
-        statuses = {n.id: NodeStatus.NEW for n in realistic_graph.get_nodes()}
-        # Only validate one sub-premise
-        statuses["test-dish-colony-002-003"] = NodeStatus.VALIDATED
+    def test_unresolved_deps_blocks(self, canonical_colony) -> None:
+        graph = canonical_colony["graph"]
+        statuses = {n.id: NodeStatus.NEW for n in graph.get_nodes()}
+        statuses[canonical_colony["cell1"].id] = NodeStatus.VALIDATED
 
-        eligible = realistic_graph.get_eligible_for_validation(statuses)
+        eligible = graph.get_eligible_for_validation(statuses)
         eligible_ids = {n.id for n in eligible}
-        # premise1 still has sub2 unresolved, premise2 has sub2 unresolved
-        assert "test-dish-colony-001-001" not in eligible_ids
-        assert "test-dish-colony-001-002" not in eligible_ids
+        assert canonical_colony["premise1"].id not in eligible_ids
+        assert canonical_colony["premise2"].id not in eligible_ids
 
-    def test_non_new_excluded(self, realistic_graph: ColonyGraph) -> None:
-        statuses = {n.id: NodeStatus.VALIDATED for n in realistic_graph.get_nodes()}
-        eligible = realistic_graph.get_eligible_for_validation(statuses)
+    def test_non_new_excluded(self, canonical_colony) -> None:
+        graph = canonical_colony["graph"]
+        statuses = {n.id: NodeStatus.VALIDATED for n in graph.get_nodes()}
+        eligible = graph.get_eligible_for_validation(statuses)
         assert eligible == []
 
 
@@ -312,52 +251,49 @@ class TestEligibleForValidation:
 
 class TestSharedPremises:
     def test_matching_claims_returns_pairs(self) -> None:
-        g1 = ColonyGraph(colony_id="dish-c1")
-        g2 = ColonyGraph(colony_id="dish-c2")
+        graph1 = ColonyGraph(colony_id="dish-c1")
+        graph2 = ColonyGraph(colony_id="dish-c2")
 
-        n1 = _node("dish", "c1", 1, 1, "Shared claim")
-        n2 = _node("dish", "c2", 1, 1, "Shared claim")
+        node1 = make_node("dish", "c1", 1, 1, "Shared claim")
+        node2 = make_node("dish", "c2", 1, 1, "Shared claim")
 
-        g1.add_node(n1)
-        g2.add_node(n2)
+        graph1.add_node(node1)
+        graph2.add_node(node2)
 
-        pairs = g1.find_shared_premises(g2)
-        assert pairs == [(n1.id, n2.id)]
+        pairs = graph1.find_shared_premises(graph2)
+        assert pairs == [(node1.id, node2.id)]
 
     def test_no_matches_returns_empty(self) -> None:
-        g1 = ColonyGraph(colony_id="dish-c1")
-        g2 = ColonyGraph(colony_id="dish-c2")
+        graph1 = ColonyGraph(colony_id="dish-c1")
+        graph2 = ColonyGraph(colony_id="dish-c2")
 
-        g1.add_node(_node("dish", "c1", 1, 1, "Alpha"))
-        g2.add_node(_node("dish", "c2", 1, 1, "Beta"))
+        graph1.add_node(make_node("dish", "c1", 1, 1, "Alpha"))
+        graph2.add_node(make_node("dish", "c2", 1, 1, "Beta"))
 
-        assert g1.find_shared_premises(g2) == []
+        assert graph1.find_shared_premises(graph2) == []
 
 
 # ── DAG Validation ───────────────────────────────────────────────────────
 
 
 class TestDAGValidation:
-    def test_valid_dag(self, realistic_graph: ColonyGraph) -> None:
-        assert realistic_graph.validate_dag() is True
+    def test_valid_dag(self, canonical_colony) -> None:
+        assert canonical_colony["graph"].validate_dag() is True
 
     def test_has_cycle_with_edge_detects_would_be_cycle(
         self, colony_graph: ColonyGraph
     ) -> None:
-        a = _node("test-dish", "colony", 0, 0)
-        b = _node("test-dish", "colony", 1, 1)
-        colony_graph.add_node(a)
-        colony_graph.add_node(b)
-        colony_graph.add_edge(_edge(a.id, b.id))
+        node_a = make_node("test-dish", "colony", 0, 0)
+        node_b = make_node("test-dish", "colony", 1, 1)
+        colony_graph.add_node(node_a)
+        colony_graph.add_node(node_b)
+        colony_graph.add_edge(make_edge(node_a.id, node_b.id))
 
-        # b -> a would close a cycle
-        assert colony_graph.has_cycle_with_edge(b.id, a.id) is True
-        # a -> b already exists; adding it as a check is benign but not a cycle
-        # because has_cycle_with_edge only checks reachability, not duplicate edges
-        # The direction c -> a where c is new would not form a cycle:
-        c = _node("test-dish", "colony", 2, 2)
-        colony_graph.add_node(c)
-        assert colony_graph.has_cycle_with_edge(c.id, a.id) is False
+        assert colony_graph.has_cycle_with_edge(node_b.id, node_a.id) is True
+
+        node_c = make_node("test-dish", "colony", 2, 2)
+        colony_graph.add_node(node_c)
+        assert colony_graph.has_cycle_with_edge(node_c.id, node_a.id) is False
 
 
 # ── Serialization / Deserialization ──────────────────────────────────────
@@ -376,73 +312,59 @@ class TestSerialization:
 
     @pytest.fixture
     def graph_with_deps(self) -> ColonyGraph:
-        """Build realistic graph whose nodes carry dependency lists.
+        """Build graph with explicit dependency lists on nodes (needed for roundtrip)."""
+        graph = ColonyGraph(colony_id="test-dish-colony")
 
-        serialize reads the graph; deserialize rebuilds edges from
-        node.dependencies, so the dependency lists must be populated.
-        """
-        g = ColonyGraph(colony_id="test-dish-colony")
-
-        center = _node(
+        center = make_node(
             "test-dish", "colony", 0, 0, "Central thesis",
             dependencies=["test-dish-colony-001-001", "test-dish-colony-001-002"],
         )
-        p1 = _node(
+        premise1 = make_node(
             "test-dish", "colony", 1, 1, "First premise",
             dependencies=["test-dish-colony-002-003", "test-dish-colony-002-004"],
         )
-        p2 = _node(
+        premise2 = make_node(
             "test-dish", "colony", 1, 2, "Second premise",
             dependencies=["test-dish-colony-002-004"],
         )
-        sub1 = _node("test-dish", "colony", 2, 3, "Sub-premise of P1")
-        sub2 = _node("test-dish", "colony", 2, 4, "Shared sub-premise")
+        cell1 = make_node("test-dish", "colony", 2, 3, "Cell premise of P1")
+        cell2 = make_node("test-dish", "colony", 2, 4, "Shared cell premise")
 
-        for n in [center, p1, p2, sub1, sub2]:
-            g.add_node(n)
+        for node in [center, premise1, premise2, cell1, cell2]:
+            graph.add_node(node)
 
-        g.add_edge(_edge(center.id, p1.id))
-        g.add_edge(_edge(center.id, p2.id))
-        g.add_edge(_edge(p1.id, sub1.id))
-        g.add_edge(_edge(p1.id, sub2.id))
-        g.add_edge(_edge(p2.id, sub2.id))
+        graph.add_edge(make_edge(center.id, premise1.id))
+        graph.add_edge(make_edge(center.id, premise2.id))
+        graph.add_edge(make_edge(premise1.id, cell1.id))
+        graph.add_edge(make_edge(premise1.id, cell2.id))
+        graph.add_edge(make_edge(premise2.id, cell2.id))
 
-        return g
+        return graph
 
     def test_creates_expected_structure(
-        self,
-        tmp_path,
-        graph_with_deps: ColonyGraph,
-        colony_model: Colony,
+        self, tmp_path, graph_with_deps, colony_model,
     ) -> None:
         base = tmp_path / "colony"
         serialize_colony(graph_with_deps, colony_model, base)
 
         assert (base / "colony.json").exists()
 
-        # The new layout nests nodes under level dirs; verify all 5 nodes
-        # have the required files by scanning with rglob.
         metadata_files = sorted(base.rglob("metadata.json"))
         assert len(metadata_files) == 5
-        for mf in metadata_files:
-            node_dir = mf.parent
+        for metadata_file in metadata_files:
+            node_dir = metadata_file.parent
             assert (node_dir / "events.jsonl").exists()
             assert (node_dir / "evidence.md").exists()
 
-        # node_paths in colony.json maps every node id to its relative dir
         colony_data = json.loads((base / "colony.json").read_text())
         assert len(colony_data["node_paths"]) == 5
 
     def test_node_gets_metadata_events_evidence(
-        self,
-        tmp_path,
-        graph_with_deps: ColonyGraph,
-        colony_model: Colony,
+        self, tmp_path, graph_with_deps, colony_model,
     ) -> None:
         base = tmp_path / "colony"
         serialize_colony(graph_with_deps, colony_model, base)
 
-        # Resolve the center node's directory via node_paths
         colony_data = json.loads((base / "colony.json").read_text())
         center_rel = colony_data["node_paths"]["test-dish-colony-000-000"]
         center_dir = base / center_rel
@@ -458,10 +380,7 @@ class TestSerialization:
         assert "Central thesis" in evidence
 
     def test_deserialize_reconstructs_graph(
-        self,
-        tmp_path,
-        graph_with_deps: ColonyGraph,
-        colony_model: Colony,
+        self, tmp_path, graph_with_deps, colony_model,
     ) -> None:
         base = tmp_path / "colony"
         serialize_colony(graph_with_deps, colony_model, base)
@@ -476,10 +395,7 @@ class TestSerialization:
         assert loaded_ids == original_ids
 
     def test_roundtrip_preserves_edges(
-        self,
-        tmp_path,
-        graph_with_deps: ColonyGraph,
-        colony_model: Colony,
+        self, tmp_path, graph_with_deps, colony_model,
     ) -> None:
         base = tmp_path / "colony"
         serialize_colony(graph_with_deps, colony_model, base)

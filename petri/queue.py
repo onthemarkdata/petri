@@ -29,10 +29,11 @@ from petri.models import QueueEntry, QueueState
 # ── Valid State Transitions ─────────────────────────────────────────────
 
 VALID_TRANSITIONS: dict[str, list[str]] = {
-    "queued": ["phase1_active"],
-    "phase1_active": ["phase2_active", "stalled"],
-    "phase2_active": ["mediating", "stalled"],
-    "mediating": ["converged", "stalled", "phase1_active"],  # phase1_active = iterate
+    "queued": ["socratic_active"],
+    "socratic_active": ["research_active", "stalled"],
+    "research_active": ["critique_active", "stalled"],
+    "critique_active": ["mediating", "stalled"],
+    "mediating": ["converged", "stalled", "research_active"],  # research_active = iterate
     "converged": ["red_team_active", "deferred_open", "deferred_closed"],
     "stalled": ["needs_human", "queued"],
     "needs_human": ["queued"],
@@ -48,8 +49,9 @@ VALID_STATES: list[str] = list(VALID_TRANSITIONS.keys())
 
 _RESUMABLE_STATES: list[str] = [
     "queued",
-    "phase1_active",
-    "phase2_active",
+    "socratic_active",
+    "research_active",
+    "critique_active",
     "mediating",
 ]
 
@@ -250,8 +252,8 @@ def new_cycle(queue_path: Path, node_id: str) -> None:
 def get_next(queue_path: Path) -> dict | None:
     """Get the next node to process.
 
-    Returns the first entry in a resumable state (queued, phase1_active,
-    phase2_active, mediating).  No lock needed (read-only).
+    Returns the first entry in a resumable state (queued, socratic_active,
+    research_active, critique_active, mediating).  No lock needed (read-only).
     """
     queue = load_queue(queue_path)
 

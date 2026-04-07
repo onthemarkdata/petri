@@ -37,11 +37,11 @@ def generate_clarifying_questions(
         raw = provider.generate_clarifying_questions(claim, max_questions)
         return [
             ClarifyingQuestion(
-                question=q["question"],
-                options=q.get("options", []),
-                answer=q.get("answer"),
+                question=question["question"],
+                options=question.get("options", []),
+                answer=question.get("answer"),
             )
-            for q in raw[:max_questions]
+            for question in raw[:max_questions]
         ]
 
     return _default_questions()[:max_questions]
@@ -122,11 +122,11 @@ def generate_colony_name(claim: str) -> str:
         "about", "up", "out", "off", "over", "under", "again",
         "further", "then", "once",
     }
-    significant = [w for w in words if w not in stop_words and w]
+    significant = [word for word in words if word not in stop_words and word]
 
     # Fall back to all words if filtering removed everything
     if not significant:
-        significant = [w for w in words if w]
+        significant = [word for word in words if word]
 
     # Still empty -- use a generic fallback
     if not significant:
@@ -198,12 +198,13 @@ def _default_decompose(
     dish_id: str,
     colony_name: str,
 ) -> DecompositionResult:
-    """Create a simple default decomposition without an LLM.
+    """Create a first-principles decomposition without an LLM.
 
-    Structure:
+    Structure (first principles approach):
       Level 0: center (the original claim)
-      Level 1: 3 generic premises (evidence, feasibility, context)
-      Level 2: 2 sub-premises under the evidence premise
+      Level 1: core assumptions — the key definitions, causal mechanisms,
+               and logical premises that must hold for the claim to be true
+      Level 2: fundamental facts — independently verifiable bedrock truths
     """
     colony_id = f"{dish_id}-{colony_name}"
 
@@ -216,74 +217,74 @@ def _default_decompose(
         level=0,
     )
 
-    # Level 1 -- three premises
-    evidence_key = build_node_key(dish_id, colony_name, 1, 1)
-    feasibility_key = build_node_key(dish_id, colony_name, 1, 2)
-    context_key = build_node_key(dish_id, colony_name, 1, 3)
+    # Level 1 -- core assumptions (first principles)
+    definition_key = build_node_key(dish_id, colony_name, 1, 1)
+    mechanism_key = build_node_key(dish_id, colony_name, 1, 2)
+    boundary_key = build_node_key(dish_id, colony_name, 1, 3)
 
-    evidence_node = Node(
-        id=evidence_key,
+    definition_node = Node(
+        id=definition_key,
         colony_id=colony_id,
-        claim_text=f"Evidence supports that: {claim}",
+        claim_text=f"The key terms and definitions in this claim are well-defined and agreed upon: {claim}",
         level=1,
     )
-    feasibility_node = Node(
-        id=feasibility_key,
+    mechanism_node = Node(
+        id=mechanism_key,
         colony_id=colony_id,
-        claim_text=f"It is practically feasible: {claim}",
+        claim_text=f"The causal mechanism or logical reasoning underlying this claim is sound: {claim}",
         level=1,
     )
-    context_node = Node(
-        id=context_key,
+    boundary_node = Node(
+        id=boundary_key,
         colony_id=colony_id,
-        claim_text=f"The context and conditions are favorable: {claim}",
+        claim_text=f"The scope, boundary conditions, and constraints of this claim are valid: {claim}",
         level=1,
     )
 
-    # Level 2 -- two sub-premises under evidence
-    sub1_key = build_node_key(dish_id, colony_name, 2, 1)
-    sub2_key = build_node_key(dish_id, colony_name, 2, 2)
+    # Level 2 -- fundamental facts under mechanism
+    empirical_key = build_node_key(dish_id, colony_name, 2, 1)
+    consistency_key = build_node_key(dish_id, colony_name, 2, 2)
 
-    sub1 = Node(
-        id=sub1_key,
+    empirical_node = Node(
+        id=empirical_key,
         colony_id=colony_id,
-        claim_text=f"Sufficient data exists to evaluate: {claim}",
+        claim_text=f"Empirical observations or measurements support the mechanism: {claim}",
         level=2,
     )
-    sub2 = Node(
-        id=sub2_key,
+    consistency_node = Node(
+        id=consistency_key,
         colony_id=colony_id,
-        claim_text=f"Data sources are current and reliable for: {claim}",
+        claim_text=f"The claim is logically consistent with established knowledge and does not contradict known facts: {claim}",
         level=2,
     )
 
     # Wire up dependencies: parent depends on children (bottom-up validation)
-    center.dependencies = [evidence_key, feasibility_key, context_key]
-    evidence_node.dependencies = [sub1_key, sub2_key]
+    center.dependencies = [definition_key, mechanism_key, boundary_key]
+    mechanism_node.dependencies = [empirical_key, consistency_key]
 
     # Wire up dependents (reverse of dependencies)
-    evidence_node.dependents = [center_key]
-    feasibility_node.dependents = [center_key]
-    context_node.dependents = [center_key]
-    sub1.dependents = [evidence_key]
-    sub2.dependents = [evidence_key]
+    definition_node.dependents = [center_key]
+    mechanism_node.dependents = [center_key]
+    boundary_node.dependents = [center_key]
+    empirical_node.dependents = [mechanism_key]
+    consistency_node.dependents = [mechanism_key]
 
     # Edges -- from_node depends on to_node (parent depends on child)
     edges = [
-        Edge(from_node=center_key, to_node=evidence_key),
-        Edge(from_node=center_key, to_node=feasibility_key),
-        Edge(from_node=center_key, to_node=context_key),
-        Edge(from_node=evidence_key, to_node=sub1_key),
-        Edge(from_node=evidence_key, to_node=sub2_key),
+        Edge(from_node=center_key, to_node=definition_key),
+        Edge(from_node=center_key, to_node=mechanism_key),
+        Edge(from_node=center_key, to_node=boundary_key),
+        Edge(from_node=mechanism_key, to_node=empirical_key),
+        Edge(from_node=mechanism_key, to_node=consistency_key),
     ]
 
     nodes = [
         center,
-        evidence_node,
-        feasibility_node,
-        context_node,
-        sub1,
-        sub2,
+        definition_node,
+        mechanism_node,
+        boundary_node,
+        empirical_node,
+        consistency_node,
     ]
 
     return DecompositionResult(
@@ -301,71 +302,141 @@ def _provider_decompose(
     colony_name: str,
     provider: InferenceProvider,
 ) -> DecompositionResult:
-    """Decompose using an LLM reasoning provider.
+    """Decompose using iterative Five Whys via an LLM provider.
 
-    Calls provider.decompose_claim and converts the raw dict response
-    into typed Node/Edge objects with proper composite keys.
+    1. Ask the provider for Level 1 premises (direct assumptions).
+    2. For each non-atomic premise, ask "Why is this true?" to generate
+       the next level down.
+    3. Repeat until premises are atomic or max_depth is reached.
+
+    This produces a genuine first-principles DAG where leaf nodes are
+    independently verifiable bedrock truths.
     """
-    clarification_dicts = [
-        {
-            "question": q.question,
-            "answer": q.answer or "",
-            "options": q.options,
-        }
-        for q in clarifications
-    ]
+    from petri.config import get_max_decomposition_depth
 
-    raw = provider.decompose_claim(claim, clarification_dicts)
+    max_depth = get_max_decomposition_depth()
     colony_id = f"{dish_id}-{colony_name}"
 
-    nodes: list[Node] = []
-    edges: list[Edge] = []
+    # Step 1: Get initial decomposition (Level 0 + Level 1)
+    clarification_dicts = [
+        {
+            "question": clarification.question,
+            "answer": clarification.answer or "",
+            "options": clarification.options,
+        }
+        for clarification in clarifications
+    ]
+    raw = provider.decompose_claim(claim, clarification_dicts)
 
-    # Parse nodes from provider response
+    # Build Level 0 center node
+    center_key = build_node_key(dish_id, colony_name, 0, 0)
+    center = Node(
+        id=center_key,
+        colony_id=colony_id,
+        claim_text=claim,
+        level=0,
+    )
+
+    all_nodes: list[Node] = [center]
+    all_edges: list[Edge] = []
+
+    # Parse Level 1 nodes from initial decomposition
     raw_nodes = raw.get("nodes", [])
+    level_one_nodes: list[Node] = []
+    seq_counter = 1
     for raw_node in raw_nodes:
-        level = raw_node.get("level", 0)
-        seq = raw_node.get("seq", 0)
-        node_key = build_node_key(dish_id, colony_name, level, seq)
-        nodes.append(
-            Node(
-                id=node_key,
-                colony_id=colony_id,
-                claim_text=raw_node.get("claim_text", ""),
-                level=level,
-                dependencies=[
-                    build_node_key(dish_id, colony_name, d["level"], d["seq"])
-                    for d in raw_node.get("dependencies", [])
-                ],
-            )
+        raw_level = raw_node.get("level", 1)
+        if raw_level == 0:
+            continue  # Skip center — we already have it
+        claim_text = raw_node.get("claim_text", "")
+        if not claim_text:
+            continue
+        node_key = build_node_key(dish_id, colony_name, 1, seq_counter)
+        node = Node(
+            id=node_key,
+            colony_id=colony_id,
+            claim_text=claim_text,
+            level=1,
+        )
+        level_one_nodes.append(node)
+        all_nodes.append(node)
+        all_edges.append(Edge(from_node=center_key, to_node=node_key))
+        seq_counter += 1
+
+    # If no Level 1 nodes were produced, fall back to default
+    if not level_one_nodes:
+        return _default_decompose(claim, dish_id, colony_name)
+
+    # Wire center dependencies
+    center.dependencies = [node.id for node in level_one_nodes]
+    for level_one_node in level_one_nodes:
+        level_one_node.dependents = [center_key]
+
+    # Step 2: Iterative Five Whys — drill deeper on non-atomic premises
+    # nodes_to_expand holds (node, current_level) pairs
+    nodes_to_expand: list[tuple[Node, int]] = [
+        (node, 1) for node in level_one_nodes
+    ]
+
+    while nodes_to_expand:
+        parent_node, current_level = nodes_to_expand.pop(0)
+        next_level = current_level + 1
+
+        # Stop if we've reached max depth
+        if next_level > max_depth:
+            continue
+
+        # Ask "Why is this true?" — if atomic, skip
+        if not hasattr(provider, "decompose_why"):
+            continue
+
+        sub_premises = provider.decompose_why(
+            parent_node.claim_text,
+            parent_level=current_level,
+            parent_seq=0,
         )
 
-    # Parse edges from provider response
-    raw_edges = raw.get("edges", [])
-    for raw_edge in raw_edges:
-        from_info = raw_edge.get("from", {})
-        to_info = raw_edge.get("to", {})
-        edges.append(
-            Edge(
-                from_node=build_node_key(
-                    dish_id,
-                    colony_name,
-                    from_info.get("level", 0),
-                    from_info.get("seq", 0),
-                ),
-                to_node=build_node_key(
-                    dish_id,
-                    colony_name,
-                    to_info.get("level", 0),
-                    to_info.get("seq", 0),
-                ),
-                edge_type=raw_edge.get("edge_type", "intra_colony"),
+        if not sub_premises:
+            # Premise is atomic — no further decomposition needed
+            continue
+
+        child_keys: list[str] = []
+        child_seq = 1
+        for sub_premise in sub_premises:
+            if not isinstance(sub_premise, dict):
+                continue
+            sub_claim = sub_premise.get("claim_text", "")
+            if not sub_claim:
+                continue
+
+            # Find the next available seq at this level
+            existing_at_level = [
+                node for node in all_nodes if node.level == next_level
+            ]
+            child_seq = len(existing_at_level) + 1
+
+            child_key = build_node_key(dish_id, colony_name, next_level, child_seq)
+            child_node = Node(
+                id=child_key,
+                colony_id=colony_id,
+                claim_text=sub_claim,
+                level=next_level,
+                dependents=[parent_node.id],
             )
-        )
+            all_nodes.append(child_node)
+            all_edges.append(Edge(from_node=parent_node.id, to_node=child_key))
+            child_keys.append(child_key)
+
+            # If not atomic, queue for further decomposition
+            is_atomic = sub_premise.get("is_atomic", False)
+            if not is_atomic:
+                nodes_to_expand.append((child_node, next_level))
+
+        parent_node.dependencies = child_keys
 
     return DecompositionResult(
-        nodes=nodes,
-        edges=edges,
+        nodes=all_nodes,
+        edges=all_edges,
         colony_name=colony_name,
         center_claim=claim,
     )

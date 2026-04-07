@@ -7,31 +7,12 @@ resolution, auto-fix application, and loop termination.
 from __future__ import annotations
 
 import json
-import shutil
-from pathlib import Path
 
 import pytest
 
 from petri.scanner import ScanIssue, auto_fix, scan, scan_loop
 
-
-@pytest.fixture
-def petri_env(tmp_path):
-    """Set up a .petri/ directory with real defaults."""
-    petri_dir = tmp_path / ".petri"
-    petri_dir.mkdir()
-    (petri_dir / "petri-dishes").mkdir()
-
-    # Copy real defaults (includes consolidated petri.yaml)
-    src_defaults = Path(__file__).parent.parent.parent / "petri" / "defaults"
-    dst_defaults = petri_dir / "defaults"
-    shutil.copytree(src_defaults, dst_defaults)
-
-    # Queue
-    queue = {"version": 1, "last_updated": None, "entries": {}}
-    (petri_dir / "queue.json").write_text(json.dumps(queue, indent=2) + "\n")
-
-    return tmp_path
+from tests.conftest import CANONICAL_NODE_IDS
 
 
 class TestScanBaseline:
@@ -137,9 +118,9 @@ class TestQueueSchema:
             "version": 1,
             "last_updated": None,
             "entries": {
-                "test-node-001-001": {
+                CANONICAL_NODE_IDS["premise1"]: {
                     "queue_state": "INVALID_STATE",
-                    "node_id": "test-node-001-001",
+                    "node_id": CANONICAL_NODE_IDS["premise1"],
                 }
             },
         }

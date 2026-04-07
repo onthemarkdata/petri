@@ -19,6 +19,11 @@ from petri.event_log import (
     rollup_to_combined,
 )
 
+from tests.conftest import CANONICAL_NODE_IDS, make_event
+
+PREMISE1 = CANONICAL_NODE_IDS["premise1"]
+PREMISE2 = CANONICAL_NODE_IDS["premise2"]
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -28,30 +33,6 @@ def _write_event_line(path: Path, event: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a") as f:
         f.write(json.dumps(event, separators=(",", ":")) + "\n")
-
-
-def _make_event(
-    *,
-    node_id: str = "dish-col-001-001",
-    event_id: str = "dish-col-001-001-aabbccdd",
-    event_type: str = "verdict_issued",
-    agent: str = "analyst",
-    iteration: int = 1,
-    timestamp: str = "2026-01-15T10:00:00+00:00",
-    data: dict | None = None,
-) -> dict:
-    """Build a raw event dict (as it would appear serialised in JSONL)."""
-    if data is None:
-        data = {"verdict": "VALIDATED", "summary": "Looks good"}
-    return {
-        "id": event_id,
-        "node_id": node_id,
-        "timestamp": timestamp,
-        "type": event_type,
-        "agent": agent,
-        "iteration": iteration,
-        "data": data,
-    }
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -67,63 +48,63 @@ def events_path(tmp_path: Path) -> Path:
 def populated_events_path(events_path: Path) -> Path:
     """Create an events.jsonl with several varied events already written."""
     events = [
-        _make_event(
-            event_id="dish-col-001-001-00000001",
-            node_id="node-a",
+        make_event(
+            event_id=f"{PREMISE1}-00000001",
+            node_id=PREMISE1,
             event_type="search_executed",
             agent="searcher",
             iteration=1,
             timestamp="2026-01-10T08:00:00+00:00",
             data={"query": "python best practices", "sources_found": 5},
         ),
-        _make_event(
-            event_id="dish-col-001-001-00000002",
-            node_id="node-a",
+        make_event(
+            event_id=f"{PREMISE1}-00000002",
+            node_id=PREMISE1,
             event_type="source_reviewed",
             agent="reviewer",
             iteration=1,
             timestamp="2026-01-10T09:00:00+00:00",
             data={"url": "https://example.com/a", "title": "Source A"},
         ),
-        _make_event(
-            event_id="dish-col-001-001-00000003",
-            node_id="node-b",
+        make_event(
+            event_id=f"{PREMISE1}-00000003",
+            node_id=PREMISE2,
             event_type="verdict_issued",
             agent="analyst",
             iteration=1,
             timestamp="2026-01-11T10:00:00+00:00",
             data={"verdict": "VALIDATED", "summary": "All clear"},
         ),
-        _make_event(
-            event_id="dish-col-001-001-00000004",
-            node_id="node-a",
+        make_event(
+            event_id=f"{PREMISE1}-00000004",
+            node_id=PREMISE1,
             event_type="verdict_issued",
             agent="analyst",
             iteration=2,
             timestamp="2026-01-12T11:00:00+00:00",
             data={"verdict": "NEEDS_EXPERIMENT", "summary": "Needs more data"},
         ),
-        _make_event(
-            event_id="dish-col-001-001-00000005",
-            node_id="node-a",
+        make_event(
+            event_id=f"{PREMISE1}-00000005",
+            node_id=PREMISE1,
             event_type="source_reviewed",
             agent="reviewer",
             iteration=2,
             timestamp="2026-01-12T12:00:00+00:00",
             data={"url": "https://example.com/a", "title": "Source A again"},
         ),
-        _make_event(
-            event_id="dish-col-001-001-00000006",
-            node_id="node-a",
+        make_event(
+            event_id=f"{PREMISE1}-00000006",
+            node_id=PREMISE1,
             event_type="source_reviewed",
             agent="reviewer",
             iteration=2,
             timestamp="2026-01-12T13:00:00+00:00",
             data={"url": "https://example.com/b", "title": "Source B"},
         ),
-        _make_event(
-            event_id="dish-col-001-001-00000007",
-            node_id="node-b",
+        make_event(
+            event_id=f"{PREMISE1}-00000007",
+            node_id=PREMISE2,
             event_type="search_executed",
             agent="searcher",
             iteration=2,
@@ -145,13 +126,13 @@ class TestAppendEvent:
     def test_appends_valid_event_returns_event_model(self, events_path: Path):
         result = append_event(
             events_path,
-            node_id="dish-col-001-001",
+            node_id=PREMISE1,
             event_type="verdict_issued",
             agent="analyst",
             iteration=1,
             data={"verdict": "VALIDATED", "summary": "Confirmed"},
         )
-        assert result.node_id == "dish-col-001-001"
+        assert result.node_id == PREMISE1
         assert result.type.value == "verdict_issued"
         assert result.agent == "analyst"
         assert result.iteration == 1
@@ -161,20 +142,20 @@ class TestAppendEvent:
     def test_event_id_format(self, events_path: Path):
         result = append_event(
             events_path,
-            node_id="dish-col-001-001",
+            node_id=PREMISE1,
             event_type="search_executed",
             agent="searcher",
             iteration=0,
             data={"query": "test", "sources_found": 1},
         )
         # ID should be {node_id}-{8hex}
-        pattern = r"^dish-col-001-001-[0-9a-f]{8}$"
+        pattern = rf"^{PREMISE1}-[0-9a-f]{{8}}$"
         assert re.match(pattern, result.id), f"ID {result.id!r} doesn't match expected format"
 
     def test_timestamp_is_utc_iso8601(self, events_path: Path):
         result = append_event(
             events_path,
-            node_id="dish-col-001-001",
+            node_id=PREMISE1,
             event_type="search_executed",
             agent="searcher",
             iteration=0,
@@ -276,8 +257,8 @@ class TestLoadEvents:
     def test_loads_valid_jsonl(self, populated_events_path: Path):
         events = load_events(populated_events_path)
         assert len(events) == 7
-        assert events[0]["id"] == "dish-col-001-001-00000001"
-        assert events[-1]["id"] == "dish-col-001-001-00000007"
+        assert events[0]["id"] == f"{PREMISE1}-00000001"
+        assert events[-1]["id"] == f"{PREMISE1}-00000007"
 
     def test_empty_file_returns_empty_list(self, events_path: Path):
         events_path.parent.mkdir(parents=True, exist_ok=True)
@@ -298,7 +279,7 @@ class TestLoadEvents:
         assert result == []
 
     def test_mix_of_valid_and_malformed(self, events_path: Path):
-        valid_event = _make_event()
+        valid_event = make_event()
         events_path.parent.mkdir(parents=True, exist_ok=True)
         content = (
             json.dumps(valid_event, separators=(",", ":")) + "\n"
@@ -318,9 +299,9 @@ class TestQueryEvents:
     """Tests for query_events."""
 
     def test_filter_by_node_id(self, populated_events_path: Path):
-        result = query_events(populated_events_path, node_id="node-a")
+        result = query_events(populated_events_path, node_id=PREMISE1)
         assert len(result) == 5
-        assert all(e["node_id"] == "node-a" for e in result)
+        assert all(e["node_id"] == PREMISE1 for e in result)
 
     def test_filter_by_iteration(self, populated_events_path: Path):
         result = query_events(populated_events_path, iteration=2)
@@ -348,13 +329,13 @@ class TestQueryEvents:
     def test_multiple_filters_combined_and_logic(self, populated_events_path: Path):
         result = query_events(
             populated_events_path,
-            node_id="node-a",
+            node_id=PREMISE1,
             iteration=2,
             event_type="source_reviewed",
         )
         assert len(result) == 2
         for e in result:
-            assert e["node_id"] == "node-a"
+            assert e["node_id"] == PREMISE1
             assert e["iteration"] == 2
             assert e["type"] == "source_reviewed"
 
@@ -379,16 +360,16 @@ class TestGetVerdicts:
         verdicts = get_verdicts(populated_events_path)
         assert len(verdicts) == 2
         v1 = verdicts[0]
-        assert v1["node_id"] == "node-b"
-        assert v1["verdict"] == "VALIDATED"
-        assert v1["summary"] == "All clear"
-        assert v1["agent"] == "analyst"
-        assert v1["iteration"] == 1
+        assert v1.node_id == PREMISE2
+        assert v1.verdict == "VALIDATED"
+        assert v1.summary == "All clear"
+        assert v1.agent == "analyst"
+        assert v1.iteration == 1
 
     def test_filter_by_iteration(self, populated_events_path: Path):
         verdicts = get_verdicts(populated_events_path, iteration=2)
         assert len(verdicts) == 1
-        assert verdicts[0]["verdict"] == "NEEDS_EXPERIMENT"
+        assert verdicts[0].verdict == "NEEDS_EXPERIMENT"
 
     def test_filter_by_agent(self, populated_events_path: Path):
         verdicts = get_verdicts(populated_events_path, agent="analyst")
@@ -398,7 +379,7 @@ class TestGetVerdicts:
         events_path.parent.mkdir(parents=True, exist_ok=True)
         _write_event_line(
             events_path,
-            _make_event(
+            make_event(
                 event_type="search_executed",
                 data={"query": "test", "sources_found": 0},
             ),
@@ -459,11 +440,11 @@ class TestRollupToCombined:
         alpha_node1.mkdir(parents=True)
         _write_event_line(
             alpha_node1 / "events.jsonl",
-            _make_event(event_id="a1", node_id="alpha-001"),
+            make_event(event_id="a1", node_id="alpha-001"),
         )
         _write_event_line(
             alpha_node1 / "events.jsonl",
-            _make_event(event_id="a2", node_id="alpha-001"),
+            make_event(event_id="a2", node_id="alpha-001"),
         )
 
         # Colony alpha, node 2
@@ -471,7 +452,7 @@ class TestRollupToCombined:
         alpha_node2.mkdir(parents=True)
         _write_event_line(
             alpha_node2 / "events.jsonl",
-            _make_event(event_id="a3", node_id="alpha-002"),
+            make_event(event_id="a3", node_id="alpha-002"),
         )
 
         # Colony beta, node 1
@@ -479,7 +460,7 @@ class TestRollupToCombined:
         beta_node1.mkdir(parents=True)
         _write_event_line(
             beta_node1 / "events.jsonl",
-            _make_event(event_id="b1", node_id="beta-001"),
+            make_event(event_id="b1", node_id="beta-001"),
         )
 
         combined_path = rollup_to_combined(tmp_path)
@@ -499,7 +480,7 @@ class TestRollupToCombined:
         colony_dir.mkdir(parents=True)
 
         source_events = [
-            _make_event(event_id=f"evt-{i}", node_id="only-001", iteration=i)
+            make_event(event_id=f"evt-{i}", node_id="only-001", iteration=i)
             for i in range(10)
         ]
         for evt in source_events:
@@ -518,7 +499,7 @@ class TestRollupToCombined:
         node_with.mkdir(parents=True)
         _write_event_line(
             node_with / "events.jsonl",
-            _make_event(event_id="x1"),
+            make_event(event_id="x1"),
         )
 
         # Node with empty JSONL
