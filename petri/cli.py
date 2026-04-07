@@ -14,6 +14,8 @@ from typing import Optional
 
 import typer
 
+from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+
 app = typer.Typer(
     name="petri",
     help="Petri -- colony-based research orchestration framework",
@@ -128,9 +130,9 @@ def init(
     dish_name = name or target.name
 
     # ── Interactive Setup Wizard ─────────────────────────────────────
-    model_name = "gemma4:4b"
-    max_concurrent = 4
-    max_iterations = 3
+    model_name = LLM_INFERENCE_MODEL
+    max_concurrent = MAX_CONCURRENT
+    max_iterations = MAX_ITERATIONS
     interactive = not no_questions
 
     if interactive:
@@ -161,8 +163,8 @@ def init(
             "Inference model:",
             choices=[
                 questionary.Choice(
-                    "gemma4:4b  (local via Ollama — free, no API key)",
-                    value="gemma4:4b",
+                    f"{LLM_INFERENCE_MODEL}  (local via Ollama — free, no API key)",
+                    value=LLM_INFERENCE_MODEL,
                 ),
                 questionary.Choice(
                     "claude-sonnet-4-6  (cloud via Claude Code — fast, cost-effective)",
@@ -185,7 +187,7 @@ def init(
         if model_choice == "_custom":
             model_name = questionary.text(
                 "Model name (as recognized by Claude Code):",
-                default="gemma4:4b",
+                default=LLM_INFERENCE_MODEL,
             ).ask()
             if model_name is None:
                 typer.echo("Cancelled.")
@@ -196,7 +198,7 @@ def init(
         # Max concurrent agents
         concurrent_input = questionary.text(
             "Max concurrent agents:",
-            default="4",
+            default=str(MAX_CONCURRENT),
         ).ask()
         if concurrent_input is None:
             typer.echo("Cancelled.")
@@ -204,12 +206,12 @@ def init(
         try:
             max_concurrent = int(concurrent_input)
         except ValueError:
-            max_concurrent = 4
+            max_concurrent = MAX_CONCURRENT
 
         # Max iterations per convergence cycle
         iterations_input = questionary.text(
             "Max iterations per convergence cycle:",
-            default="3",
+            default=str(MAX_ITERATIONS),
         ).ask()
         if iterations_input is None:
             typer.echo("Cancelled.")
@@ -217,7 +219,7 @@ def init(
         try:
             max_iterations = int(iterations_input)
         except ValueError:
-            max_iterations = 3
+            max_iterations = MAX_ITERATIONS
 
         typer.echo("")
 
@@ -836,7 +838,7 @@ def grow(
     ),
     all_nodes: bool = typer.Option(False, "--all", help="Grow all eligible"),
     max_concurrent: int = typer.Option(
-        4, "--max-concurrent", help="Max parallel nodes"
+        MAX_CONCURRENT, "--max-concurrent", help="Max parallel nodes"
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would process"

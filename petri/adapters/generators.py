@@ -66,10 +66,14 @@ def generate_data_model_rule(
 
 def generate_feedback_loop_rule(
     agent_roles: dict[str, AgentRole],
-    max_iterations: int = 3,
+    max_iterations: int | None = None,
 ) -> str:
     """Generate the feedback-loop rule file content."""
+    from petri.config import MAX_ITERATIONS
     tmpl = _load_template("rule_feedback_loop.txt")
+
+    if max_iterations is None:
+        max_iterations = MAX_ITERATIONS
 
     blocking_lines = []
     for name, role in sorted(agent_roles.items()):
@@ -264,7 +268,8 @@ def generate_skill(name: str, petri_dir: str, config: dict | None = None) -> str
             lines.append(f"- `{state}` → {targets_str}")
         subs["state_transitions"] = "\n".join(lines)
     elif name == "convergence_check":
-        subs["max_iterations"] = str(config.get("max_iterations", 3))
+        from petri.config import MAX_ITERATIONS
+        subs["max_iterations"] = str(config.get("max_iterations", MAX_ITERATIONS))
 
     return tmpl.safe_substitute(**subs)
 
@@ -367,11 +372,12 @@ def generate_petri_yaml(config: dict) -> str:
     lines.append("model:")
 
     model = config.get("model", {})
-    lines.append(f"  name: {model.get('name', 'gemma-3-4b-it')}")
+    from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+    lines.append(f"  name: {model.get('name', LLM_INFERENCE_MODEL)}")
     lines.append(f"  provider: {model.get('provider', 'local')}")
 
     lines.append(f"harness: {config.get('harness', 'claude-code')}")
-    lines.append(f"max_iterations: {config.get('max_iterations', 3)}")
-    lines.append(f"max_concurrent: {config.get('max_concurrent', 4)}")
+    lines.append(f"max_iterations: {config.get('max_iterations', MAX_ITERATIONS)}")
+    lines.append(f"max_concurrent: {config.get('max_concurrent', MAX_CONCURRENT)}")
 
     return "\n".join(lines) + "\n"

@@ -9,8 +9,8 @@ Petri — a colony-based research orchestration framework that decomposes claims
 ## Build & Install
 
 ```bash
-# Prerequisite: Ollama with default model
-ollama pull gemma3:4b-it
+# Prerequisite: Ollama with the default model from petri/defaults/petri.yaml
+ollama pull gemma4:4b
 
 # Install (everything included — no extras needed)
 uv pip install -e "."

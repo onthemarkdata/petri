@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from petri.config import MAX_ITERATIONS
 from petri.models import AgentRole, ConvergenceCheckResult, Debate, ShortCircuitCondition, Verdict
 
 # ── Defaults ──────────────────────────────────────────────────────────────
@@ -200,7 +201,7 @@ def evaluate_short_circuits(
 def compute_circuit_breaker(
     iteration: int,
     cycle_start_iteration: int,
-    max_iterations: int = 3,
+    max_iterations: int = MAX_ITERATIONS,
 ) -> bool:
     """Return ``True`` if the circuit breaker should fire.
 

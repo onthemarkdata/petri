@@ -2,6 +2,7 @@
 
 Single source of truth — loads petri.yaml once, provides typed accessors.
 All other modules import from here instead of hardcoding values.
+If the config file is missing or malformed, Petri refuses to run.
 """
 
 from __future__ import annotations
@@ -18,33 +19,62 @@ _DEFAULTS_PATH = Path(__file__).parent / "defaults" / "petri.yaml"
 def load_config(config_path: Path | None = None) -> dict:
     """Load and cache the full petri.yaml config."""
     path = config_path if config_path and config_path.exists() else _DEFAULTS_PATH
-    return yaml.safe_load(path.read_text()) or {}
+    if not path.exists():
+        raise FileNotFoundError(f"Petri config not found: {path}")
+    cfg = yaml.safe_load(path.read_text())
+    if not cfg or not isinstance(cfg, dict):
+        raise ValueError(f"Petri config is empty or malformed: {path}")
+    return cfg
 
 
 def get_model_name(config: dict | None = None) -> str:
     cfg = config or load_config()
-    model = cfg.get("model", {})
+    model = cfg.get("model")
+    if model is None:
+        raise KeyError("Missing 'model' in petri.yaml")
     if isinstance(model, dict):
-        return model.get("name", "")
-    return str(model) if model else ""
+        name = model.get("name")
+        if not name:
+            raise KeyError("Missing 'model.name' in petri.yaml")
+        return name
+    if not model:
+        raise KeyError("Empty 'model' in petri.yaml")
+    return str(model)
 
 
 def get_max_iterations(config: dict | None = None) -> int:
-    return (config or load_config()).get("max_iterations", 3)
+    cfg = config or load_config()
+    value = cfg.get("max_iterations")
+    if value is None:
+        raise KeyError("Missing 'max_iterations' in petri.yaml")
+    return int(value)
 
 
 def get_max_concurrent(config: dict | None = None) -> int:
-    return (config or load_config()).get("max_concurrent", 4)
+    cfg = config or load_config()
+    value = cfg.get("max_concurrent")
+    if value is None:
+        raise KeyError("Missing 'max_concurrent' in petri.yaml")
+    return int(value)
 
 
 def get_max_decomposition_depth(config: dict | None = None) -> int:
-    return (config or load_config()).get("max_decomposition_depth", 3)
+    cfg = config or load_config()
+    value = cfg.get("max_decomposition_depth")
+    if value is None:
+        raise KeyError("Missing 'max_decomposition_depth' in petri.yaml")
+    return int(value)
 
 
 def get_minimum_terminal_level(config: dict | None = None) -> int:
     cfg = config or load_config()
-    hierarchy = cfg.get("source_hierarchy", {})
-    return hierarchy.get("minimum_terminal_level", 4)
+    hierarchy = cfg.get("source_hierarchy")
+    if hierarchy is None:
+        raise KeyError("Missing 'source_hierarchy' in petri.yaml")
+    value = hierarchy.get("minimum_terminal_level")
+    if value is None:
+        raise KeyError("Missing 'source_hierarchy.minimum_terminal_level' in petri.yaml")
+    return int(value)
 
 
 def get_research_agents(config: dict | None = None) -> list[str]:
@@ -152,3 +182,12 @@ def get_short_circuit_rules(config: dict | None = None) -> list[dict]:
             })
 
     return rules
+
+
+# ── Global config values ──────────────────────────────────────────────────
+# Loaded once from petri.yaml at import time. The actual values live only
+# in ``defaults/petri.yaml`` — these are the single entry points for every
+# module that needs configured defaults.
+LLM_INFERENCE_MODEL: str = get_model_name()
+MAX_ITERATIONS: int = get_max_iterations()
+MAX_CONCURRENT: int = get_max_concurrent()

@@ -1,3 +1,4 @@
+![alt text](petri/assets/petri-title-screen.svg)
 # Petri
 
 An agent orchestration framework to grow your AI's context. Decomposes claims into DAGs of logical units and validates them bottom-up through a 13-agent adversarial review pipeline.

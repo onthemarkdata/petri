@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from petri.colony import ColonyGraph, serialize_colony
+from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
 from petri.models import Colony, Edge, Node, NodeStatus, Verdict, build_node_key
 
 
@@ -111,9 +112,9 @@ def tmp_petri_dir(tmp_path):
     # Default config
     config = {
         "name": "test-dish",
-        "model": {"name": "gemma-3-4b-it", "provider": "local"},
+        "model": {"name": LLM_INFERENCE_MODEL, "provider": "local"},
         "harness": "claude-code",
-        "max_iterations": 3,
+        "max_iterations": MAX_ITERATIONS,
     }
     (petri_dir / "petri.yaml").write_text(
         "# Petri configuration\n"
@@ -159,11 +160,11 @@ def petri_env(tmp_path):
     (petri_dir / "petri.yaml").write_text(
         "name: test-dish\n"
         "model:\n"
-        "  name: gemma-3-4b-it\n"
+        f"  name: {LLM_INFERENCE_MODEL}\n"
         "  provider: local\n"
         "harness: claude-code\n"
-        "max_iterations: 3\n"
-        "max_concurrent: 4\n"
+        f"max_iterations: {MAX_ITERATIONS}\n"
+        f"max_concurrent: {MAX_CONCURRENT}\n"
     )
 
     # Empty queue
@@ -290,10 +291,10 @@ def petri_env_with_colony(tmp_path, canonical_colony_validated_cells):
     (petri_dir / "petri.yaml").write_text(
         "name: test-dish\n"
         "model:\n"
-        "  name: gemma-3-4b-it\n"
+        f"  name: {LLM_INFERENCE_MODEL}\n"
         "  provider: local\n"
         "harness: claude-code\n"
-        "max_iterations: 3\n"
+        f"max_iterations: {MAX_ITERATIONS}\n"
     )
 
     queue_data = {"version": 1, "last_updated": None, "entries": {}}

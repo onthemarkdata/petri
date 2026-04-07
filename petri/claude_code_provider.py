@@ -1,9 +1,8 @@
 """Claude Code harness-based InferenceProvider for Petri.
 
 Routes inference through the ``claude`` CLI in print mode.
-Claude Code handles all authentication and model routing:
-  - Cloud models (e.g. claude-opus-4-6) via Anthropic API
-  - Local models (e.g. gemma-3-4b-it) via Ollama integration
+Claude Code handles all authentication and model routing
+(cloud models via API, local models via Ollama).
 See: https://docs.ollama.com/integrations/claude-code
 """
 
@@ -13,6 +12,8 @@ import json
 import logging
 import re
 import subprocess
+
+from petri.config import LLM_INFERENCE_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ def _parse_verdict(text: str, valid_verdicts: list[str]) -> str:
 class ClaudeCodeProvider:
     """InferenceProvider that routes through the claude CLI."""
 
-    def __init__(self, model: str = "claude-opus-4-6"):
+    def __init__(self, model: str = LLM_INFERENCE_MODEL):
         self.model = model
 
     def _ask(self, prompt: str) -> str:

@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
+from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 from petri.convergence import (
     check_convergence,
     compute_circuit_breaker,
@@ -856,7 +857,7 @@ def _run_convergence(
     convergence = check_convergence(verdicts, agent_roles)
 
     # Check circuit breaker
-    max_iter = queue_entry.get("max_iterations", 3)
+    max_iter = queue_entry.get("max_iterations", MAX_ITERATIONS)
     cycle_start = queue_entry.get("cycle_start_iteration", 0)
     breaker_fires = compute_circuit_breaker(iteration, cycle_start, max_iter)
 
@@ -1210,7 +1211,7 @@ def find_eligible_nodes(
 def process_queue(
     petri_dir: Path,
     provider: InferenceProvider | None = None,
-    max_concurrent: int = 4,
+    max_concurrent: int = MAX_CONCURRENT,
     node_ids: list[str] | None = None,
     colony_filter: str | None = None,
     all_nodes: bool = False,

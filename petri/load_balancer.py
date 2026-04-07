@@ -12,6 +12,8 @@ import os
 import threading
 import time
 
+from petri.config import MAX_CONCURRENT
+
 logger = logging.getLogger(__name__)
 
 # Resource thresholds (as fractions of 1.0)
@@ -96,7 +98,7 @@ class AdaptiveLoadBalancer:
 
     def __init__(
         self,
-        max_workers: int = 4,
+        max_workers: int = MAX_CONCURRENT,
         min_workers: int = 1,
         poll_interval: float = _POLL_INTERVAL,
     ):

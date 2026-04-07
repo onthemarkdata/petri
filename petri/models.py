@@ -13,6 +13,8 @@ from typing import Any, Optional, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
+from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
+
 
 # ── Enums ────────────────────────────────────────────────────────────────
 
@@ -256,7 +258,7 @@ class QueueEntry(BaseModel):
     node_id: str  # composite node key
     queue_state: QueueState = QueueState.queued
     iteration: int = Field(default=0, ge=0)
-    max_iterations: int = Field(default=3, ge=1)
+    max_iterations: int = Field(default=MAX_ITERATIONS, ge=1)
     cycle_start_iteration: int = Field(default=0, ge=0)
     weakest_link: Optional[str] = None
     focused_directive: Optional[str] = None
@@ -293,8 +295,8 @@ class PetriConfig(BaseModel):
     name: str = ""
     model: dict = Field(default_factory=dict)  # {name, provider}
     harness: str = "claude-code"
-    max_iterations: int = 3
-    max_concurrent: int = 4
+    max_iterations: int = MAX_ITERATIONS
+    max_concurrent: int = MAX_CONCURRENT
     agents: dict[str, AgentRole] = Field(default_factory=dict)
     debates: list[Debate] = Field(default_factory=list)
     source_hierarchy: dict = Field(default_factory=dict)

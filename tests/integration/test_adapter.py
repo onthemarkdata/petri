@@ -12,6 +12,7 @@ import json
 import pytest
 
 from petri.adapters.claude_code import ClaudeCodeAdapter
+from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
 from petri.convergence import load_agent_roles
 from petri.models import PetriConfig
 from petri.scanner import scan
@@ -23,10 +24,10 @@ def adapter(petri_env):
     petri_dir = petri_env / ".petri"
     config = PetriConfig(
         name="test-dish",
-        model={"name": "gemma-3-4b-it", "provider": "local"},
+        model={"name": LLM_INFERENCE_MODEL, "provider": "local"},
         harness="claude-code",
-        max_iterations=3,
-        max_concurrent=4,
+        max_iterations=MAX_ITERATIONS,
+        max_concurrent=MAX_CONCURRENT,
     )
     return ClaudeCodeAdapter(config=config, petri_dir=petri_dir)
 
