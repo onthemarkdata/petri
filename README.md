@@ -7,7 +7,7 @@
 [![Python 3.11+](https://img.shields.io/pypi/pyversions/petri-grow)](https://pypi.org/project/petri-grow/)
 [![License](https://img.shields.io/pypi/l/petri-grow)](https://github.com/onthemarkdata/petri/blob/main/LICENSE)
 
-An agent orchestration framework to grow your AI's context. Decomposes claims into DAGs of logical units and validates them bottom-up through a multi-agent adversarial review pipeline.
+An agent orchestration framework to grow your AI's context via Claude Code. Decomposes claims into DAGs of logical units and validates them bottom-up through a multi-agent adversarial review pipeline.
 
 ## Cost Warning
 
@@ -78,6 +78,8 @@ This installs the CLI and core library. Claude Code must be authenticated (see a
 
 ## Quickstart
 
+Petri is designed to be AI agent first for UX. It's highly recommended to have a Claude Code session already started and pass this README file link (https://github.com/onthemarkdata/petri/blob/main/README.md) directly to Claude Code to set up.
+
 ```bash
 # 1. Initialize a petri dish
 mkdir my-research && cd my-research
@@ -86,8 +88,8 @@ petri init
 #   Model: claude-sonnet-4-6
 
 # 2. Seed a colony from a claim
-petri seed "A hotdog is a sandwich" --no-questions
-# → Colony 'hotdog-sandwich' created with 6 nodes across 3 levels
+petri seed "Open source models will catch up to current frontier models in the next 6 months."
+# → Colony 'open-source-models' created with 6 nodes across 3 levels
 
 # 3. Check status
 petri check
