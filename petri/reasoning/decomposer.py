@@ -1,24 +1,33 @@
 """Claim decomposition module for Petri.
 
-Takes a claim, optionally asks clarifying questions, and decomposes it into
-a colony DAG of logical premises. Delegates actual reasoning to a
-InferenceProvider when available; provides a simple structural fallback
-for standalone CLI use without an LLM.
+Takes a claim, asks clarifying questions, and decomposes it into a colony
+DAG of logical premises. All reasoning is delegated to an
+``InferenceProvider`` — there is no offline fallback. Callers that cannot
+supply a provider must surface that to the user instead of generating a
+template-stamped tree.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Callable, Optional
 
 from petri.models import (
+    Cell,
     ClarifyingQuestion,
     DecompositionResult,
     Edge,
-    Node,
     InferenceProvider,
-    build_node_key,
+    build_cell_key,
     validate_slug,
 )
+
+
+# Type alias for the per-cell serialization callback fired by the
+# decomposer the moment a new cell is built. ``new_edges`` are the edges
+# whose ``to_node`` is the newly-created cell — i.e. the parent links the
+# CLI needs to persist alongside the cell itself.
+OnCellCreated = Callable[[Cell, "list[Edge]"], None]
 
 
 # ── Public API ───────────────────────────────────────────────────────────
@@ -26,25 +35,33 @@ from petri.models import (
 
 def generate_clarifying_questions(
     claim: str,
-    provider: InferenceProvider | None = None,
+    provider: InferenceProvider | None,
     max_questions: int = 5,
+    on_progress: Optional[Callable[[str], None]] = None,
 ) -> list[ClarifyingQuestion]:
-    """Generate clarifying questions for a claim.
+    """Generate claim-specific clarifying questions via the provider.
 
-    If provider is None, returns a default set of generic questions.
+    Raises ValueError if no provider is supplied — the wizard is fully
+    agentic and has no hardcoded question set. ``on_progress`` is forwarded
+    to the provider so callers can stream the model's text live.
     """
-    if provider is not None:
-        raw = provider.generate_clarifying_questions(claim, max_questions)
-        return [
-            ClarifyingQuestion(
-                question=question["question"],
-                options=question.get("options", []),
-                answer=question.get("answer"),
-            )
-            for question in raw[:max_questions]
-        ]
+    if provider is None:
+        raise ValueError(
+            "generate_clarifying_questions requires an InferenceProvider; "
+            "the wizard is fully agentic and has no hardcoded fallback."
+        )
 
-    return _default_questions()[:max_questions]
+    raw = provider.generate_clarifying_questions(
+        claim, max_questions, on_progress=on_progress
+    )
+    return [
+        ClarifyingQuestion(
+            question=question["question"],
+            options=question.get("options", []),
+            answer=question.get("answer"),
+        )
+        for question in raw[:max_questions]
+    ]
 
 
 def decompose_claim(
@@ -52,44 +69,78 @@ def decompose_claim(
     clarifications: list[ClarifyingQuestion],
     dish_id: str,
     colony_name: str,
-    provider: InferenceProvider | None = None,
+    provider: InferenceProvider | None,
+    guidance: str = "",
+    on_progress: Optional[Callable[[str], None]] = None,
+    on_cell_created: Optional[OnCellCreated] = None,
+    center: Optional[Cell] = None,
 ) -> DecompositionResult:
-    """Decompose a claim into a colony of nodes and edges.
+    """Decompose a claim into a colony of cells and edges.
 
-    If provider is None, creates a simple default decomposition
-    with 3 premises at level 1 and 2 sub-premises at level 2.
+    Raises ValueError if no provider is supplied.
+
+    ``guidance`` is optional free-text feedback from a regenerate-with-guidance
+    loop and is threaded into the model context.
+
+    ``on_progress`` streams the model's text to the caller during every LLM
+    call (initial decomposition + each Five Whys iteration).
+
+    ``on_cell_created`` is fired the moment each new cell is constructed
+    from the LLM response — before the next LLM call begins. The CLI uses
+    this to serialize each cell + log a ``cell_created`` event incrementally
+    so on-disk state always reflects what the agent has done so far. The
+    callback is *not* called for the level-0 center cell (the CLI creates
+    that itself before invoking ``decompose_claim``).
+
+    ``center`` is an optional caller-supplied level-0 Cell. When provided,
+    the decomposer mutates that same object when wiring dependencies — so
+    the CLI's in-memory ``center_node`` reference reflects the level-1
+    children and the subsequent ``serialize_colony`` writes them to disk.
+    When ``center`` is None, the decomposer constructs its own level-0
+    cell internally (backwards-compatible default used by unit tests).
     """
-    if provider is not None:
-        return _provider_decompose(
-            claim, clarifications, dish_id, colony_name, provider
+    if provider is None:
+        raise ValueError(
+            "decompose_claim requires an InferenceProvider; "
+            "there is no offline decomposition fallback."
         )
 
-    return _default_decompose(claim, dish_id, colony_name)
+    return _provider_decompose(
+        claim,
+        clarifications,
+        dish_id,
+        colony_name,
+        provider,
+        guidance,
+        on_progress=on_progress,
+        on_cell_created=on_cell_created,
+        center=center,
+    )
 
 
 def format_colony_display(result: DecompositionResult) -> str:
     """Format a decomposition result as a text tree for display.
 
-    Groups nodes by level and sorts by seq within each level.
+    Groups cells by level and sorts by seq within each level.
     Shows composite IDs and claim text.
     """
-    if not result.nodes:
+    if not result.cells:
         return f"Colony: {result.colony_name} (empty)\n"
 
-    center_id = result.nodes[0].id if result.nodes else "?"
+    center_id = result.cells[0].id if result.cells else "?"
     lines = [f"Colony: {result.colony_name} (center: {center_id})\n"]
 
     # Group by level
-    by_level: dict[int, list[Node]] = {}
-    for node in result.nodes:
-        by_level.setdefault(node.level, []).append(node)
+    by_level: dict[int, list[Cell]] = {}
+    for cell in result.cells:
+        by_level.setdefault(cell.level, []).append(cell)
 
     for level in sorted(by_level):
-        # Sort nodes within a level by their seq (last 3-digit segment)
-        nodes_at_level = sorted(by_level[level], key=lambda n: n.id)
-        for node in nodes_at_level:
+        # Sort cells within a level by their seq (last 3-digit segment)
+        cells_at_level = sorted(by_level[level], key=lambda c: c.id)
+        for cell in cells_at_level:
             lines.append(
-                f"Level {level}: {node.id} \u2014 {node.claim_text}"
+                f"Level {level}: {cell.id} \u2014 {cell.claim_text}"
             )
 
     return "\n".join(lines) + "\n"
@@ -165,142 +216,16 @@ def generate_colony_name(claim: str) -> str:
 # ── Private Helpers ──────────────────────────────────────────────────────
 
 
-def _default_questions() -> list[ClarifyingQuestion]:
-    """Return the standard set of generic clarifying questions."""
-    return [
-        ClarifyingQuestion(
-            question="What is the primary domain or industry?",
-        ),
-        ClarifyingQuestion(
-            question="What geographic scope applies?",
-        ),
-        ClarifyingQuestion(
-            question="What time horizon are you considering?",
-            options=["1 year", "3 years", "5 years", "10+ years"],
-        ),
-        ClarifyingQuestion(
-            question="What aspect matters most?",
-            options=[
-                "Technical feasibility",
-                "Economic viability",
-                "Regulatory compliance",
-                "Market demand",
-            ],
-        ),
-        ClarifyingQuestion(
-            question="Are there specific constraints to consider?",
-        ),
-    ]
-
-
-def _default_decompose(
-    claim: str,
-    dish_id: str,
-    colony_name: str,
-) -> DecompositionResult:
-    """Create a first-principles decomposition without an LLM.
-
-    Structure (first principles approach):
-      Level 0: center (the original claim)
-      Level 1: core assumptions — the key definitions, causal mechanisms,
-               and logical premises that must hold for the claim to be true
-      Level 2: fundamental facts — independently verifiable bedrock truths
-    """
-    colony_id = f"{dish_id}-{colony_name}"
-
-    # Level 0 -- center
-    center_key = build_node_key(dish_id, colony_name, 0, 0)
-    center = Node(
-        id=center_key,
-        colony_id=colony_id,
-        claim_text=claim,
-        level=0,
-    )
-
-    # Level 1 -- core assumptions (first principles)
-    definition_key = build_node_key(dish_id, colony_name, 1, 1)
-    mechanism_key = build_node_key(dish_id, colony_name, 1, 2)
-    boundary_key = build_node_key(dish_id, colony_name, 1, 3)
-
-    definition_node = Node(
-        id=definition_key,
-        colony_id=colony_id,
-        claim_text=f"The key terms and definitions in this claim are well-defined and agreed upon: {claim}",
-        level=1,
-    )
-    mechanism_node = Node(
-        id=mechanism_key,
-        colony_id=colony_id,
-        claim_text=f"The causal mechanism or logical reasoning underlying this claim is sound: {claim}",
-        level=1,
-    )
-    boundary_node = Node(
-        id=boundary_key,
-        colony_id=colony_id,
-        claim_text=f"The scope, boundary conditions, and constraints of this claim are valid: {claim}",
-        level=1,
-    )
-
-    # Level 2 -- fundamental facts under mechanism
-    empirical_key = build_node_key(dish_id, colony_name, 2, 1)
-    consistency_key = build_node_key(dish_id, colony_name, 2, 2)
-
-    empirical_node = Node(
-        id=empirical_key,
-        colony_id=colony_id,
-        claim_text=f"Empirical observations or measurements support the mechanism: {claim}",
-        level=2,
-    )
-    consistency_node = Node(
-        id=consistency_key,
-        colony_id=colony_id,
-        claim_text=f"The claim is logically consistent with established knowledge and does not contradict known facts: {claim}",
-        level=2,
-    )
-
-    # Wire up dependencies: parent depends on children (bottom-up validation)
-    center.dependencies = [definition_key, mechanism_key, boundary_key]
-    mechanism_node.dependencies = [empirical_key, consistency_key]
-
-    # Wire up dependents (reverse of dependencies)
-    definition_node.dependents = [center_key]
-    mechanism_node.dependents = [center_key]
-    boundary_node.dependents = [center_key]
-    empirical_node.dependents = [mechanism_key]
-    consistency_node.dependents = [mechanism_key]
-
-    # Edges -- from_node depends on to_node (parent depends on child)
-    edges = [
-        Edge(from_node=center_key, to_node=definition_key),
-        Edge(from_node=center_key, to_node=mechanism_key),
-        Edge(from_node=center_key, to_node=boundary_key),
-        Edge(from_node=mechanism_key, to_node=empirical_key),
-        Edge(from_node=mechanism_key, to_node=consistency_key),
-    ]
-
-    nodes = [
-        center,
-        definition_node,
-        mechanism_node,
-        boundary_node,
-        empirical_node,
-        consistency_node,
-    ]
-
-    return DecompositionResult(
-        nodes=nodes,
-        edges=edges,
-        colony_name=colony_name,
-        center_claim=claim,
-    )
-
-
 def _provider_decompose(
     claim: str,
     clarifications: list[ClarifyingQuestion],
     dish_id: str,
     colony_name: str,
     provider: InferenceProvider,
+    guidance: str = "",
+    on_progress: Optional[Callable[[str], None]] = None,
+    on_cell_created: Optional[OnCellCreated] = None,
+    center: Optional[Cell] = None,
 ) -> DecompositionResult:
     """Decompose using iterative Five Whys via an LLM provider.
 
@@ -309,13 +234,26 @@ def _provider_decompose(
        the next level down.
     3. Repeat until premises are atomic or max_depth is reached.
 
-    This produces a genuine first-principles DAG where leaf nodes are
-    independently verifiable bedrock truths.
+    Each level is capped at ``get_max_nodes_per_layer()`` total cells.
+    The provider prompts ask the model to brainstorm broadly, prioritise,
+    and return only the top N most important premises; the decomposer
+    additionally hard-truncates as a safety net so the cap holds even if
+    the model ignores the instruction.
+
+    Each new cell fires ``on_cell_created`` *immediately* so the CLI can
+    persist it to disk and log a ``cell_created`` event before the next
+    LLM call begins. ``on_progress`` is forwarded to every provider call.
     """
-    from petri.config import get_max_decomposition_depth
+    from petri.config import get_max_decomposition_depth, get_max_nodes_per_layer
 
     max_depth = get_max_decomposition_depth()
+    max_per_layer = get_max_nodes_per_layer()
     colony_id = f"{dish_id}-{colony_name}"
+
+    # Per-level usage tracker — used to enforce the cap and to compute
+    # remaining budget for each Five Whys call so the model can be told
+    # how many top-N picks are still available at the target level.
+    cells_per_level: dict[int, int] = {0: 1}  # center already exists
 
     # Step 1: Get initial decomposition (Level 0 + Level 1)
     clarification_dicts = [
@@ -326,64 +264,99 @@ def _provider_decompose(
         }
         for clarification in clarifications
     ]
-    raw = provider.decompose_claim(claim, clarification_dicts)
-
-    # Build Level 0 center node
-    center_key = build_node_key(dish_id, colony_name, 0, 0)
-    center = Node(
-        id=center_key,
-        colony_id=colony_id,
-        claim_text=claim,
-        level=0,
+    raw = provider.decompose_claim(
+        claim,
+        clarification_dicts,
+        guidance=guidance,
+        max_premises=max_per_layer,
+        on_progress=on_progress,
     )
 
-    all_nodes: list[Node] = [center]
+    # Build Level 0 center cell — the CLI is responsible for serializing
+    # this one (it's created and persisted before _provider_decompose runs)
+    # so we do NOT fire on_cell_created for the center.
+    #
+    # If the caller passed in an existing ``center`` Cell, mutate that
+    # object so the CLI's in-memory reference sees the wired dependencies
+    # (the source-of-truth fix for the bottom-up inversion bug). Otherwise
+    # construct a local Cell — backwards-compatible for existing callers
+    # and unit tests.
+    if center is None:
+        center_key = build_cell_key(dish_id, colony_name, 0, 0)
+        center = Cell(
+            id=center_key,
+            colony_id=colony_id,
+            claim_text=claim,
+            level=0,
+        )
+    else:
+        center_key = center.id
+
+    all_cells: list[Cell] = [center]
     all_edges: list[Edge] = []
 
-    # Parse Level 1 nodes from initial decomposition
-    raw_nodes = raw.get("nodes", [])
-    level_one_nodes: list[Node] = []
+    # Parse Level 1 cells from initial decomposition. Hard-truncate to
+    # the per-layer cap as a safety net (the prompt asks for at most N,
+    # but we don't trust the model to obey).
+    raw_cells = raw.get("nodes", [])
+    level_one_cells: list[Cell] = []
     seq_counter = 1
-    for raw_node in raw_nodes:
-        raw_level = raw_node.get("level", 1)
+    for raw_cell in raw_cells:
+        if len(level_one_cells) >= max_per_layer:
+            break  # cap reached
+        raw_level = raw_cell.get("level", 1)
         if raw_level == 0:
             continue  # Skip center — we already have it
-        claim_text = raw_node.get("claim_text", "")
+        claim_text = raw_cell.get("claim_text", "")
         if not claim_text:
             continue
-        node_key = build_node_key(dish_id, colony_name, 1, seq_counter)
-        node = Node(
-            id=node_key,
+        cell_key = build_cell_key(dish_id, colony_name, 1, seq_counter)
+        cell = Cell(
+            id=cell_key,
             colony_id=colony_id,
             claim_text=claim_text,
             level=1,
+            dependents=[center_key],
         )
-        level_one_nodes.append(node)
-        all_nodes.append(node)
-        all_edges.append(Edge(from_node=center_key, to_node=node_key))
+        edge = Edge(from_cell=center_key, to_cell=cell_key)
+        level_one_cells.append(cell)
+        all_cells.append(cell)
+        all_edges.append(edge)
         seq_counter += 1
+        cells_per_level[1] = cells_per_level.get(1, 0) + 1
+        if on_cell_created is not None:
+            on_cell_created(cell, [edge])
 
-    # If no Level 1 nodes were produced, fall back to default
-    if not level_one_nodes:
-        return _default_decompose(claim, dish_id, colony_name)
+    # If no Level 1 cells were produced, fail loudly — there is no
+    # hardcoded fallback in the agentic flow.
+    if not level_one_cells:
+        raise RuntimeError(
+            "LLM returned no level-1 premises for this claim; "
+            "try regenerating with guidance or refining the claim."
+        )
 
     # Wire center dependencies
-    center.dependencies = [node.id for node in level_one_nodes]
-    for level_one_node in level_one_nodes:
-        level_one_node.dependents = [center_key]
+    center.dependencies = [cell.id for cell in level_one_cells]
 
-    # Step 2: Iterative Five Whys — drill deeper on non-atomic premises
-    # nodes_to_expand holds (node, current_level) pairs
-    nodes_to_expand: list[tuple[Node, int]] = [
-        (node, 1) for node in level_one_nodes
+    # Step 2: Iterative Five Whys — drill deeper on non-atomic premises.
+    # Each child level is capped at max_per_layer total cells; the cap is
+    # enforced by tracking cells_per_level and skipping calls (or
+    # truncating returned sub-premises) once the budget is exhausted.
+    cells_to_expand: list[tuple[Cell, int]] = [
+        (cell, 1) for cell in level_one_cells
     ]
 
-    while nodes_to_expand:
-        parent_node, current_level = nodes_to_expand.pop(0)
+    while cells_to_expand:
+        parent_cell, current_level = cells_to_expand.pop(0)
         next_level = current_level + 1
 
         # Stop if we've reached max depth
         if next_level > max_depth:
+            continue
+
+        # Stop if the next level is already at the per-layer cap
+        remaining_budget = max_per_layer - cells_per_level.get(next_level, 0)
+        if remaining_budget <= 0:
             continue
 
         # Ask "Why is this true?" — if atomic, skip
@@ -391,9 +364,11 @@ def _provider_decompose(
             continue
 
         sub_premises = provider.decompose_why(
-            parent_node.claim_text,
+            parent_cell.claim_text,
             parent_level=current_level,
             parent_seq=0,
+            max_premises=remaining_budget,
+            on_progress=on_progress,
         )
 
         if not sub_premises:
@@ -401,41 +376,41 @@ def _provider_decompose(
             continue
 
         child_keys: list[str] = []
-        child_seq = 1
         for sub_premise in sub_premises:
+            if cells_per_level.get(next_level, 0) >= max_per_layer:
+                break  # cap reached mid-iteration
             if not isinstance(sub_premise, dict):
                 continue
             sub_claim = sub_premise.get("claim_text", "")
             if not sub_claim:
                 continue
 
-            # Find the next available seq at this level
-            existing_at_level = [
-                node for node in all_nodes if node.level == next_level
-            ]
-            child_seq = len(existing_at_level) + 1
-
-            child_key = build_node_key(dish_id, colony_name, next_level, child_seq)
-            child_node = Node(
+            child_seq = cells_per_level.get(next_level, 0) + 1
+            child_key = build_cell_key(dish_id, colony_name, next_level, child_seq)
+            child_cell = Cell(
                 id=child_key,
                 colony_id=colony_id,
                 claim_text=sub_claim,
                 level=next_level,
-                dependents=[parent_node.id],
+                dependents=[parent_cell.id],
             )
-            all_nodes.append(child_node)
-            all_edges.append(Edge(from_node=parent_node.id, to_node=child_key))
+            child_edge = Edge(from_cell=parent_cell.id, to_cell=child_key)
+            all_cells.append(child_cell)
+            all_edges.append(child_edge)
             child_keys.append(child_key)
+            cells_per_level[next_level] = cells_per_level.get(next_level, 0) + 1
+            if on_cell_created is not None:
+                on_cell_created(child_cell, [child_edge])
 
             # If not atomic, queue for further decomposition
             is_atomic = sub_premise.get("is_atomic", False)
             if not is_atomic:
-                nodes_to_expand.append((child_node, next_level))
+                cells_to_expand.append((child_cell, next_level))
 
-        parent_node.dependencies = child_keys
+        parent_cell.dependencies = child_keys
 
     return DecompositionResult(
-        nodes=all_nodes,
+        cells=all_cells,
         edges=all_edges,
         colony_name=colony_name,
         center_claim=claim,

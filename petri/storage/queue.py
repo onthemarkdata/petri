@@ -1,6 +1,6 @@
 """Workflow queue manager for the Petri validation pipeline.
 
-Manages ``queue.json`` -- a file-locked JSON store that tracks where each node
+Manages ``queue.json`` -- a file-locked JSON store that tracks where each cell
 is in the 13-state validation state machine.  The queue stores NO research
 data; verdicts and events live in the event log (see ``petri.event_log``).
 
@@ -125,37 +125,37 @@ def save_queue(queue_path: Path, queue: dict) -> None:
 
 def add_to_queue(
     queue_path: Path,
-    node_id: str,
+    cell_id: str,
     entered_at: str | None = None,
 ) -> QueueEntry:
-    """Add a node to the queue.
+    """Add a cell to the queue.
 
     Validates via Pydantic ``QueueEntry`` model.  Raises ``ValueError`` if the
-    node is already present.  Uses file lock.
+    cell is already present.  Uses file lock.
     """
     with _queue_lock(queue_path):
         queue = load_queue(queue_path)
 
-        if node_id in queue["entries"]:
-            existing_state = queue["entries"][node_id].get("queue_state", "unknown")
+        if cell_id in queue["entries"]:
+            existing_state = queue["entries"][cell_id].get("queue_state", "unknown")
             raise ValueError(
-                f"Node {node_id} is already in the queue (state: {existing_state})"
+                f"Cell {cell_id} is already in the queue (state: {existing_state})"
             )
 
         now = _now()
         entry = QueueEntry(
-            node_id=node_id,
+            cell_id=cell_id,
             entered_at=entered_at or now,
             last_activity=now,
         )
 
-        queue["entries"][node_id] = entry.model_dump()
+        queue["entries"][cell_id] = entry.model_dump()
         save_queue(queue_path, queue)
 
     return entry
 
 
-def update_state(queue_path: Path, node_id: str, new_state: str) -> None:
+def update_state(queue_path: Path, cell_id: str, new_state: str) -> None:
     """Transition queue state.
 
     Validates against ``VALID_TRANSITIONS`` -- raises ``ValueError`` if the
@@ -169,10 +169,10 @@ def update_state(queue_path: Path, node_id: str, new_state: str) -> None:
     with _queue_lock(queue_path):
         queue = load_queue(queue_path)
 
-        if node_id not in queue["entries"]:
-            raise ValueError(f"Node {node_id} is not in the queue")
+        if cell_id not in queue["entries"]:
+            raise ValueError(f"Cell {cell_id} is not in the queue")
 
-        entry = queue["entries"][node_id]
+        entry = queue["entries"][cell_id]
         old_state = entry["queue_state"]
         allowed = VALID_TRANSITIONS.get(old_state, [])
 
@@ -188,46 +188,46 @@ def update_state(queue_path: Path, node_id: str, new_state: str) -> None:
         save_queue(queue_path, queue)
 
 
-def set_weakest_link(queue_path: Path, node_id: str, weakest_link: str) -> None:
-    """Set the weakest link for a node. Uses lock."""
+def set_weakest_link(queue_path: Path, cell_id: str, weakest_link: str) -> None:
+    """Set the weakest link for a cell. Uses lock."""
     with _queue_lock(queue_path):
         queue = load_queue(queue_path)
 
-        if node_id not in queue["entries"]:
-            raise ValueError(f"Node {node_id} is not in the queue")
+        if cell_id not in queue["entries"]:
+            raise ValueError(f"Cell {cell_id} is not in the queue")
 
-        queue["entries"][node_id]["weakest_link"] = weakest_link
-        queue["entries"][node_id]["last_activity"] = _now()
+        queue["entries"][cell_id]["weakest_link"] = weakest_link
+        queue["entries"][cell_id]["last_activity"] = _now()
         save_queue(queue_path, queue)
 
 
-def set_focused_directive(queue_path: Path, node_id: str, directive: str) -> None:
-    """Set focused directive for a node. Uses lock."""
+def set_focused_directive(queue_path: Path, cell_id: str, directive: str) -> None:
+    """Set focused directive for a cell. Uses lock."""
     with _queue_lock(queue_path):
         queue = load_queue(queue_path)
 
-        if node_id not in queue["entries"]:
-            raise ValueError(f"Node {node_id} is not in the queue")
+        if cell_id not in queue["entries"]:
+            raise ValueError(f"Cell {cell_id} is not in the queue")
 
-        queue["entries"][node_id]["focused_directive"] = directive
-        queue["entries"][node_id]["last_activity"] = _now()
+        queue["entries"][cell_id]["focused_directive"] = directive
+        queue["entries"][cell_id]["last_activity"] = _now()
         save_queue(queue_path, queue)
 
 
-def set_iteration(queue_path: Path, node_id: str, iteration: int) -> None:
-    """Set iteration counter for a node. Uses lock."""
+def set_iteration(queue_path: Path, cell_id: str, iteration: int) -> None:
+    """Set iteration counter for a cell. Uses lock."""
     with _queue_lock(queue_path):
         queue = load_queue(queue_path)
 
-        if node_id not in queue["entries"]:
-            raise ValueError(f"Node {node_id} is not in the queue")
+        if cell_id not in queue["entries"]:
+            raise ValueError(f"Cell {cell_id} is not in the queue")
 
-        queue["entries"][node_id]["iteration"] = iteration
-        queue["entries"][node_id]["last_activity"] = _now()
+        queue["entries"][cell_id]["iteration"] = iteration
+        queue["entries"][cell_id]["last_activity"] = _now()
         save_queue(queue_path, queue)
 
 
-def new_cycle(queue_path: Path, node_id: str) -> None:
+def new_cycle(queue_path: Path, cell_id: str) -> None:
     """Advance to new cycle.
 
     Increments iteration, sets ``cycle_start_iteration`` to the new value,
@@ -236,10 +236,10 @@ def new_cycle(queue_path: Path, node_id: str) -> None:
     with _queue_lock(queue_path):
         queue = load_queue(queue_path)
 
-        if node_id not in queue["entries"]:
-            raise ValueError(f"Node {node_id} is not in the queue")
+        if cell_id not in queue["entries"]:
+            raise ValueError(f"Cell {cell_id} is not in the queue")
 
-        entry = queue["entries"][node_id]
+        entry = queue["entries"][cell_id]
         new_iter = entry["iteration"] + 1
         entry["iteration"] = new_iter
         entry["cycle_start_iteration"] = new_iter
@@ -250,14 +250,14 @@ def new_cycle(queue_path: Path, node_id: str) -> None:
 
 
 def get_next(queue_path: Path) -> dict | None:
-    """Get the next node to process.
+    """Get the next cell to process.
 
     Returns the first entry in a resumable state (queued, socratic_active,
     research_active, critique_active, mediating).  No lock needed (read-only).
     """
     queue = load_queue(queue_path)
 
-    for _node_id, entry in queue["entries"].items():
+    for _cell_id, entry in queue["entries"].items():
         if entry.get("queue_state") in _RESUMABLE_STATES:
             return entry
 
@@ -270,23 +270,23 @@ def list_queue(queue_path: Path) -> list[dict]:
     return list(queue["entries"].values())
 
 
-def remove_from_queue(queue_path: Path, node_id: str) -> None:
-    """Remove a node from the queue. Uses lock."""
+def remove_from_queue(queue_path: Path, cell_id: str) -> None:
+    """Remove a cell from the queue. Uses lock."""
     with _queue_lock(queue_path):
         queue = load_queue(queue_path)
 
-        if node_id not in queue["entries"]:
-            raise ValueError(f"Node {node_id} is not in the queue")
+        if cell_id not in queue["entries"]:
+            raise ValueError(f"Cell {cell_id} is not in the queue")
 
-        del queue["entries"][node_id]
+        del queue["entries"][cell_id]
         save_queue(queue_path, queue)
 
 
-def sync_check(queue_path: Path, nodes_dir: Path) -> dict:
-    """Compare queue state against node metadata files.
+def sync_check(queue_path: Path, cells_dir: Path) -> dict:
+    """Compare queue state against cell metadata files.
 
     Reads each active queue entry and compares its ``queue_state`` against the
-    ``status`` field in the node's ``metadata.json`` file.  Returns a dict with:
+    ``status`` field in the cell's ``metadata.json`` file.  Returns a dict with:
 
     - **synced** (``bool``): True if all entries are consistent.
     - **conflicts** (``list[dict]``): Entries with discrepancies.
@@ -299,19 +299,19 @@ def sync_check(queue_path: Path, nodes_dir: Path) -> dict:
         conflicts: list[dict] = []
         reconciled: list[dict] = []
 
-        for node_id, entry in queue["entries"].items():
+        for cell_id, entry in queue["entries"].items():
             # Skip terminal states -- their metadata may diverge legitimately.
             if entry["queue_state"] in ("done", "deferred_closed"):
                 continue
 
-            # Derive node directory from composite key.
+            # Derive cell directory from composite key.
             # Key format: {dish}-{colony}-{level}-{seq}
-            # Filesystem: nodes_dir/{colony}/{level}-{seq}/metadata.json
-            parts = node_id.rsplit("-", 2)
+            # Filesystem: cells_dir/{colony}/{level}-{seq}/metadata.json
+            parts = cell_id.rsplit("-", 2)
             if len(parts) < 3:
                 conflicts.append(
                     {
-                        "node_id": node_id,
+                        "cell_id": cell_id,
                         "issue": "invalid_key_format",
                         "details": "Cannot parse composite key into colony/level/seq",
                     }
@@ -325,13 +325,13 @@ def sync_check(queue_path: Path, nodes_dir: Path) -> dict:
             seq_str = parts[2]
 
             metadata_path = (
-                nodes_dir / colony_prefix / f"{level_str}-{seq_str}" / "metadata.json"
+                cells_dir / colony_prefix / f"{level_str}-{seq_str}" / "metadata.json"
             )
 
             if not metadata_path.exists():
                 conflicts.append(
                     {
-                        "node_id": node_id,
+                        "cell_id": cell_id,
                         "issue": "metadata_not_found",
                         "details": f"No metadata.json at {metadata_path}",
                     }
@@ -346,7 +346,7 @@ def sync_check(queue_path: Path, nodes_dir: Path) -> dict:
             except (json.JSONDecodeError, OSError) as exc:
                 conflicts.append(
                     {
-                        "node_id": node_id,
+                        "cell_id": cell_id,
                         "issue": "metadata_unreadable",
                         "details": str(exc),
                     }
@@ -359,12 +359,12 @@ def sync_check(queue_path: Path, nodes_dir: Path) -> dict:
             if file_status is None:
                 continue  # No status in metadata -- nothing to compare.
 
-            # Map terminal NodeStatus values to queue expectations.
+            # Map terminal CellStatus values to queue expectations.
             terminal_statuses = {"VALIDATED", "DISPROVEN", "DEFER_CLOSED"}
             if file_status in terminal_statuses and entry["queue_state"] != "done":
                 reconciled.append(
                     {
-                        "node_id": node_id,
+                        "cell_id": cell_id,
                         "old_queue_state": entry["queue_state"],
                         "new_queue_state": "done",
                         "file_status": file_status,
@@ -381,3 +381,31 @@ def sync_check(queue_path: Path, nodes_dir: Path) -> dict:
         "conflicts": conflicts,
         "reconciled": reconciled,
     }
+
+
+# ── Terminal State Helpers ──────────────────────────────────────────────
+
+
+TERMINAL_STATES: frozenset[str] = frozenset({
+    "done", "needs_human", "deferred_closed",
+})
+
+
+def is_terminal_state(state: str) -> bool:
+    """A cell in a terminal state needs no further work this run.
+
+    ``deferred_open`` is intentionally NOT terminal -- it can re-enter the
+    queue if new evidence arrives. ``stalled`` is also not terminal because
+    it can transition back to ``queued`` via human intervention.
+    """
+    return state in TERMINAL_STATES
+
+
+def get_state_summary(queue_path: Path) -> dict[str, int]:
+    """Return ``{state_name: count}`` across all queue entries."""
+    queue = load_queue(queue_path)
+    summary: dict[str, int] = {}
+    for entry in queue.get("entries", {}).values():
+        state = entry.get("queue_state", "")
+        summary[state] = summary.get(state, 0) + 1
+    return summary

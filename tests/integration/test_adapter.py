@@ -69,12 +69,13 @@ class TestClaudeCodeAdapterGeneration:
                 f"Missing agent: {agent_name}"
             )
 
-    def test_generate_creates_13_agents(self, adapter, petri_env):
+    def test_generate_creates_14_agents(self, adapter, petri_env):
         output_dir = petri_env / ".claude"
         adapter.generate(output_dir)
 
+        # 3 leads + 10 specialists + 1 exploratory (socratic_questioner) = 14 agents
         agent_files = list((output_dir / "agents").glob("*.md"))
-        assert len(agent_files) == 13
+        assert len(agent_files) == 14
 
     def test_generate_creates_all_skill_files(self, adapter, petri_env):
         output_dir = petri_env / ".claude"
@@ -85,7 +86,7 @@ class TestClaudeCodeAdapterGeneration:
             "event_log_read.md",
             "queue_update.md",
             "convergence_check.md",
-            "read_node.md",
+            "read_cell.md",
         ]
         for skill in expected_skills:
             assert (output_dir / "skills" / skill).exists(), (
@@ -155,7 +156,7 @@ class TestLeadAgentConstitutionReread:
         output_dir = petri_env / ".claude"
         adapter.generate(output_dir)
 
-        lead_names = ["decomposition_lead", "node_lead", "red_team_lead"]
+        lead_names = ["decomposition_lead", "cell_lead", "red_team_lead"]
         for name in lead_names:
             content = (output_dir / "agents" / f"{name}.md").read_text()
             assert "re-read" in content.lower() or "reread" in content.lower(), (
@@ -181,8 +182,9 @@ class TestCustomConfigPropagation:
 
     def test_get_generated_files_lists_all(self, adapter):
         files = adapter.get_generated_files()
-        # 5 rules + 13 agents + 5 skills + 6 commands + 1 settings
-        assert len(files) == 30
+        # 5 rules + 14 agents (3 leads + 10 specialists + 1 exploratory
+        # socratic_questioner) + 5 skills + 6 commands + 1 settings
+        assert len(files) == 31
 
     def test_validate_returns_list(self, adapter, petri_env):
         output_dir = petri_env / ".claude"
@@ -204,7 +206,7 @@ class TestScannerOnGeneratedConfig:
         # Filter for actual errors (some informational issues may remain)
         errors = [
             i for i in issues
-            if i.category not in ("node_statuses",)  # informational
+            if i.category not in ("cell_statuses",)  # informational
         ]
         assert len(errors) == 0, (
             f"Scanner found {len(errors)} issues on fresh generate: "

@@ -9,5 +9,5 @@ $constitution_content
 ## Enforcement
 
 - This document is the highest authority in the Petri system.
-- Lead agents (Decomposition Lead, Node Lead, Red Team Lead) MUST re-read this document every iteration.
+- Lead agents (Decomposition Lead, Cell Lead, Red Team Lead) MUST re-read this document every iteration.
 - Amendments require written rationale.

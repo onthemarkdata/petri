@@ -2,7 +2,7 @@
 
 Tests cover:
 - SQLite rebuild from JSONL (migrate)
-- REST endpoint responses (GET /api/events, /api/queue, /api/nodes, /api/node/{id}, /api/health, /api/stats)
+- REST endpoint responses (GET /api/events, /api/queue, /api/cells, /api/cell/{id}, /api/health, /api/stats)
 - SSE stream delivers new events after incremental sync
 """
 
@@ -30,14 +30,14 @@ def dashboard_env(petri_env_with_colony):
     colony_path = env["colony_path"]
     colony_model = env["colony_model"]
 
-    # Resolve event paths from node_paths mapping
-    cell1_events_path = colony_path / colony_model.node_paths[env["cell1"].id] / "events.jsonl"
-    center_events_path = colony_path / colony_model.node_paths[env["center"].id] / "events.jsonl"
+    # Resolve event paths from cell_paths mapping
+    cell1_events_path = colony_path / colony_model.cell_paths[env["cell1"].id] / "events.jsonl"
+    center_events_path = colony_path / colony_model.cell_paths[env["center"].id] / "events.jsonl"
 
     for i in range(3):
         append_event(
             cell1_events_path,
-            node_id=env["cell1"].id,
+            cell_id=env["cell1"].id,
             event_type="search_executed",
             agent="investigator",
             iteration=i,
@@ -46,7 +46,7 @@ def dashboard_env(petri_env_with_colony):
 
     append_event(
         cell1_events_path,
-        node_id=env["cell1"].id,
+        cell_id=env["cell1"].id,
         event_type="verdict_issued",
         agent="investigator",
         iteration=1,
@@ -55,11 +55,11 @@ def dashboard_env(petri_env_with_colony):
 
     append_event(
         center_events_path,
-        node_id=env["center"].id,
+        cell_id=env["center"].id,
         event_type="decomposition_created",
         agent="decomposition_lead",
         iteration=0,
-        data={"parent_node_id": env["center"].id, "child_node_ids": [env["cell1"].id]},
+        data={"parent_cell_id": env["center"].id, "child_cell_ids": [env["cell1"].id]},
     )
 
     # Add a queue entry
@@ -95,13 +95,13 @@ class TestRebuildSqlite:
         table_names = {t[0] for t in tables}
         assert "events" in table_names
 
-    def test_events_queryable_by_node_id(self, dashboard_env):
+    def test_events_queryable_by_cell_id(self, dashboard_env):
         env = dashboard_env
         rebuild_sqlite(env["petri_dir"], env["db_path"])
 
         conn = sqlite3.connect(str(env["db_path"]))
         rows = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE node_id = ?",
+            "SELECT COUNT(*) FROM events WHERE cell_id = ?",
             [env["cell1"].id],
         ).fetchone()
         conn.close()
@@ -161,11 +161,11 @@ class TestIncrementalSync:
 
         # Append a new event — resolve path from colony.json
         colony_data = json.loads((env["colony_path"] / "colony.json").read_text())
-        cell1_rel = colony_data["node_paths"][env["cell1"].id]
+        cell1_rel = colony_data["cell_paths"][env["cell1"].id]
         cell1_events_path = env["colony_path"] / cell1_rel / "events.jsonl"
         append_event(
             cell1_events_path,
-            node_id=env["cell1"].id,
+            cell_id=env["cell1"].id,
             event_type="verdict_issued",
             agent="skeptic",
             iteration=2,
@@ -243,13 +243,13 @@ class TestEventsEndpoint:
         assert isinstance(events, list)
         assert len(events) == 5
 
-    def test_filter_by_node_id(self, api_client):
+    def test_filter_by_cell_id(self, api_client):
         client, env = api_client
-        resp = client.get("/api/events", params={"node_id": env["cell1"].id})
+        resp = client.get("/api/events", params={"cell_id": env["cell1"].id})
         assert resp.status_code == 200
         events = resp.json()
         assert len(events) == 4
-        assert all(e["node_id"] == env["cell1"].id for e in events)
+        assert all(e["cell_id"] == env["cell1"].id for e in events)
 
     def test_filter_by_event_type(self, api_client):
         client, _ = api_client
@@ -279,7 +279,7 @@ class TestEventsEndpoint:
         events = resp.json()
         assert len(events) >= 1
         evt = events[0]
-        for field in ["id", "node_id", "timestamp", "type", "agent", "iteration", "data"]:
+        for field in ["id", "cell_id", "timestamp", "type", "agent", "iteration", "data"]:
             assert field in evt, f"Missing field: {field}"
 
     def test_data_is_parsed_dict(self, api_client):
@@ -298,55 +298,55 @@ class TestQueueEndpoint:
         entries = resp.json()
         assert isinstance(entries, list)
         assert len(entries) >= 1
-        assert entries[0]["node_id"] == env["cell1"].id
+        assert entries[0]["cell_id"] == env["cell1"].id
 
 
-class TestNodesEndpoint:
-    def test_get_all_nodes(self, api_client):
+class TestCellsEndpoint:
+    def test_get_all_cells(self, api_client):
         client, env = api_client
-        resp = client.get("/api/nodes")
+        resp = client.get("/api/cells")
         assert resp.status_code == 200
-        nodes = resp.json()
-        assert isinstance(nodes, list)
-        assert len(nodes) == 5  # canonical colony: center + 2 premises + 2 cells
+        cells = resp.json()
+        assert isinstance(cells, list)
+        assert len(cells) == 5  # canonical colony: center + 2 premises + 2 cells
 
-        node_ids = {n["node_id"] for n in nodes}
-        assert env["center"].id in node_ids
-        assert env["cell1"].id in node_ids
+        cell_ids = {entry["cell_id"] for entry in cells}
+        assert env["center"].id in cell_ids
+        assert env["cell1"].id in cell_ids
 
-    def test_node_has_expected_fields(self, api_client):
+    def test_cell_has_expected_fields(self, api_client):
         client, _ = api_client
-        nodes = client.get("/api/nodes").json()
-        node = nodes[0]
+        cells = client.get("/api/cells").json()
+        cell = cells[0]
         for field in [
-            "node_id", "colony_id", "claim_text", "level",
+            "cell_id", "colony_id", "claim_text", "level",
             "status", "dependencies", "dependents",
         ]:
-            assert field in node, f"Missing field: {field}"
+            assert field in cell, f"Missing field: {field}"
 
 
-class TestNodeDetailEndpoint:
-    def test_get_node_detail(self, api_client):
+class TestCellDetailEndpoint:
+    def test_get_cell_detail(self, api_client):
         client, env = api_client
-        resp = client.get(f"/api/node/{env['cell1'].id}")
+        resp = client.get(f"/api/cell/{env['cell1'].id}")
         assert resp.status_code == 200
 
         detail = resp.json()
-        assert detail["node_id"] == env["cell1"].id
-        assert detail["claim_text"] == "Cell premise of P1"
+        assert detail["cell_id"] == env["cell1"].id
+        assert detail["claim_text"] == "Leaf premise of P1"
         assert "events" in detail
         assert len(detail["events"]) == 4  # 3 search + 1 verdict
 
-    def test_node_detail_includes_events(self, api_client):
+    def test_cell_detail_includes_events(self, api_client):
         client, env = api_client
-        detail = client.get(f"/api/node/{env['cell1'].id}").json()
+        detail = client.get(f"/api/cell/{env['cell1'].id}").json()
         event_types = [e["type"] for e in detail["events"]]
         assert "search_executed" in event_types
         assert "verdict_issued" in event_types
 
-    def test_node_not_found(self, api_client):
+    def test_cell_not_found(self, api_client):
         client, _ = api_client
-        resp = client.get("/api/node/nonexistent-node-999-999")
+        resp = client.get("/api/cell/nonexistent-cell-999-999")
         assert resp.status_code == 404
 
 
@@ -358,14 +358,109 @@ class TestStatsEndpoint:
 
         stats = resp.json()
         assert stats["total_events"] == 5
-        assert stats["nodes_with_events"] == 2
+        assert stats["cells_with_events"] == 2
         assert stats["queue_size"] >= 1
         assert isinstance(stats["events_by_type"], list)
-        assert isinstance(stats["top_nodes"], list)
-        assert isinstance(stats["nodes_by_state"], dict)
+        assert isinstance(stats["top_cells"], list)
+        assert isinstance(stats["cells_by_state"], dict)
 
 
 # ── SSE stream ──────────────────────────────────────────────────────────
+
+
+class TestRootEndpoint:
+    def test_root_returns_html(self, api_client):
+        """GET / serves the frontend HTML generated from template."""
+        client, _ = api_client
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "PETRI LAB" in resp.text
+
+    def test_root_html_has_substituted_config(self, api_client):
+        """Verify template variables were substituted."""
+        client, _ = api_client
+        resp = client.get("/")
+        # Should contain JSON-serialized status colors, not raw template vars
+        assert "STATUS_COLORS" in resp.text
+        assert "$status_colors_json" not in resp.text
+        assert "$event_colors_json" not in resp.text
+
+
+class TestDishesEndpoint:
+    def test_dishes_returns_list(self, api_client):
+        """GET /api/dishes returns colony directories."""
+        client, env = api_client
+        resp = client.get("/api/dishes")
+        assert resp.status_code == 200
+        dishes = resp.json()
+        assert isinstance(dishes, list)
+        # The test fixture creates a colony, so there should be one dish
+        assert len(dishes) >= 1
+
+    def test_dishes_empty_when_no_colonies(self, dashboard_env):
+        """GET /api/dishes returns [] when petri-dishes is empty."""
+        import shutil
+
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            pytest.skip("fastapi not installed")
+
+        env = dashboard_env
+        rebuild_sqlite(env["petri_dir"], env["db_path"])
+
+        # Remove all colony directories
+        dishes_dir = env["petri_dir"] / "petri-dishes"
+        if dishes_dir.exists():
+            shutil.rmtree(dishes_dir)
+            dishes_dir.mkdir()
+
+        from petri.dashboard.api import create_app
+
+        app = create_app(env["petri_dir"], env["db_path"])
+        client = TestClient(app, raise_server_exceptions=True)
+
+        resp = client.get("/api/dishes")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
+class TestFrontendBuilder:
+    def test_build_frontend_html_returns_string(self):
+        """build_frontend_html returns a non-empty HTML string."""
+        from petri.dashboard.frontend import build_frontend_html
+
+        html = build_frontend_html()
+        assert isinstance(html, str)
+        assert len(html) > 1000
+        assert html.startswith("<!DOCTYPE html>")
+
+    def test_build_frontend_html_substitutes_all_variables(self):
+        """No unresolved $variable placeholders remain."""
+        from petri.dashboard.frontend import build_frontend_html
+
+        html = build_frontend_html(version="1.2.3")
+        assert "$status_colors_json" not in html
+        assert "$event_colors_json" not in html
+        assert "$queue_active_states_json" not in html
+        assert "$pass_verdicts_json" not in html
+        assert "$petri_version" not in html
+        assert "$starter_claim" not in html
+        assert "v1.2.3" in html
+
+    def test_build_frontend_html_contains_config_data(self):
+        """Verify config-derived data appears in the output."""
+        from petri.dashboard.frontend import build_frontend_html
+
+        html = build_frontend_html()
+        # Status colors should be JSON-embedded
+        assert '"NEW"' in html
+        assert '"VALIDATED"' in html
+        assert "#22c55e" in html
+        # Event types
+        assert "search_executed" in html
+        assert "verdict_issued" in html
 
 
 class TestSSEStream:

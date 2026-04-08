@@ -32,12 +32,14 @@ def agent_roles():
 
 class TestLoadAgentRoles:
     def test_loads_default_agents(self, agent_roles):
-        assert len(agent_roles) == 13
+        # 13 original agents + socratic_questioner (exploratory phase 0)
+        assert len(agent_roles) == 14
         assert "investigator" in agent_roles
-        assert "node_lead" in agent_roles
+        assert "cell_lead" in agent_roles
+        assert "socratic_questioner" in agent_roles
 
     def test_leads_are_non_blocking(self, agent_roles):
-        for name in ("decomposition_lead", "node_lead", "red_team_lead"):
+        for name in ("decomposition_lead", "cell_lead", "red_team_lead"):
             role = agent_roles[name]
             assert role.is_lead is True
             assert role.blocking == "false"
@@ -53,7 +55,8 @@ class TestLoadAgentRoles:
 
     def test_fallback_to_defaults_on_missing_path(self):
         roles = load_agent_roles(Path("/nonexistent/agents.yaml"))
-        assert len(roles) == 13
+        # 13 original agents + socratic_questioner (exploratory phase 0)
+        assert len(roles) == 14
 
 
 # ── check_convergence ────────────────────────────────────────────────────
@@ -134,12 +137,12 @@ class TestCheckConvergence:
             make_verdict("pragmatist", "PRODUCTION_READY"),
             make_verdict("triage", "HIGH_VALUE"),
             # Lead agents' verdicts should not matter
-            make_verdict("node_lead", "PIPELINE_STALLED"),
+            make_verdict("cell_lead", "PIPELINE_STALLED"),
         ]
         result = check_convergence(verdicts, agent_roles)
         assert result.converged is True
-        # node_lead should not appear in blocking or non-blocking results
-        assert "node_lead" not in result.blocking_results
+        # cell_lead should not appear in blocking or non-blocking results
+        assert "cell_lead" not in result.blocking_results
 
     def test_latest_verdict_per_agent_used(self, agent_roles):
         """When an agent has multiple verdicts, the latest one wins."""

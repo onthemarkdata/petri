@@ -1,10 +1,10 @@
 ---
-description: "Read events from a node's event log"
+description: "Read events from a cell's event log"
 ---
 
 # Event Log Read
 
-Query events from a node's event log.
+Query events from a cell's event log.
 
 ## Usage
 
@@ -18,10 +18,10 @@ events_path = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}/events.jsonl"
 events = load_events(events_path)
 
 # Query by filters
-results = query_events(events_path, node_id="{node_id}", event_type="{type}", iteration={n})
+results = query_events(events_path, cell_id="{cell_id}", event_type="{type}", iteration={n})
 
-# Get verdicts for a node + iteration
-verdicts = get_verdicts(events_path, node_id="{node_id}", iteration={n})
+# Get verdicts for a cell + iteration
+verdicts = get_verdicts(events_path, cell_id="{cell_id}", iteration={n})
 ```
 
 ## Important

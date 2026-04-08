@@ -1,11 +1,11 @@
-"""Append-only JSONL event log for Petri research nodes.
+"""Append-only JSONL event log for Petri research cells.
 
-Each node stores its events in a dedicated ``events.jsonl`` file located at
+Each cell stores its events in a dedicated ``events.jsonl`` file located at
 ``.petri/petri-dishes/{colony}/{level}-{seq}/events.jsonl``.  Events are
 immutable -- they are only ever appended, never updated or deleted.  This
 module is the sole writer; all other code treats the JSONL files as read-only.
 
-A combined rollup concatenates per-node files into a single
+A combined rollup concatenates per-cell files into a single
 ``combined.jsonl`` that downstream consumers (e.g. the SQLite read index) can
 ingest in one pass.
 """
@@ -26,13 +26,13 @@ from petri.models import Event, EventType, Verdict, build_event_key, validate_ev
 
 def append_event(
     events_path: Path,
-    node_id: str,
+    cell_id: str,
     event_type: str,
     agent: str,
     iteration: int,
     data: dict,
 ) -> Event:
-    """Append a validated event to a node's JSONL file.
+    """Append a validated event to a cell's JSONL file.
 
     1. Validates *data* against the Pydantic model for *event_type*.
     2. Generates a collision-free event ID.
@@ -48,15 +48,15 @@ def append_event(
             existing_ids.add(entry.get("id", ""))
 
     # Generate a unique event ID, re-rolling on collision.
-    event_id = build_event_key(node_id, secrets.token_hex(4))
+    event_id = build_event_key(cell_id, secrets.token_hex(4))
     while event_id in existing_ids:
-        event_id = build_event_key(node_id, secrets.token_hex(4))
+        event_id = build_event_key(cell_id, secrets.token_hex(4))
 
     timestamp = datetime.now(timezone.utc).isoformat()
 
     event = Event(
         id=event_id,
-        node_id=node_id,
+        cell_id=cell_id,
         timestamp=timestamp,
         type=EventType(event_type),
         agent=agent,
@@ -102,7 +102,7 @@ def load_events(events_path: Path) -> list[dict]:
 
 def query_events(
     events_path: Path,
-    node_id: str | None = None,
+    cell_id: str | None = None,
     iteration: int | None = None,
     event_type: str | None = None,
     agent: str | None = None,
@@ -117,7 +117,7 @@ def query_events(
     filtered: list[dict] = []
 
     for evt in events:
-        if node_id is not None and evt.get("node_id") != node_id:
+        if cell_id is not None and evt.get("cell_id") != cell_id:
             continue
         if iteration is not None and evt.get("iteration") != iteration:
             continue
@@ -134,14 +134,14 @@ def query_events(
 
 def get_verdicts(
     events_path: Path,
-    node_id: str | None = None,
+    cell_id: str | None = None,
     iteration: int | None = None,
     agent: str | None = None,
 ) -> list[Verdict]:
     """Return verdict_issued events with extracted verdict and summary."""
     events = query_events(
         events_path,
-        node_id=node_id,
+        cell_id=cell_id,
         iteration=iteration,
         event_type="verdict_issued",
         agent=agent,
@@ -151,7 +151,7 @@ def get_verdicts(
         data = evt.get("data", {})
         verdicts.append(
             Verdict(
-                node_id=evt.get("node_id", ""),
+                cell_id=evt.get("cell_id", ""),
                 agent=evt.get("agent", ""),
                 iteration=evt.get("iteration", 0),
                 verdict=data.get("verdict", ""),
@@ -185,9 +185,9 @@ def get_searches(events_path: Path) -> list[dict]:
 
 
 def rollup_to_combined(dish_path: Path) -> Path:
-    """Concatenate all per-node ``events.jsonl`` files into ``combined.jsonl``.
+    """Concatenate all per-cell ``events.jsonl`` files into ``combined.jsonl``.
 
-    Walks ``dish_path/petri-dishes/{colony}/{node}/events.jsonl`` in sorted
+    Walks ``dish_path/petri-dishes/{colony}/{cell}/events.jsonl`` in sorted
     order and writes every non-blank line to ``dish_path/combined.jsonl``.
     The combined file is what the SQLite read index is built from.
     """

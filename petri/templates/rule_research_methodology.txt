@@ -14,11 +14,11 @@ description: "Research methodology rules — how agents conduct research and ass
 ## Agent Communication
 
 - Agents communicate ONLY via the event log — never directly.
-- Debates are mediated by the Node Lead through the debate mediation skill.
+- Debates are mediated by the Cell Lead through the debate mediation skill.
 - Phase 2 → Phase 1 messages are held for the next iteration.
 
 ## Evidence Preservation
 
 - Event logs are append-only. Never delete or modify past events.
-- When a node is re-opened, all prior evidence is preserved.
+- When a cell is re-opened, all prior evidence is preserved.
 - New evidence is appended alongside existing evidence.

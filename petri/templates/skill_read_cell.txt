@@ -1,10 +1,10 @@
 ---
-description: "Read a node's metadata and evidence"
+description: "Read a cell's metadata and evidence"
 ---
 
-# Read Node
+# Read Cell
 
-Read a node's current state, metadata, and evidence.
+Read a cell's current state, metadata, and evidence.
 
 ## Usage
 
@@ -13,26 +13,26 @@ from petri.graph.colony import deserialize_colony
 from pathlib import Path
 import json
 
-# Read node metadata
-node_dir = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}")
-metadata = json.loads((node_dir / "metadata.json").read_text())
+# Read cell metadata
+cell_dir = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}")
+metadata = json.loads((cell_dir / "metadata.json").read_text())
 
 # Read evidence
-evidence = (node_dir / "evidence.md").read_text()
+evidence = (cell_dir / "evidence.md").read_text()
 
 # Load full colony graph
 colony_dir = Path("$petri_dir/petri-dishes/{colony}")
 graph, colony = deserialize_colony(colony_dir, dish_id="{dish_id}")
 
-# Get specific node
-node = graph.get_node("{node_id}")
+# Get specific cell
+cell = graph.get_cell("{cell_id}")
 ```
 
-## Node File Structure
+## Cell File Structure
 
 ```
 .petri/petri-dishes/{colony}/{level}-{seq}/
 ├── evidence.md      # Human-readable research/evidence
 ├── events.jsonl     # Append-only event log (source of truth)
-└── metadata.json    # Node attributes (status, level, dependencies)
+└── metadata.json    # Cell attributes (status, level, dependencies)
 ```

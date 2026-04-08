@@ -8,16 +8,162 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import shutil
 import subprocess
+import time
+from typing import Callable, Optional
 
-from petri.config import LLM_INFERENCE_MODEL
+from petri.config import AGENT_TOOLS, LLM_INFERENCE_MODEL
 
 logger = logging.getLogger(__name__)
 
 
+# ── Retry policy for transient claude CLI failures ──────────────────────
+# Up to (1 + _MAX_RETRIES) attempts per _ask call. Backoff is exponential
+# with bounded jitter so concurrent workers don't synchronise their
+# retries against the same upstream rate limit.
+_MAX_RETRIES = 2
+_RETRY_BASE_DELAY_SECONDS = 1.5
+_RETRY_JITTER_SECONDS = 0.5
 
+
+def _is_transient_failure(stderr: str) -> bool:
+    """Decide whether a claude CLI failure looks worth retrying.
+
+    Permanent markers win over transient ones — a stderr that mentions
+    both 'auth' and 'rate limit' is treated as permanent (the auth
+    issue won't fix itself). Empty/unknown stderr is treated as
+    transient (claude CLI sometimes exits 1 with no diagnostic on
+    network blips and rate limits).
+    """
+    text = (stderr or "").lower()
+
+    # Permanent: don't waste retries on these.
+    permanent_markers = (
+        "unauthorized", "401", "403", "forbidden",
+        "auth",  # auth, authentication, unauthenticated
+        "model", "not found", "404",
+        "context", "too long", "exceeds", "max tokens",
+        "invalid api key",
+        "billing",
+    )
+    for marker in permanent_markers:
+        if marker in text:
+            return False
+
+    # Transient: worth retrying.
+    transient_markers = (
+        "rate limit", "rate-limit", "too many requests", "429",
+        "timeout", "timed out",
+        "connection reset", "connection refused", "broken pipe",
+        "network",
+        "service unavailable", "503", "502", "504",
+        "internal server error", "500",
+        "temporarily unavailable",
+        "overloaded",
+    )
+    for marker in transient_markers:
+        if marker in text:
+            return True
+
+    # Empty/unknown stderr — claude CLI sometimes fails this way on
+    # transient issues. Retry once rather than fail hard.
+    return not text.strip()
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    """Exponential backoff with bounded jitter. attempt is 1-indexed:
+    attempt=1 → ~1.5s, attempt=2 → ~3s, attempt=3 → ~6s."""
+    base = _RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+    return base + random.uniform(0, _RETRY_JITTER_SECONDS)
+
+
+def _extract_text_delta(event: dict) -> str:
+    """Extract assistant-text delta from a stream-json event.
+
+    Defensive: returns "" for any event shape we don't recognise so the
+    spinner stays empty rather than crashing if the format ever changes.
+    Handles the common Anthropic streaming shapes:
+      - {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "..."}}
+      - {"type": "stream_event", "event": {<the above>}}
+      - {"type": "assistant", "message": {"content": [{"type": "text", "text": "..."}]}}
+    """
+    if not isinstance(event, dict):
+        return ""
+
+    # Direct content_block_delta
+    if event.get("type") == "content_block_delta":
+        delta = event.get("delta") or {}
+        if isinstance(delta, dict) and delta.get("type") == "text_delta":
+            text = delta.get("text", "")
+            return text if isinstance(text, str) else ""
+
+    # Wrapped stream_event
+    if event.get("type") == "stream_event":
+        return _extract_text_delta(event.get("event") or {})
+
+    # Full assistant message (sent as one event in some modes)
+    if event.get("type") == "assistant":
+        message = event.get("message") or {}
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "".join(parts)
+
+    return ""
+
+
+
+
+
+def _process_stream_lines(
+    lines, on_progress: Callable[[str], None]
+) -> str:
+    """Process claude ``--output-format stream-json`` output lines.
+
+    Accumulates text deltas from JSON events into a single buffer and
+    feeds the most recent text line to ``on_progress`` after each delta.
+    Returns the full accumulated text.
+
+    Non-JSON lines are **dropped silently** rather than being treated
+    as model output. claude CLI in stream-json mode emits structured
+    JSON events for everything model-related; any plain-text line on
+    stdout is almost always error noise (auth banner, rate-limit
+    message, debug print) and should NOT pollute the response buffer
+    or the spinner. Dropped lines are logged at DEBUG level for
+    postmortem visibility.
+
+    ``lines`` is any iterable of strings — a real ``proc.stdout`` in
+    production, a list in tests.
+    """
+    buffer: list[str] = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            logger.debug(
+                "Discarding non-JSON stream line: %r", line[:200]
+            )
+            continue
+        chunk = _extract_text_delta(event)
+        if not chunk:
+            continue
+        buffer.append(chunk)
+        joined = "".join(buffer)
+        last_line = joined.rsplit("\n", 1)[-1]
+        if last_line:
+            on_progress(last_line)
+    return "".join(buffer)
 
 
 def _extract_json(text: str) -> dict | None:
@@ -62,19 +208,65 @@ def _coerce_str(value: object) -> str:
     return str(value) if value else ""
 
 
+class ClaudeCLIError(RuntimeError):
+    """Raised when the ``claude`` subprocess exits with a non-zero code.
+
+    Carries the exit code, captured stderr, and any partial stdout so
+    callers can build informative error messages instead of silently
+    swallowing the failure.
+    """
+
+    def __init__(
+        self,
+        *,
+        exit_code: int,
+        stderr: str,
+        stdout: str = "",
+    ) -> None:
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.stdout = stdout
+        stderr_preview = stderr.strip()[:300] or "(empty)"
+        super().__init__(
+            f"claude CLI exited {exit_code}. stderr: {stderr_preview}"
+        )
+
+
 def _parse_verdict(text: str, valid_verdicts: list[str]) -> str:
     upper = text.upper()
     for verdict in valid_verdicts:
         if verdict in upper:
             return verdict
-    return valid_verdicts[0]
+    raise ValueError(
+        f"Model output did not contain any recognized verdict. "
+        f"Expected one of {valid_verdicts}; got: {text[:200]!r}"
+    )
 
 
 class ClaudeCodeProvider:
-    """InferenceProvider that routes through the claude CLI."""
+    """InferenceProvider that routes through the claude CLI.
 
-    def __init__(self, model: str = LLM_INFERENCE_MODEL):
+    ``allowed_tools`` is the explicit allowlist passed to ``claude
+    --allowedTools``. It defaults to ``AGENT_TOOLS`` (read from
+    petri.yaml). Petri NEVER passes
+    ``--allow-dangerously-skip-permissions`` — every tool grant is
+    explicit and named, so adding new tools to Claude Code in the future
+    cannot silently widen the agents' permissions.
+    """
+
+    def __init__(
+        self,
+        model: str = LLM_INFERENCE_MODEL,
+        *,
+        allowed_tools: list[str] | None = None,
+    ):
         self.model = model
+        # If allowed_tools is None, fall back to the global AGENT_TOOLS
+        # default. An explicit empty list means "no tools" — text-only
+        # reasoning, no web access — and is honored as-is.
+        self.allowed_tools = (
+            list(AGENT_TOOLS) if allowed_tools is None else list(allowed_tools)
+        )
         if shutil.which("claude") is None:
             raise FileNotFoundError(
                 "Claude Code CLI ('claude') not found on PATH. "
@@ -83,16 +275,110 @@ class ClaudeCodeProvider:
                 "Run 'petri inspect' to check all prerequisites."
             )
 
-    def _ask(self, prompt: str) -> str:
-        """Send a prompt to claude CLI in print mode."""
+    def _sleep(self, seconds: float) -> None:
+        """Sleep for ``seconds``. Overridable so tests can drive the
+        retry loop without actually waiting on the wall clock."""
+        time.sleep(seconds)
+
+    def _build_claude_command(
+        self, prompt: str, *, streaming: bool
+    ) -> list[str]:
+        """Build the argv for a single claude CLI invocation.
+
+        Centralised so both ``_ask_oneshot`` and ``_ask_streaming`` use
+        the same flag set, including the explicit ``--allowedTools``
+        allowlist. The prompt is always the final positional argument.
+        """
+        command = ["claude", "--print", "--model", self.model]
+        if self.allowed_tools:
+            # IMPORTANT: use the ``--allowedTools=value`` equals form,
+            # NOT the space-separated ``--allowedTools value`` form.
+            # claude CLI declares the flag as ``<tools...>`` (variadic),
+            # so a space-separated value causes the parser to consume
+            # every following positional argument — including our prompt
+            # — as additional tool names, producing the cryptic error
+            # ``Error: Input must be provided either through stdin or
+            # as a prompt argument when using --print``. The equals form
+            # binds the value to the flag unambiguously.
+            command.append(
+                f"--allowedTools={','.join(self.allowed_tools)}"
+            )
+        else:
+            # Explicit empty list means "no tools at all" — text-only
+            # reasoning. ``--tools=`` (equals form, empty value) is
+            # claude CLI's documented way to disable the entire
+            # built-in tool set, distinct from simply omitting
+            # --allowedTools (which would inherit whatever the user's
+            # settings.json grants). Use the equals form for the same
+            # variadic-parser reason as above.
+            command.append("--tools=")
+        if streaming:
+            command.extend(
+                [
+                    "--output-format", "stream-json",
+                    "--include-partial-messages",
+                    "--verbose",
+                ]
+            )
+        command.append(prompt)
+        return command
+
+    def _ask(
+        self,
+        prompt: str,
+        on_progress: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        """Send a prompt to claude CLI in print mode.
+
+        If ``on_progress`` is supplied, streams output via stream-json so the
+        caller can display the model's text as it's generated. Otherwise uses
+        the simpler one-shot path.
+        """
+        if on_progress is None:
+            return self._ask_oneshot(prompt)
+        return self._ask_streaming(prompt, on_progress)
+
+    def _ask_oneshot(self, prompt: str) -> str:
+        """One-shot subprocess call with retry on transient failures.
+
+        Retries up to ``_MAX_RETRIES`` times for transient failures
+        (rate limits, network blips, server errors). Permanent failures
+        (auth, model not found, context too long) raise immediately so
+        we don't burn budget on a doomed call.
+        """
+        for attempt in range(1, _MAX_RETRIES + 2):
+            try:
+                return self._oneshot_attempt(prompt)
+            except ClaudeCLIError as cli_error:
+                if attempt > _MAX_RETRIES:
+                    raise
+                if not _is_transient_failure(cli_error.stderr):
+                    raise
+                delay = _retry_delay_seconds(attempt)
+                logger.warning(
+                    "Transient claude CLI failure (exit %d, attempt %d/%d), "
+                    "retrying in %.1fs. stderr: %r",
+                    cli_error.exit_code,
+                    attempt,
+                    _MAX_RETRIES + 1,
+                    delay,
+                    (cli_error.stderr or "")[:200],
+                )
+                self._sleep(delay)
+        # Unreachable: the loop either returns or raises.
+        raise RuntimeError(  # pragma: no cover
+            "_ask_oneshot retry loop fell through"
+        )
+
+    def _oneshot_attempt(self, prompt: str) -> str:
+        """A single one-shot subprocess call. No retries.
+
+        Raises ``ClaudeCLIError`` on non-zero exit so the caller (the
+        retry wrapper) can decide whether to back off or give up.
+        """
         try:
             result = subprocess.run(
-                [
-                    "claude",
-                    "--print",
-                    "--model", self.model,
-                    prompt,
-                ],
+                self._build_claude_command(prompt, streaming=False),
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -103,9 +389,13 @@ class ClaudeCodeProvider:
                 "Install: https://docs.anthropic.com/en/docs/claude-code"
             ) from None
         if result.returncode != 0:
-            stderr = result.stderr.strip()
+            stderr = (result.stderr or "").strip()
+            stdout = (result.stdout or "").strip()
             logger.warning(
-                "claude CLI error (exit %d): %s", result.returncode, stderr[:1000]
+                "claude CLI error (exit %d). stderr=%r stdout=%r",
+                result.returncode,
+                stderr[:500],
+                stdout[:500],
             )
             if "model" in stderr.lower() and "not found" in stderr.lower():
                 logger.warning(
@@ -113,51 +403,249 @@ class ClaudeCodeProvider:
                     "Verify the model name and your Claude Code authentication.",
                     self.model,
                 )
+            raise ClaudeCLIError(
+                exit_code=result.returncode,
+                stderr=stderr,
+                stdout=stdout,
+            )
         return result.stdout.strip()
 
+    def _ask_streaming(
+        self, prompt: str, on_progress: Callable[[str], None]
+    ) -> str:
+        """Stream claude output line-by-line with retry on transient failures.
+
+        Each retry restarts the subprocess from scratch — partial output
+        from the failed attempt is discarded. ``on_progress`` may be
+        called multiple times across retries (the spinner will simply
+        update twice).
+        """
+        for attempt in range(1, _MAX_RETRIES + 2):
+            try:
+                return self._streaming_attempt(prompt, on_progress)
+            except ClaudeCLIError as cli_error:
+                if attempt > _MAX_RETRIES:
+                    raise
+                if not _is_transient_failure(cli_error.stderr):
+                    raise
+                delay = _retry_delay_seconds(attempt)
+                logger.warning(
+                    "Transient claude CLI streaming failure "
+                    "(exit %d, attempt %d/%d), retrying in %.1fs. stderr: %r",
+                    cli_error.exit_code,
+                    attempt,
+                    _MAX_RETRIES + 1,
+                    delay,
+                    (cli_error.stderr or "")[:200],
+                )
+                self._sleep(delay)
+        # Unreachable: the loop either returns or raises.
+        raise RuntimeError(  # pragma: no cover
+            "_ask_streaming retry loop fell through"
+        )
+
+    def _streaming_attempt(
+        self, prompt: str, on_progress: Callable[[str], None]
+    ) -> str:
+        """A single streaming subprocess call. No retries.
+
+        Uses ``--output-format stream-json --include-partial-messages`` so
+        each line of stdout is a JSON event. Assistant-text deltas are
+        accumulated into a buffer; on each new chunk we feed the most recent
+        line of accumulated text to ``on_progress``. Returns the full
+        accumulated text on completion. Raises ``ClaudeCLIError`` on
+        non-zero exit so the retry wrapper can decide whether to back off.
+        """
+        cmd = self._build_claude_command(prompt, streaming=True)
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "Claude Code CLI ('claude') not found on PATH. "
+                "Install: https://docs.anthropic.com/en/docs/claude-code"
+            ) from None
+
+        accumulated_text = ""
+        assert proc.stdout is not None
+        try:
+            accumulated_text = _process_stream_lines(proc.stdout, on_progress)
+        finally:
+            try:
+                proc.wait(timeout=300)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+        if proc.returncode != 0:
+            stderr = ""
+            if proc.stderr is not None:
+                try:
+                    stderr = proc.stderr.read() or ""
+                except Exception:
+                    stderr = ""
+            partial_stdout = accumulated_text.strip()
+            logger.warning(
+                "claude CLI streaming error (exit %d). stderr=%r stdout=%r",
+                proc.returncode,
+                stderr.strip()[:500],
+                partial_stdout[:500],
+            )
+            raise ClaudeCLIError(
+                exit_code=proc.returncode,
+                stderr=stderr.strip(),
+                stdout=partial_stdout,
+            )
+
+        return accumulated_text.strip()
+
+    def assess_claim_substance(
+        self,
+        claim: str,
+        on_progress: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        """Decide whether a claim is substantive enough to warrant a wizard.
+
+        The model flags placeholder/test/empty input ("this is a test claim",
+        "asdf", "hello world") as non-substantive so the CLI can short-circuit
+        the clarifying-question wizard.
+
+        Returns a dict with keys:
+            is_substantive (bool)
+            reason (str)               -- one-sentence explanation
+            suggested_rewrite (str)    -- optional; "" if none
+        """
+        prompt = (
+            "Assess whether the following text is a SUBSTANTIVE research claim "
+            "that warrants decomposition, or whether it is placeholder/test "
+            "input (e.g. 'this is a test claim', 'asdf', 'hello world', empty).\n\n"
+            f"Text: \"{claim}\"\n\n"
+            "Return ONLY a JSON object:\n"
+            "{\n"
+            '  "is_substantive": true|false,\n'
+            '  "reason": "one-sentence explanation",\n'
+            '  "suggested_rewrite": "tighter rephrasing, or empty string"\n'
+            "}\n"
+        )
+        try:
+            raw = self._ask(prompt, on_progress=on_progress)
+        except ClaudeCLIError:
+            # Subprocess failed — fall through to the wizard rather than
+            # block the user. The seed flow will surface the error if
+            # subsequent calls also fail.
+            return {"is_substantive": True, "reason": "", "suggested_rewrite": ""}
+        parsed = _extract_json(raw)
+        if not isinstance(parsed, dict):
+            # Treat parse failure as substantive — fall through to the wizard
+            # rather than block the user on a model glitch.
+            return {"is_substantive": True, "reason": "", "suggested_rewrite": ""}
+        return {
+            "is_substantive": bool(parsed.get("is_substantive", True)),
+            "reason": _coerce_str(parsed.get("reason", "")),
+            "suggested_rewrite": _coerce_str(parsed.get("suggested_rewrite", "")),
+        }
+
     def generate_clarifying_questions(
-        self, claim: str, max_questions: int = 5
+        self,
+        claim: str,
+        max_questions: int = 5,
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> list[dict]:
         prompt = (
-            f"Generate {max_questions} clarifying questions for this research claim:\n"
-            f"\"{claim}\"\n\n"
-            f"Return ONLY a JSON array: [{{\"question\": \"...\", \"options\": [...]}}]"
+            f"Generate {max_questions} CLAIM-SPECIFIC clarifying questions for this research claim. "
+            "The questions must be tailored to the actual content of the claim — do not use generic "
+            "questions like 'what is the domain?' or 'what is the time horizon?'. Each question should "
+            "surface a specific assumption, scope boundary, or definitional ambiguity in THIS claim.\n\n"
+            f"Claim: \"{claim}\"\n\n"
+            "For each question, optionally provide 2-5 multiple-choice options when the answer space is "
+            "naturally bounded; otherwise leave options empty for free-text input.\n\n"
+            "Return ONLY a JSON array: "
+            '[{"question": "...", "options": ["...", "..."]}, ...]'
         )
-        raw = self._ask(prompt)
+        try:
+            raw = self._ask(prompt, on_progress=on_progress)
+        except ClaudeCLIError:
+            # Subprocess failed — return no questions and let the seed
+            # flow proceed without the wizard step.
+            return []
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, list):
                 return parsed[:max_questions]
         except (json.JSONDecodeError, TypeError):
             pass
+        # Try the more lenient extractor for fenced/wrapped output
+        wrapped = _extract_json(raw)
+        if isinstance(wrapped, list):
+            return wrapped[:max_questions]
         return []
 
-    def decompose_claim(self, claim: str, clarifications: list[dict]) -> dict:
+    def decompose_claim(
+        self,
+        claim: str,
+        clarifications: list[dict],
+        guidance: str = "",
+        max_premises: int = 5,
+        on_progress: Optional[Callable[[str], None]] = None,
+    ) -> dict:
         clarification_text = ""
         if clarifications:
             lines = [f"Q: {c['question']} A: {c.get('answer', 'N/A')}" for c in clarifications]
             clarification_text = "\nClarifications:\n" + "\n".join(lines)
 
+        guidance_text = ""
+        if guidance.strip():
+            guidance_text = (
+                "\nRefinement guidance from user (must shape this re-roll):\n"
+                f"{guidance.strip()}\n"
+            )
+
         prompt = (
-            "Decompose this claim using FIRST PRINCIPLES thinking.\n"
-            "Break it down to fundamental, irreducible truths that can be independently verified.\n\n"
-            "DO NOT just rephrase the claim. Ask 'WHY?' repeatedly until you reach bedrock facts.\n"
-            "Identify key DEFINITIONS, ASSUMPTIONS, and EVIDENCE needed.\n\n"
-            f"Claim: \"{claim}\"{clarification_text}\n\n"
-            "Return JSON with 'nodes' and 'edges' arrays.\n"
-            "Each node: {level, seq, claim_text, dependencies: [{level, seq}]}\n"
-            "Each edge: {from: {level, seq}, to: {level, seq}}\n"
-            "Level 0 = original claim. Level 1 = core assumptions. "
-            "Level 2 = fundamental facts.\n\n"
-            "Return ONLY the JSON object."
+            "Decompose this claim into first-principles premises.\n\n"
+            f"Claim: \"{claim}\"{clarification_text}{guidance_text}\n\n"
+            "Work through this in four explicit steps. Show your reasoning as "
+            "you go — the user is watching this stream live.\n\n"
+            "STEP 1 — BRAINSTORM (overgenerate).\n"
+            "List 10-15 candidate premises that, if false, would invalidate "
+            "the claim. Cast a wide net. Cover different angles: definitions, "
+            "mechanisms, scope boundaries, counterfactuals, hidden assumptions. "
+            "Number them 1..N. Do NOT filter at this stage.\n\n"
+            "STEP 2 — PRIORITIZE.\n"
+            "For each candidate, score on three dimensions:\n"
+            "  - LOAD-BEARING: would the claim collapse if this were false? (HIGH/MED/LOW)\n"
+            "  - CONTESTABLE: is this actually in question, not trivially true? (HIGH/MED/LOW)\n"
+            "  - DISTINCT: does it cover ground the other top candidates don't?\n"
+            "Briefly justify each score.\n\n"
+            "STEP 3 — SELECT.\n"
+            f"Pick the TOP {max_premises} premises after ranking. Order them by "
+            "importance (most important first). Drop duplicates and trivial restatements. "
+            "Do not pick the first ones you wrote down — pick the ones that scored highest.\n\n"
+            "STEP 4 — EMIT JSON.\n"
+            "Return a JSON object on the final lines:\n"
+            '{"nodes": [{"level": 1, "seq": 1, "claim_text": "..."}, ...], "edges": []}\n\n'
+            f"The JSON must contain AT MOST {max_premises} nodes (fewer is fine if "
+            "fewer genuine first-principles premises exist). Return no commentary "
+            "after the JSON."
         )
-        raw = self._ask(prompt)
+        raw = self._ask(prompt, on_progress=on_progress)
         parsed = _extract_json(raw)
         if parsed and "nodes" in parsed:
             return parsed
         return {"nodes": [], "edges": []}
 
-    def decompose_why(self, premise: str, parent_level: int, parent_seq: int) -> list[dict]:
+    def decompose_why(
+        self,
+        premise: str,
+        parent_level: int,
+        parent_seq: int,
+        max_premises: int = 5,
+        on_progress: Optional[Callable[[str], None]] = None,
+    ) -> list[dict]:
         """Five Whys: ask 'Why is this true?' for a single premise.
 
         Returns a list of sub-premise dicts: [{claim_text, is_atomic}].
@@ -165,19 +653,32 @@ class ClaudeCodeProvider:
         an empty list.
         """
         prompt = (
-            "FIVE WHYS DECOMPOSITION — one level deeper.\n\n"
+            "FIVE WHYS — drill one level deeper into a parent premise.\n\n"
             f"Premise: \"{premise}\"\n\n"
-            "Ask: WHY is this true? What must be true for this premise to hold?\n\n"
-            "If this premise is already ATOMIC (a directly verifiable fact, a "
-            "definition, or a measurement that can be looked up), return:\n"
+            "Work through this in four explicit steps. Show your reasoning "
+            "as you go — the user is watching this stream live.\n\n"
+            "STEP 1 — BRAINSTORM (overgenerate).\n"
+            "List 6-10 candidate sub-premises that must hold for the parent "
+            "premise to be true. Number them 1..N. Don't filter yet.\n\n"
+            "STEP 2 — PRIORITIZE.\n"
+            "For each candidate, score on:\n"
+            "  - FOUNDATIONALITY: closer to bedrock = higher (HIGH/MED/LOW)\n"
+            "  - INDEPENDENCE: separately verifiable from the others (HIGH/MED/LOW)\n"
+            "  - LOAD-BEARING: would the parent collapse if this sub-premise were false?\n"
+            "Briefly justify each score.\n\n"
+            "STEP 3 — SELECT.\n"
+            f"Pick the TOP {max_premises} sub-premises. Drop redundant or "
+            "surface-level ones. Do not pick the first ones you wrote down — "
+            "pick the ones that scored highest.\n\n"
+            "If the parent is already ATOMIC (a directly verifiable fact, "
+            "definition, or measurement), skip steps 1-3 and return:\n"
             '{"sub_premises": [], "is_atomic": true, "reason": "why it is atomic"}\n\n'
-            "Otherwise, break it into 2-4 sub-premises that are more fundamental. "
-            "Each sub-premise should be closer to a bedrock, independently verifiable truth.\n"
-            "Return:\n"
-            '{"sub_premises": [{"claim_text": "...", "is_atomic": false}], "is_atomic": false}\n\n'
-            "Return ONLY the JSON object."
+            "STEP 4 — EMIT JSON.\n"
+            'Return: {"sub_premises": [{"claim_text": "...", "is_atomic": false}, ...], "is_atomic": false}\n\n'
+            f"The sub_premises list must contain AT MOST {max_premises} items. "
+            "Return no commentary after the JSON."
         )
-        raw = self._ask(prompt)
+        raw = self._ask(prompt, on_progress=on_progress)
         parsed = _extract_json(raw)
         if parsed and parsed.get("is_atomic", False):
             return []
@@ -185,13 +686,25 @@ class ClaudeCodeProvider:
             return parsed["sub_premises"]
         return []
 
-    def assess_node(
-        self, node_id: str, claim_text: str, context: dict, agent_role: str
+    def assess_cell(
+        self,
+        cell_id: str,
+        claim_text: str,
+        context: dict,
+        agent_role: str,
+        *,
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> "AssessmentResult":
         from petri.config import get_agent_verdicts, get_agent_instruction
         from petri.models import AssessmentResult, SourceCitation
 
-        valid_verdicts = get_agent_verdicts(agent_role) or ["PASS"]
+        valid_verdicts = get_agent_verdicts(agent_role)
+        if not valid_verdicts:
+            raise ValueError(
+                f"Unknown agent role {agent_role!r}: not declared in agents.yaml. "
+                "Add it to .petri/defaults/petri.yaml under 'agents:' with explicit "
+                "verdicts_pass and verdicts_block lists."
+            )
         verdict_list = ", ".join(valid_verdicts)
         role_instruction = get_agent_instruction(agent_role) or "Assess this claim thoroughly."
 
@@ -219,7 +732,7 @@ class ClaudeCodeProvider:
         prompt = (
             f"You are the {agent_role} agent in a research validation pipeline.\n\n"
             f"{role_instruction}\n\n"
-            f"Node: {node_id}\n"
+            f"Cell: {cell_id}\n"
             f"Claim: \"{claim_text}\"\n"
             f"Context: {context_str}\n"
             f"{evidence_section}\n"
@@ -242,13 +755,45 @@ class ClaudeCodeProvider:
             f"Return ONLY the JSON."
         )
 
-        raw = self._ask(prompt)
+        try:
+            raw = self._ask(prompt, on_progress=on_progress)
+        except ClaudeCLIError as cli_error:
+            # Subprocess failure — surface the real stderr in the summary
+            # so the user can see WHY claude failed (auth, rate limit,
+            # model name, prompt too long, etc.) instead of a generic
+            # "execution error". Truncate aggressively to keep the row
+            # readable in the multi-spinner UI.
+            stderr_excerpt = (cli_error.stderr or "").strip()[:400] or "(empty)"
+            return AssessmentResult(
+                agent=agent_role,
+                verdict="EXECUTION_ERROR",
+                summary=(
+                    f"claude CLI failed (exit {cli_error.exit_code}). "
+                    f"stderr: {stderr_excerpt}"
+                ),
+            )
         parsed = _extract_json(raw)
 
         if parsed and "verdict" in parsed:
-            validated_verdict = parsed["verdict"].upper()
-            if validated_verdict not in valid_verdicts:
-                validated_verdict = _parse_verdict(raw, valid_verdicts)
+            raw_verdict = _coerce_str(parsed["verdict"]).upper()
+            if raw_verdict in valid_verdicts:
+                validated_verdict = raw_verdict
+            else:
+                # JSON had a verdict field but its value isn't valid for
+                # this agent — try to recover from the raw text. If THAT
+                # also fails, surface as EXECUTION_ERROR rather than
+                # silently returning the first pass verdict.
+                try:
+                    validated_verdict = _parse_verdict(raw, valid_verdicts)
+                except ValueError:
+                    return AssessmentResult(
+                        agent=agent_role,
+                        verdict="EXECUTION_ERROR",
+                        summary=(
+                            f"Model returned unrecognized verdict {raw_verdict!r}. "
+                            f"Raw output: {raw[:300]}"
+                        ),
+                    )
 
             # Coerce sources_cited to SourceCitation models
             raw_sources = parsed.get("sources_cited", [])
@@ -269,9 +814,71 @@ class ClaudeCodeProvider:
                 sources_cited=sources,
             )
 
-        verdict = _parse_verdict(raw, valid_verdicts)
+        # No JSON could be extracted — total failure path. Try to salvage
+        # a verdict from raw text; otherwise surface EXECUTION_ERROR.
+        try:
+            verdict = _parse_verdict(raw, valid_verdicts)
+        except ValueError:
+            return AssessmentResult(
+                agent=agent_role,
+                verdict="EXECUTION_ERROR",
+                summary=(
+                    f"Model output could not be parsed as JSON or matched "
+                    f"against a valid verdict. Raw output: {raw[:300]}"
+                ),
+            )
         return AssessmentResult(
             agent=agent_role,
             verdict=verdict,
             summary=raw[:500].strip(),
         )
+
+    def summarize_evidence(
+        self,
+        cell_id: str,
+        claim_text: str,
+        evidence_md: str,
+        iteration: int,
+    ) -> str:
+        """Ask cell_lead to produce a concise summary of the current state
+        of evidence.md for a cell.
+
+        Unlike ``assess_cell``, this does not validate verdicts or return an
+        ``AssessmentResult`` — it's a pure content generator that returns a
+        markdown string to be written straight to ``summary.md``. The agent
+        identity in event logs is still ``cell_lead`` so the audit trail is
+        consistent with the lifecycle events cell_lead already owns.
+
+        The prompt is intentionally hand-built inline (rather than going
+        through the agent-role + verdict-set machinery) because:
+        - There's no verdict to return — the output is free-form markdown.
+        - We want deterministic section headings in the result, not
+          whatever cell_lead's generic instruction would produce.
+        - Summaries are cheap and called frequently; bypassing the verdict
+          parser also avoids parse-error retry loops on what is purely
+          presentational output.
+        """
+        prompt = (
+            "You are cell_lead, the orchestrator for this research cell. "
+            "Your job right now is to read the accumulated evidence below "
+            "and produce a concise markdown summary (no more than ~400 "
+            "words) that a human can scan in 30 seconds.\n\n"
+            f"## Cell claim\n{claim_text}\n\n"
+            f"## Iteration\n{iteration}\n\n"
+            "## Accumulated evidence\n"
+            f"{evidence_md}\n\n"
+            "## Output format\n"
+            "Return ONLY markdown with these sections, in this order:\n"
+            "1. **Current state** — one sentence describing where the "
+            "cell stands right now.\n"
+            "2. **Key findings** — 3-6 bullet points, each anchored to a "
+            "specific source or agent verdict. Be concrete, not generic.\n"
+            "3. **Open questions** — 1-3 bullets of what is still "
+            "unresolved, or 'None' if the cell has converged.\n"
+            "4. **Confidence** — a short phrase (e.g. 'high, primary "
+            "sources agree', 'low, contradicting sources', "
+            "'medium, pending red team').\n\n"
+            "Do not repeat the phase-by-phase breakdown from evidence.md "
+            "— that's the raw log. Synthesize across phases."
+        )
+        return self._ask(prompt)

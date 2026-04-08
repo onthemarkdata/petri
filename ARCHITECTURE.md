@@ -4,12 +4,12 @@ Petri is a colony-based research orchestration framework. It decomposes claims i
 
 ## Colony DAG
 
-A **colony** is a DAG of **nodes**, each representing a sub-claim derived from a root claim. Nodes are identified by composite keys: `{dish}-{colony}-{level}-{seq}`.
+A **colony** is a DAG of **cells**, each representing a sub-claim derived from a root claim. The hierarchy is **petri dish → colony(s) → cell(s)**. Cells are identified by composite keys: `{dish}-{colony}-{level}-{seq}`.
 
 - **Level 0** is the center (root claim)
 - Levels increase outward as claims decompose into more fundamental sub-claims
-- **Cell nodes** (leaves with no dependencies) are validated first
-- Parent nodes unlock for validation only after all their dependencies pass
+- **Leaf cells** (with no dependencies) are validated first
+- Parent cells unlock for validation only after all their dependencies pass
 
 Cycle detection (Kahn's algorithm) ensures the graph remains a valid DAG. Cross-colony edges are supported for shared dependencies.
 
@@ -22,7 +22,7 @@ Petri uses 13 agents organized into leads and specialists:
 | Agent | Role |
 |-------|------|
 | `decomposition_lead` | Manages claim decomposition into DAG |
-| `node_lead` | Orchestrates node through validation phases |
+| `cell_lead` | Orchestrates cell through validation phases |
 | `red_team_lead` | Leads adversarial disproval attempt |
 
 ### Specialists
@@ -40,11 +40,11 @@ Petri uses 13 agents organized into leads and specialists:
 | `impact_assessor` | Critique | No | CRITICAL_PATH, SUPPORTING_NOT_BLOCKING, ISOLATED_LOW_IMPACT | -- |
 | `evidence_evaluator` | Evaluation | No | EVIDENCE_CONFIRMS, EVIDENCE_REFUTES, EVIDENCE_INCONCLUSIVE | -- |
 
-**6 blocking agents** must all pass for convergence. The `triage` agent is conditionally blocking -- a LOW_VALUE_DEFER verdict short-circuits the node to deferred status. Advisory agents (`simplifier`, `impact_assessor`) inform but do not gate.
+**6 blocking agents** must all pass for convergence. The `triage` agent is conditionally blocking -- a LOW_VALUE_DEFER verdict short-circuits the cell to deferred status. Advisory agents (`simplifier`, `impact_assessor`) inform but do not gate.
 
 ## Pipeline Flow
 
-Each node passes through six phases:
+Each cell passes through six phases:
 
 ```
 1. Socratic Questioning
@@ -61,18 +61,18 @@ Each node passes through six phases:
    Fail → iterate with weakest-link feedback (max 3 iterations)
 
 5. Red Team
-   Dedicated adversarial phase builds strongest case against the node
+   Dedicated adversarial phase builds strongest case against the cell
 
 6. Evidence Evaluation
    Final verdict: VALIDATED, DISPROVEN, or DEFER
    Terminal verdicts require Level 1-4 sources
 ```
 
-Within each phase, agents run concurrently (ThreadPoolExecutor, default 4 workers). Phases execute sequentially per node.
+Within each phase, agents run concurrently (ThreadPoolExecutor, default 4 workers). Phases execute sequentially per cell.
 
 ## State Machine
 
-Nodes move through 14 queue states. The `mediating` state is the convergence decision point -- it either advances to red team, iterates back to research with feedback, or triggers the circuit breaker.
+Cells move through 14 queue states. The `mediating` state is the convergence decision point -- it either advances to red team, iterates back to research with feedback, or triggers the circuit breaker.
 
 ```mermaid
 graph TD
@@ -149,7 +149,7 @@ After critique, four structured debates sharpen the analysis:
 |---------|--------|---------|
 | skeptic vs champion | 1.5 | Adversarial challenge -- can the claim survive its strongest critic? |
 | skeptic vs pragmatist | 1.0 | Practical relevance -- does the critique matter in practice? |
-| simplifier vs impact_assessor | 1.0 | Scope safety -- is simplification safe given the node's impact? |
+| simplifier vs impact_assessor | 1.0 | Scope safety -- is simplification safe given the cell's impact? |
 | triage vs impact_assessor | 1.0 | Effort alignment -- is the effort justified by criticality? |
 
 A 1.5-round debate: Agent A opens, Agent B responds, Agent A rebuts. A 1.0-round debate omits the rebuttal.
@@ -167,11 +167,11 @@ Convergence is a mechanical check (no LLM involvement):
 
 ## Event Sourcing
 
-Every action is recorded as an immutable event in per-node JSONL files (`.petri/petri-dishes/{colony}/{node}/events.jsonl`).
+Every action is recorded as an immutable event in per-cell JSONL files (`.petri/petri-dishes/{colony}/{cell}/events.jsonl`).
 
-**11 event types:** search_executed, source_reviewed, freshness_checked, verdict_issued, evidence_appended, debate_mediated, convergence_checked, node_reopened, propagation_triggered, decomposition_created, decomposition_audit
+**11 event types:** search_executed, source_reviewed, freshness_checked, verdict_issued, evidence_appended, debate_mediated, convergence_checked, cell_reopened, propagation_triggered, decomposition_created, decomposition_audit
 
-Events are identified by `{node_key}-{8hex}` and timestamped in UTC. The event log is the source of truth -- the queue and metadata files are derived state.
+Events are identified by `{cell_key}-{8hex}` and timestamped in UTC. The event log is the source of truth -- the queue and metadata files are derived state.
 
 ## Citation-First Evidence Model
 
@@ -201,23 +201,74 @@ Evidence is ranked by a six-level credibility hierarchy:
 | 5 | Single Expert Opinion |
 | 6 | Community Report |
 
-Terminal verdicts (VALIDATED, DISPROVEN) require at least one source at Level 4 or higher. Nodes with only Level 5-6 evidence cannot reach terminal status.
+Terminal verdicts (VALIDATED, DISPROVEN) require at least one source at Level 4 or higher. Cells with only Level 5-6 evidence cannot reach terminal status.
 
 ## Storage
 
 Petri uses a two-store separation:
 
-- **Event logs** (JSONL, append-only) -- immutable audit trail per node
+- **Event logs** (JSONL, append-only) -- immutable audit trail per cell
 - **Queue** (JSON, file-locked with `fcntl`) -- mutable state machine, atomic transitions
 - **SQLite** (disposable) -- dashboard index, rebuilt from event logs on demand
 
 No data is duplicated between event logs and queue. The event log is authoritative; the queue tracks processing state only.
 
+## Dashboard / Frontend
+
+`petri launch` boots a single-process FastAPI server (default `127.0.0.1:8090`) that serves both the REST/SSE API and the Petri Lab web UI. The frontend is intentionally a **single static HTML file** with no build step — just `petri/templates/frontend.html`, ~116 KB, vanilla JS plus xterm.js and marked from CDN.
+
+### Server (`petri/dashboard/`)
+
+| File | Role |
+|------|------|
+| `api.py` | FastAPI app with ~15 routes: health, init, seed, dishes, cells, cell detail, events, stats, queue, plus the `/api/proc/*` PTY subprocess bridge and the `/api/stream` SSE event bus |
+| `frontend.py` | Loads `templates/frontend.html` and substitutes status colors, event colors, pass-verdict list, and version via `string.Template.safe_substitute` (same pattern as agent generators) |
+| `migrate.py` | Builds the disposable SQLite read index from the JSONL event logs at startup |
+
+The SQLite index is rebuilt from JSONL on every `petri launch`, so killing the dashboard never loses data — the event log is still the source of truth.
+
+### Six screens (single-file SPA)
+
+The frontend is a hash-routed SPA inside one HTML file:
+
+| Screen | Purpose |
+|--------|---------|
+| **Title** | Animated PETRI splash; tap-to-enter gates the audio + the rest of the UI |
+| **Computer** | PTY-backed terminal that runs petri subcommands through xterm.js. Doubles as the onboarding wizard surface for first-run users |
+| **Lab** | HUD overview of all colonies + the live processing queue |
+| **Colony DAG** | Interactive force-directed DAG of one colony's cells, color-coded by status |
+| **Logs** | Filtered stream of recent events across all colonies |
+| **Cell** | Detail page for one cell: research tag, title, info cards, latest verdicts per agent, evidence summary (markdown), citations with URL links, friendly-rendered event log |
+
+All non-title screens share a CRT/HUD chrome with cut-corner panels, phosphor-green on black, and a shared pixel-art PETRI logo drawn to a `<canvas>` in the header bar.
+
+### The Computer tab is one xterm surface
+
+The Computer screen is the most architecturally interesting piece. It is **one xterm.js terminal** that hosts two modes interchangeably:
+
+1. **Onboarding wizard** — for first-run users with no `.petri/`, the wizard prompts (dish name, model, concurrency, iterations) are written into xterm via ANSI sequences and answered through the persistent bottom `#term-cmd` input. Arrow-key selects redraw in place via `\x1b[<n>A` cursor-up + `\r\x1b[2K` clear-line escapes.
+
+2. **Command mode** — once initialized, the user types `petri <subcommand>` into the same input. The frontend POSTs to `/api/proc/start`, which spawns `python -m petri <subcommand>` inside a `pty.openpty()` PTY with `TERM=xterm-256color`, `FORCE_COLOR=1`, and `PYTHONUNBUFFERED=1`. The subprocess sees a real terminal, so rich's `Live` display, animated braille spinners, and ANSI colors all activate. Raw PTY bytes stream back over SSE (`/api/proc/stream/{id}`), base64-encoded so escape sequences survive JSON transit, and are written straight into `XTERM.write(bytes)`. The output in the browser is byte-for-byte identical to the same command run in a real terminal.
+
+xterm itself runs with `disableStdin: true` — it's a write-only display. All keystrokes go to the bottom HTML input, which dispatches to either the wizard's `pendingPrompt` callback or to `termRun()`. Clicking anywhere in the xterm area redirects focus back to the input so xterm's hidden textarea cannot silently steal focus.
+
+### Live event bus
+
+`/api/stream` is a long-lived SSE channel that the dashboard subscribes to once on page load. The processor publishes events (cell status changes, verdicts issued, evidence appended, convergence checked, etc.) through an in-process broker; the SSE generator forwards them to all connected clients. Each screen opportunistically refreshes itself when a relevant event arrives — e.g. the Lab queue re-renders on a status change, the Cell page re-renders when a verdict for its cell is issued.
+
+This is what makes the dashboard "live" without polling: the JSONL event log is also the source of truth for the UI, and the in-memory broker is just a fan-out tap on top of it.
+
+### Security posture
+
+- Default bind is `127.0.0.1` only — the Computer tab can run arbitrary `petri` subcommands, so loopback-only is the safe default. `--host 0.0.0.0` is opt-in and prints a LAN-exposure warning at launch.
+- Subprocess argv is restricted to a hard-coded allowlist of petri subcommands; arbitrary shell commands are rejected.
+- Stale prior dashboards on the same port are detected via `/api/health` self-identification before being SIGKILLed, so an unrelated dev server on port 8090 is never killed by accident.
+
 ## Propagation
 
 When new evidence arrives (`petri feed`):
 
-1. Affected nodes are **re-opened** (status reset to NEW, preserving all prior evidence)
+1. Affected cells are **re-opened** (status reset to NEW, preserving all prior evidence)
 2. Dependents are **flagged** via BFS upward through the DAG
 3. Flagged dependents are not automatically re-opened (conservative approach -- requires explicit re-queueing)
-4. `node_reopened` and `propagation_triggered` events are logged for audit
+4. `cell_reopened` and `propagation_triggered` events are logged for audit

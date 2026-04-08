@@ -1,6 +1,9 @@
 # .petri output
 .petri/
 
+# macOS
+.DS_Store
+
 #claude
 .claude/
 

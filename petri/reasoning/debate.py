@@ -118,7 +118,7 @@ def mediate_debate(
 
 def log_debate(
     events_path: Path,
-    node_id: str,
+    cell_id: str,
     iteration: int,
     debate_result: DebateResult,
 ) -> None:
@@ -131,9 +131,9 @@ def log_debate(
 
     append_event(
         events_path=events_path,
-        node_id=node_id,
+        cell_id=cell_id,
         event_type="debate_mediated",
-        agent="node_lead",
+        agent="cell_lead",
         iteration=iteration,
         data={
             "from_agent": pair[0] if pair else "",

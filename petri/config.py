@@ -27,6 +27,20 @@ def load_config(config_path: Path | None = None) -> dict:
     return cfg
 
 
+def load_dish_config(petri_dir: Path) -> dict:
+    """Load ``petri.yaml`` from a specific dish directory.
+
+    Returns an empty dict if the file does not exist — callers fall back
+    to defaults in that case. ``pyyaml`` is a hard dependency (see
+    ``pyproject.toml``) so no fallback parser is needed.
+    """
+    config_path = petri_dir / "defaults" / "petri.yaml"
+    if not config_path.exists():
+        return {}
+    cfg = yaml.safe_load(config_path.read_text())
+    return cfg or {}
+
+
 def get_model_name(config: dict | None = None) -> str:
     cfg = config or load_config()
     model = cfg.get("model")
@@ -63,6 +77,52 @@ def get_max_decomposition_depth(config: dict | None = None) -> int:
     value = cfg.get("max_decomposition_depth")
     if value is None:
         raise KeyError("Missing 'max_decomposition_depth' in petri.yaml")
+    return int(value)
+
+
+def get_agent_tools(config: dict | None = None) -> list[str]:
+    """Tools the petri pipeline agents can call via Claude Code.
+
+    Used as the value for ``--allowedTools`` when invoking the ``claude``
+    CLI in print mode. Without this, agents inherit whatever the user's
+    local Claude Code config grants in non-interactive mode — which
+    typically does not include WebSearch or WebFetch, leaving the model
+    to fabricate citation URLs from training data.
+
+    Returns the list verbatim from petri.yaml. An empty list is
+    permitted (and means "no tools", which forces text-only reasoning).
+    A missing key falls back to a research-focused default.
+
+    Petri NEVER passes ``--allow-dangerously-skip-permissions`` —
+    every grant is explicit and named, so adding new tools to Claude
+    Code in the future cannot silently widen the agents' permissions.
+    """
+    cfg = config or load_config()
+    if "agent_tools" not in cfg:
+        return ["WebSearch", "WebFetch", "Read", "Glob", "Grep"]
+    tools = cfg.get("agent_tools")
+    if tools is None:
+        return []
+    if not isinstance(tools, list):
+        raise TypeError(
+            f"'agent_tools' in petri.yaml must be a list, "
+            f"got {type(tools).__name__}"
+        )
+    return [str(tool) for tool in tools]
+
+
+def get_max_nodes_per_layer(config: dict | None = None) -> int:
+    """Per-layer cap on nodes created during seed-time decomposition.
+
+    The decomposer asks the LLM to brainstorm broadly, prioritise, then
+    return the top N most important premises at each level. This bound
+    keeps the seed minimal so growth happens later via feed/grow rather
+    than producing 100+ nodes up front.
+    """
+    cfg = config or load_config()
+    value = cfg.get("max_nodes_per_layer")
+    if value is None:
+        raise KeyError("Missing 'max_nodes_per_layer' in petri.yaml")
     return int(value)
 
 
@@ -187,3 +247,4 @@ def get_short_circuit_rules(config: dict | None = None) -> list[dict]:
 LLM_INFERENCE_MODEL: str = get_model_name()
 MAX_ITERATIONS: int = get_max_iterations()
 MAX_CONCURRENT: int = get_max_concurrent()
+AGENT_TOOLS: list[str] = get_agent_tools()

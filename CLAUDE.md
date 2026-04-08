@@ -35,13 +35,14 @@ uv run pytest tests/unit/test_queue.py::TestStateTransitions
 ```bash
 petri init              # Initialize .petri/ directory
 petri seed <claim>      # Decompose a claim into a colony DAG
-petri check             # Show node statuses
-petri grow --all        # Run validation pipeline
+petri check             # Show cell statuses
+petri grow              # Run validation pipeline (all eligible cells)
 petri stop              # Gracefully halt processing
 petri feed <source>     # Feed new evidence
-petri analyze --graph   # Visualize colony structure
-petri analyze --dashboard  # Launch REST+SSE dashboard (port 8090)
-petri analyze --scan    # Run contradiction scanner
+petri graph             # Visualize colony structure
+petri launch            # Launch REST+SSE dashboard (port 8090)
+petri scan              # Run contradiction scanner
+petri connect <a> <b>   # Inspect or create a dependency edge
 petri inspect           # Check prerequisites
 ```
 
@@ -49,7 +50,7 @@ petri inspect           # Check prerequisites
 
 ```
 petri/
-├── models.py              # Pydantic models: Node, Colony, Event, QueueEntry, AgentRole
+├── models.py              # Pydantic models: Cell, Colony, Event, QueueEntry, AgentRole
 ├── config.py              # Centralized config loader (petri.yaml)
 ├── cli.py                 # Typer CLI (8 commands)
 │
@@ -60,7 +61,7 @@ petri/
 │   └── preflight.py       # Prerequisite checks (Python, Claude Code)
 │
 ├── storage/               # File-based persistence
-│   ├── event_log.py       # Append-only JSONL per node
+│   ├── event_log.py       # Append-only JSONL per cell
 │   └── queue.py           # 13-state machine with fcntl file locking
 │
 ├── analysis/              # Validation, convergence, scanning
@@ -85,14 +86,14 @@ petri/
 
 ## Active Technologies
 
-- Python 3.11+ / Core: stdlib + Pydantic / CLI: Typer / Dashboard: FastAPI + SSE
+- Python 3.14+ / Core: stdlib + Pydantic / CLI: Typer / Dashboard: FastAPI + SSE
 - Storage: JSONL (event logs, append-only), JSON (queue, file-locked), SQLite (disposable dashboard index)
 - Testing: pytest
 - Config generation: stdlib string.Template (no Jinja2)
 
 ## Key Design Decisions
 
-- Composite key identity: `{dish}-{colony}-{level}-{seq}` for nodes
+- Composite key identity: `{dish}-{colony}-{level}-{seq}` for cells
 - Two-store separation: event log (JSONL) + queue (JSON) — no data duplication
 - 13 agents: 3 leads (non-blocking orchestrators) + 10 specialists (6 blocking)
 - Convergence = all 6 blocking verdicts in pass set (mechanical, no LLM)

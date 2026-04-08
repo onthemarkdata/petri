@@ -15,7 +15,7 @@ from petri.reasoning.debate import (
 from petri.storage.event_log import load_events
 from petri.models import Debate
 
-from tests.conftest import CANONICAL_NODE_IDS
+from tests.conftest import CANONICAL_CELL_IDS
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -194,31 +194,31 @@ class TestMediateDebate:
 class TestLogDebate:
     def test_logs_debate_mediated_event(self, tmp_path, skeptic_champion_debate):
         events_path = tmp_path / "events.jsonl"
-        node_id = CANONICAL_NODE_IDS["premise1"]
+        cell_id = CANONICAL_CELL_IDS["premise1"]
 
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND", "Flaw found")
         b = _agent_output("champion", "STRONG_CASE", "Strong case")
         debate_result = mediate_debate(a, b, skeptic_champion_debate)
 
-        log_debate(events_path, node_id, iteration=1, debate_result=debate_result)
+        log_debate(events_path, cell_id, iteration=1, debate_result=debate_result)
 
         events = load_events(events_path)
         assert len(events) == 1
         evt = events[0]
         assert evt["type"] == "debate_mediated"
-        assert evt["agent"] == "node_lead"
-        assert evt["node_id"] == node_id
+        assert evt["agent"] == "cell_lead"
+        assert evt["cell_id"] == cell_id
         assert evt["iteration"] == 1
 
     def test_logs_correct_agents_in_data(self, tmp_path, skeptic_champion_debate):
         events_path = tmp_path / "events.jsonl"
-        node_id = CANONICAL_NODE_IDS["premise1"]
+        cell_id = CANONICAL_CELL_IDS["premise1"]
 
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND")
         b = _agent_output("champion", "STRONG_CASE")
         debate_result = mediate_debate(a, b, skeptic_champion_debate)
 
-        log_debate(events_path, node_id, iteration=0, debate_result=debate_result)
+        log_debate(events_path, cell_id, iteration=0, debate_result=debate_result)
 
         events = load_events(events_path)
         data = events[0]["data"]
@@ -227,13 +227,13 @@ class TestLogDebate:
 
     def test_exchange_summary_in_event(self, tmp_path, skeptic_champion_debate):
         events_path = tmp_path / "events.jsonl"
-        node_id = CANONICAL_NODE_IDS["premise1"]
+        cell_id = CANONICAL_CELL_IDS["premise1"]
 
         a = _agent_output("skeptic", "CRITICAL_FLAW_FOUND", "Problem here")
         b = _agent_output("champion", "STRONG_CASE", "No problem")
         debate_result = mediate_debate(a, b, skeptic_champion_debate)
 
-        log_debate(events_path, node_id, iteration=0, debate_result=debate_result)
+        log_debate(events_path, cell_id, iteration=0, debate_result=debate_result)
 
         events = load_events(events_path)
         summary = events[0]["data"]["exchange_summary"]
@@ -241,15 +241,15 @@ class TestLogDebate:
         assert "champion" in summary
 
     def test_multiple_debates_logged(self, tmp_path, debate_pairings):
-        """Log all 4 default debates for the same node."""
+        """Log all 4 default debates for the same cell."""
         events_path = tmp_path / "events.jsonl"
-        node_id = CANONICAL_NODE_IDS["premise1"]
+        cell_id = CANONICAL_CELL_IDS["premise1"]
 
         for debate in debate_pairings:
             a = _agent_output(debate.pair[0], "PASS_VERDICT")
             b = _agent_output(debate.pair[1], "PASS_VERDICT")
             result = mediate_debate(a, b, debate)
-            log_debate(events_path, node_id, iteration=0, debate_result=result)
+            log_debate(events_path, cell_id, iteration=0, debate_result=result)
 
         events = load_events(events_path)
         assert len(events) == 4

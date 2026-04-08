@@ -1,10 +1,10 @@
 ---
-description: "Update a node's queue state with transition validation"
+description: "Update a cell's queue state with transition validation"
 ---
 
 # Queue Update
 
-Update a node's position in the validation workflow queue.
+Update a cell's position in the validation workflow queue.
 
 ## Usage
 

@@ -1,0 +1,3402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Petri Lab</title>
+<!-- xterm.js: full VT100 emulator for the Computer tab so rich's live
+     multi-spinner, ANSI colors, and cursor control all render correctly. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<!-- marked.js: evidence.md and other markdown content is rendered with
+     this so cell detail pages display readable formatted text.
+     DOMPurify sanitizes the parsed HTML before it's injected into the
+     DOM, so a malicious URL/title in a citation can't smuggle script. -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+/* ── Reset & Base ──────────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #050810;
+  --bg-panel: #0c0f1a;
+  --bg-card: #111526;
+  --bg-header: #0a0d18;
+  --border: #1a1d2e;
+  --border-bright: #2a2d4a;
+  --text: #e0e0e0;
+  --text-dim: #666;
+  --text-mid: #999;
+  --green: #00ff88;
+  --green-dim: #116644;
+  --green-dark: #0a4a2a;
+  --phosphor: #00ff88;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ── Screens ──────────────────────────────────────────────────────── */
+.screen { display: none; position: absolute; inset: 0; overflow: hidden; }
+.screen.active { display: flex; flex-direction: column; }
+
+/* ── Mute Button (global, always visible) ─────────────────────────── */
+/* Matches the shared HUD chrome: cut-corner cyan panel, no rounded
+   corners, no blur. The note glyph (♫) stays the same in both states;
+   a ::after pseudo-element draws a diagonal strike-through line across
+   the button when muted, and the color flips to the red-danger palette
+   to match .hud-btn.danger. */
+#mute-btn {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 9999;
+  background: #001018;
+  border: 1px solid #00ccff;
+  color: #00ff88;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 18px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+#mute-btn:hover {
+  background: #002838;
+  color: #ffcc00;
+  border-color: #ffcc00;
+}
+#mute-btn.muted {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+#mute-btn.muted:hover {
+  color: #ffcc00;
+  border-color: #ffcc00;
+  background: #3a1a1a;
+}
+/* Diagonal strike-through rendered via ::after so we don't need SVG
+   or an icon asset. The line is ~26px long, centered on the 38px
+   button, rotated -24deg — short enough to sit entirely inside the
+   cut-corner clip-path. currentColor tracks the .muted red tint. */
+#mute-btn::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: calc(50% - 1px);
+  height: 2px;
+  background: currentColor;
+  transform: rotate(-24deg);
+  transform-origin: center;
+  pointer-events: none;
+  display: none;
+}
+#mute-btn.muted::after { display: block; }
+
+/* ── Title Screen ─────────────────────────────────────────────────── */
+#screen-title {
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg);
+}
+.title-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.title-bg img {
+  max-width: 80%;
+  max-height: 70vh;
+  object-fit: contain;
+  filter: drop-shadow(0 0 40px rgba(0,255,136,0.15));
+}
+.title-enter {
+  position: absolute;
+  bottom: 12vh;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: var(--green);
+  text-shadow: 0 0 20px rgba(0,255,136,0.6), 0 0 40px rgba(0,255,136,0.3);
+  animation: flash 1.2s ease-in-out infinite;
+}
+@keyframes flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+/* ── Computer / CRT Terminal (also hosts onboarding) ─────────────── */
+#screen-computer { flex-direction: column; }
+#screen-computer .crt-frame {
+  flex: 1;
+  margin: 14px auto 18px;
+  width: min(1100px, 94vw);
+  height: auto;
+}
+.crt-frame {
+  position: relative;
+  width: min(900px, 90vw);
+  height: min(600px, 80vh);
+  background: #000800;
+  border-radius: 6px;
+  border: 1px solid #00ccff;
+  overflow: hidden;
+}
+/* xterm.js mount — the ONLY display surface inside .crt-frame. The
+   onboarding wizard and command mode both write here; there is no
+   longer a separate static-DOM CRT output div. The scanlines overlay
+   still floats on top via z-index. Leaves 52px at the bottom for the
+   persistent command-input row. */
+.crt-xterm {
+  position: absolute;
+  top: 10px; left: 10px; right: 10px; bottom: 62px;
+  background: #000800;
+  border-radius: 4px;
+  padding: 8px 10px;
+  z-index: 1;
+  overflow: hidden;
+}
+.crt-xterm .xterm { height: 100%; }
+.crt-xterm .xterm .xterm-viewport { background: transparent !important; }
+.crt-xterm .xterm .xterm-screen { background: transparent !important; }
+.crt-xterm .xterm-viewport::-webkit-scrollbar { width: 4px; }
+.crt-xterm .xterm-viewport::-webkit-scrollbar-thumb { background: #00384a; }
+.crt-screen::-webkit-scrollbar { width: 4px; }
+.crt-screen::-webkit-scrollbar-track { background: transparent; }
+.crt-screen::-webkit-scrollbar-thumb { background: #00384a; }
+.crt-scanlines {
+  position: absolute;
+  inset: 10px;
+  border-radius: 4px;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px);
+  z-index: 2;
+}
+.crt-input-row {
+  position: absolute;
+  left: 10px; right: 10px; bottom: 10px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 10px;
+  background: #001018;
+  border: 1px solid #00ccff;
+  clip-path: polygon(
+    0 0, 100% 0,
+    100% calc(100% - 6px), calc(100% - 6px) 100%,
+    6px 100%, 0 calc(100% - 6px)
+  );
+  z-index: 4;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+.crt-input-row .crt-prompt {
+  color: #00ff88;
+  font-weight: bold;
+  font-size: 13px;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+.crt-input-row .crt-cmd {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e0f0ff;
+  font-family: inherit;
+  font-size: 13px;
+  caret-color: #00ff88;
+}
+.crt-input-row .crt-cmd::placeholder { color: #5fa8b8; font-style: italic; }
+.crt-input-row button {
+  background: #001018;
+  border: 1px solid #00ccff;
+  color: #00ccff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 5px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+.crt-input-row button:hover:not(:disabled) { background: #002838; color: #ffcc00; }
+.crt-input-row button.active { background: #00384a; color: #ffcc00; border-color: #ffcc00; }
+.crt-input-row button.stop { border-color: #ff6b6b; color: #ff6b6b; }
+.crt-input-row button.stop:hover:not(:disabled) { background: #3a1a1a; }
+.crt-input-row button:disabled { opacity: 0.35; cursor: not-allowed; }
+.term-line { margin-bottom: 2px; white-space: pre-wrap; word-break: break-word; }
+.term-line.dim     { color: #116644; }
+.term-line.bright  { color: #66ffbb; }
+.term-line.error   { color: #ff4444; }
+.term-line.cmd     { color: #ffcc00; margin-top: 6px; }
+.term-line.stdout  { color: var(--green); }
+.term-line.stderr  { color: #ff6b6b; }
+.term-line.event   { color: #116644; opacity: 0.85; font-size: 12px; }
+.term-line.system  { color: #33bb88; font-style: italic; }
+.term-line.done    { color: #66ffbb; margin-bottom: 8px; }
+.term-line.done.fail { color: #ff6b6b; }
+.term-prompt { color: #33bb88; }
+.term-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: var(--green);
+  animation: blink-cursor 0.8s step-end infinite;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+@keyframes blink-cursor { 50% { opacity: 0; } }
+.term-input-wrap { display: flex; align-items: center; margin-top: 4px; }
+.term-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--green);
+  font-family: inherit;
+  font-size: inherit;
+  flex: 1;
+  caret-color: var(--green);
+}
+.term-option {
+  padding: 4px 12px;
+  margin: 2px 0;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.term-option:hover { background: rgba(0,255,136,0.1); }
+.term-option.selected { background: rgba(0,255,136,0.15); color: #66ffbb; }
+.term-option::before { content: '  '; }
+.term-option.selected::before { content: '> '; color: var(--green); }
+
+/* ── Header Bar (Lab + other views) ──────────────────────────────── */
+.header-bar {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 16px;
+  z-index: 10;
+}
+.header-title {
+  flex-shrink: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0;
+  transition: filter 0.15s;
+}
+.header-title img,
+.header-title canvas {
+  height: 100%;
+  width: auto;
+  display: block;
+  image-rendering: pixelated;
+  pointer-events: none;  /* click target is the wrapper, not the image */
+  /* Subtle glow on the pixel-art chrome so it reads against the HUD
+     grid background. */
+  filter: drop-shadow(0 0 3px rgba(60, 140, 255, 0.45));
+}
+.header-title:hover img,
+.header-title:hover canvas {
+  filter: drop-shadow(0 0 5px rgba(255, 204, 0, 0.6));
+}
+.header-nav { display: flex; gap: 2px; margin-left: 24px; }
+.nav-tab {
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-family: inherit;
+}
+.nav-tab:first-child { border-radius: 4px 0 0 4px; }
+.nav-tab:last-child { border-radius: 0 4px 4px 0; }
+.nav-tab.active { background: var(--bg-card); color: var(--text); border-color: var(--border-bright); }
+.nav-tab:hover:not(.active) { color: var(--text-mid); }
+.header-spacer { flex: 1; }
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--green);
+  letter-spacing: 2px;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.live-badge.connected { opacity: 1; }
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--green); }
+  50% { opacity: 0.4; box-shadow: none; }
+}
+
+/* ── Shared HUD chrome primitives ─────────────────────────────────
+ *
+ * Single source of truth for the retro HUD look: reusable panels,
+ * labels, values, corner brackets, and buttons that every screen
+ * consumes. Any future tweak to the aesthetic lives here and ripples
+ * across the whole dashboard — resist the urge to override colors or
+ * corner shapes in per-screen rules.
+ * --------------------------------------------------------------- */
+
+.hud-screen {
+  background: #000000;
+  background-image:
+    linear-gradient(to right,  #2a0d1f 1px, transparent 1px),
+    linear-gradient(to bottom, #2a0d1f 1px, transparent 1px);
+  background-size: 24px 24px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+.hud-panel {
+  position: relative;
+  background: #001018;
+  border: 1px solid #00ccff;
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0, 100% 8px,
+    100% calc(100% - 8px), calc(100% - 8px) 100%,
+    8px 100%, 0 calc(100% - 8px),
+    0 8px
+  );
+  padding: 12px 16px;
+}
+.hud-panel.top-bar {
+  clip-path: polygon(
+    8px 0, calc(100% - 8px) 0, 100% 8px,
+    100% 100%, 0 100%, 0 8px
+  );
+}
+.hud-panel.bottom-bar {
+  clip-path: polygon(
+    0 0, 100% 0,
+    100% calc(100% - 8px), calc(100% - 8px) 100%,
+    8px 100%, 0 calc(100% - 8px)
+  );
+}
+.hud-panel.compact { padding: 8px 12px; }
+.hud-panel.dense { padding: 6px 10px; }
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.hud-label {
+  color: #5fa8b8;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.hud-value {
+  color: #ffcc00;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+.hud-value.big { font-size: 24px; letter-spacing: 2px; }
+.hud-value.success { color: #00ff88; }
+.hud-value.danger  { color: #ff6b6b; }
+
+.hud-title-text {
+  color: #ffcc00;
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  font-weight: bold;
+}
+
+.hud-corners { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.hud-corners::before,
+.hud-corners::after,
+.hud-corners .hud-corner-b,
+.hud-corners .hud-corner-c {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+}
+.hud-corners::before {
+  top: 8px; left: 8px;
+  border-top: 2px solid #ff3399;
+  border-left: 2px solid #ff3399;
+}
+.hud-corners::after {
+  top: 8px; right: 8px;
+  border-top: 2px solid #ff3399;
+  border-right: 2px solid #ff3399;
+}
+.hud-corners .hud-corner-b {
+  bottom: 8px; left: 8px;
+  border-bottom: 2px solid #ff3399;
+  border-left: 2px solid #ff3399;
+}
+.hud-corners .hud-corner-c {
+  bottom: 8px; right: 8px;
+  border-bottom: 2px solid #ff3399;
+  border-right: 2px solid #ff3399;
+}
+
+.hud-btn {
+  background: #001018;
+  color: #00ccff;
+  border: 1px solid #00ccff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  cursor: pointer;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+.hud-btn:hover:not(:disabled) { background: #002838; color: #ffcc00; }
+.hud-btn.danger { border-color: #ff6b6b; color: #ff6b6b; }
+.hud-btn.danger:hover:not(:disabled) { background: #3a1a1a; }
+.hud-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.hud-divider {
+  height: 1px;
+  background: #00384a;
+  margin: 12px 0;
+}
+
+.hud-text       { color: #e0f0ff; font-size: 12px; line-height: 1.5; }
+.hud-text.dim   { color: #5fa8b8; }
+.hud-text.cmd   { color: #ffcc00; }
+.hud-text.error { color: #ff6b6b; }
+.hud-text.ok    { color: #00ff88; }
+.hud-link       { color: #00ff88; cursor: pointer; text-decoration: none; }
+.hud-link:hover { color: #ffcc00; text-decoration: underline; }
+
+/* ── Lab Overview ────────────────────────────────────────────────── */
+.lab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 24px 40px;
+  position: relative;
+}
+.lab-content::-webkit-scrollbar { width: 6px; }
+.lab-content::-webkit-scrollbar-track { background: transparent; }
+.lab-content::-webkit-scrollbar-thumb { background: #00384a; }
+
+.lab-section-label {
+  color: #5fa8b8;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin: 0 0 12px 2px;
+}
+
+.stats-ribbon {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+.stats-ribbon .hud-panel { text-align: left; }
+.stats-ribbon .hud-value.big { display: block; margin-top: 6px; }
+
+.colony-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.colony-grid .hud-panel {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.colony-grid .hud-panel:hover {
+  border-color: #ffcc00;
+  background: #002028;
+}
+.colony-grid .hud-panel:hover .colony-name-text { color: #ffcc00; }
+.colony-name-text {
+  color: #00ff88;
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.15s;
+}
+.colony-name-text .active-dot {
+  width: 8px; height: 8px;
+  background: #00ff88;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+.colony-meta-row {
+  font-size: 11px;
+  color: #5fa8b8;
+  margin-bottom: 12px;
+  letter-spacing: 0.5px;
+}
+.colony-status-bar {
+  display: flex;
+  height: 10px;
+  background: #000800;
+  border: 1px solid #00384a;
+  overflow: hidden;
+}
+.colony-status-seg { transition: width 0.3s; }
+
+.queue-panel { margin-bottom: 20px; }
+.queue-list { display: flex; flex-direction: column; gap: 8px; }
+.queue-list .hud-panel.dense {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+}
+.queue-cell-link {
+  color: #00ff88;
+  cursor: pointer;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.queue-cell-link:hover { color: #ffcc00; text-decoration: underline; }
+.queue-state {
+  color: #ffcc00;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.queue-agent {
+  color: #5fa8b8;
+  font-size: 11px;
+}
+
+/* ── Colony DAG View — retro HUD map-screen chrome ──────────────── */
+#screen-colony { background: #000000; }
+
+.dag-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  background: #000000;
+  /* Faint magenta grid overlay, retro HUD style */
+  background-image:
+    linear-gradient(to right,  #2a0d1f 1px, transparent 1px),
+    linear-gradient(to bottom, #2a0d1f 1px, transparent 1px);
+  background-size: 24px 24px;
+  image-rendering: pixelated;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+.dag-container.grabbing { cursor: grabbing; }
+
+.dag-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
+}
+
+/* Top HUD bar */
+.dag-hud-top {
+  position: absolute;
+  top: 12px; left: 12px; right: 12px;
+  height: 32px;
+  background: #001018;
+  border: 1px solid #00ccff;
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0, 100% 8px,
+    100% 100%,
+    0 100%,
+    0 8px
+  );
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  gap: 14px;
+  pointer-events: none;
+  z-index: 10;
+}
+.dag-hud-top .hud-label {
+  color: #5fa8b8;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.dag-hud-top .hud-value {
+  color: #ffcc00;
+  font-size: 11px;
+  letter-spacing: 1px;
+  font-weight: bold;
+}
+.dag-hud-top .hud-title {
+  flex: 1;
+  text-align: center;
+  color: #ffcc00;
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+/* Bottom HUD bar — legend + BACK */
+.dag-hud-bottom {
+  position: absolute;
+  bottom: 12px; left: 12px; right: 12px;
+  min-height: 28px;
+  background: #001018;
+  border: 1px solid #00ccff;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - 8px), calc(100% - 8px) 100%,
+    8px 100%, 0 calc(100% - 8px)
+  );
+  display: flex;
+  align-items: center;
+  padding: 4px 14px;
+  gap: 14px;
+  flex-wrap: wrap;
+  z-index: 10;
+}
+.dag-hud-bottom .legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #5fa8b8;
+  text-transform: uppercase;
+}
+.dag-hud-bottom .legend-swatch {
+  width: 8px; height: 8px;
+  border: 1px solid #00ccff;
+  flex-shrink: 0;
+}
+
+/* Back button — cut-corner cyan chip below the top HUD */
+.dag-back {
+  position: absolute;
+  top: 52px;
+  left: 12px;
+  background: #001018;
+  color: #00ccff;
+  border: 1px solid #00ccff;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 5px 12px;
+  cursor: pointer;
+  z-index: 11;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% 100%, 0 100%, 0 6px
+  );
+}
+.dag-back:hover { background: #002838; color: #ffcc00; }
+
+/* Corner brackets — four L-shaped magenta accents framing the map window */
+.dag-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+  z-index: 5;
+}
+.dag-corner.tl { top: 50px;    left: 12px;  border-top: 2px solid #ff3399; border-left: 2px solid #ff3399; }
+.dag-corner.tr { top: 50px;    right: 12px; border-top: 2px solid #ff3399; border-right: 2px solid #ff3399; }
+.dag-corner.bl { bottom: 46px; left: 12px;  border-bottom: 2px solid #ff3399; border-left: 2px solid #ff3399; }
+.dag-corner.br { bottom: 46px; right: 12px; border-bottom: 2px solid #ff3399; border-right: 2px solid #ff3399; }
+
+/* Nodes & edges */
+.dag-cell { cursor: pointer; transition: filter 0.15s; }
+.dag-cell:hover { filter: brightness(1.4); }
+
+.dag-edge { fill: none; stroke-linecap: butt; }
+.dag-edge.intra { stroke: #00ff88; stroke-width: 2; }
+.dag-edge.cross { stroke: #ff3399; stroke-width: 2; stroke-dasharray: 3 3; }
+
+/* HTML body mounted inside each cell via <foreignObject> */
+.cell-body {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px 5px 8px;
+  font-family: inherit;
+  color: #e0f0ff;
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cell-id {
+  color: #00ccff;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.cell-claim {
+  color: #e0f0ff;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+.dag-cell.is-seed .cell-id { color: #00ff88; }
+.dag-cell.is-seed .cell-body { padding-left: 22px; }  /* leave room for the H glyph */
+.dag-cell.is-ghost .cell-body { opacity: 0.65; }
+.dag-cell.is-ghost .cell-claim { -webkit-line-clamp: 2; font-size: 10px; }
+.dag-cell.is-ghost .cell-id { font-size: 9px; }
+
+/* Tooltip — cut-corner cyan panel matching HUD chrome */
+.dag-tooltip {
+  display: none;
+  position: fixed;
+  background: #001018;
+  border: 1px solid #00ccff;
+  color: #5fa8b8;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-family: inherit;
+  pointer-events: none;
+  line-height: 1.5;
+  max-width: 320px;
+  z-index: 200;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+.dag-tooltip .tt-claim { color: #ffcc00; margin-bottom: 4px; letter-spacing: 0.5px; }
+.dag-tooltip .tt-status {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 9px;
+  color: #000;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+@keyframes pulse-glow { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+.cell-active { animation: pulse-glow 1.5s ease-in-out infinite; }
+
+/* ── Research Logs ───────────────────────────────────────────────── */
+.logs-toolbar {
+  display: flex;
+  gap: 12px;
+  padding: 14px 22px 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: transparent;
+}
+.logs-filter {
+  background: #001018;
+  border: 1px solid #00ccff;
+  color: #e0f0ff;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 7px 14px;
+  outline: none;
+  letter-spacing: 0.5px;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+.logs-filter::placeholder { color: #5fa8b8; font-style: italic; }
+.logs-filter:focus { border-color: #ffcc00; }
+
+.logs-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 22px 20px;
+  font-size: 12px;
+  font-family: inherit;
+  position: relative;
+}
+.logs-feed::-webkit-scrollbar { width: 6px; }
+.logs-feed::-webkit-scrollbar-track { background: transparent; }
+.logs-feed::-webkit-scrollbar-thumb { background: #00384a; }
+.log-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  margin-bottom: 4px;
+  background: rgba(0, 16, 24, 0.6);
+  border-left: 2px solid #00ccff;
+  transition: background 0.15s, border-color 0.15s;
+}
+.log-row:hover {
+  background: #001830;
+  border-left-color: #ffcc00;
+}
+.log-time {
+  color: #ffcc00;
+  flex-shrink: 0;
+  width: 72px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.log-type-badge {
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: bold;
+  flex-shrink: 0;
+  min-width: 120px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid currentColor;
+}
+.log-agent {
+  color: #66ccff;
+  flex-shrink: 0;
+  min-width: 130px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.log-cell {
+  color: #00ff88;
+  cursor: pointer;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+.log-cell:hover { color: #ffcc00; text-decoration: underline; }
+.log-iter {
+  color: #5fa8b8;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.logs-empty {
+  color: #5fa8b8;
+  text-align: center;
+  padding: 64px 20px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+/* ── Cell Detail ─────────────────────────────────────────────────── */
+.cell-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 40px;
+  position: relative;
+  font-family: inherit;
+}
+.cell-content::-webkit-scrollbar { width: 6px; }
+.cell-content::-webkit-scrollbar-track { background: transparent; }
+.cell-content::-webkit-scrollbar-thumb { background: #00384a; }
+
+.cell-back { margin-bottom: 20px; }
+
+.cell-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+.cell-claim-text {
+  font-size: 20px;
+  font-weight: bold;
+  color: #e0f0ff;
+  flex: 1;
+  min-width: 260px;
+  line-height: 1.4;
+  letter-spacing: 0.5px;
+}
+.cell-status-badge {
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+
+.cell-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+.meta-item-label {
+  color: #5fa8b8;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.meta-item-value {
+  color: #ffcc00;
+  font-size: 13px;
+  font-weight: bold;
+  word-break: break-word;
+  letter-spacing: 0.5px;
+}
+.meta-item-value.link { color: #00ff88; cursor: pointer; }
+.meta-item-value.link:hover { color: #ffcc00; text-decoration: underline; }
+
+.verdict-section { margin-bottom: 32px; }
+.verdict-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: inherit;
+}
+.verdict-table th {
+  text-align: left;
+  padding: 10px 14px;
+  color: #5fa8b8;
+  border-bottom: 1px solid #00ccff;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  background: #001018;
+}
+.verdict-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #003040;
+  color: #e0f0ff;
+}
+.verdict-pass { color: #00ff88; font-weight: bold; }
+.verdict-block { color: #ff6b6b; font-weight: bold; }
+
+.timeline-section { margin-bottom: 32px; }
+.timeline-group { margin-bottom: 24px; }
+.timeline-iter-label {
+  font-size: 11px;
+  font-weight: bold;
+  color: #ffcc00;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 10px 0;
+  border-bottom: 1px solid #00ccff;
+  margin-bottom: 12px;
+}
+.timeline-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #001830;
+  font-size: 12px;
+}
+.timeline-detail {
+  flex: 1;
+  color: #e0f0ff;
+  line-height: 1.6;
+}
+.timeline-detail strong { color: #ffcc00; font-weight: bold; }
+.timeline-time {
+  color: #5fa8b8;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.expand-toggle {
+  cursor: pointer;
+  color: #5fa8b8;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.expand-toggle:hover { color: #ffcc00; }
+.expand-content {
+  display: none;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: #000800;
+  border: 1px solid #003040;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #66ffbb;
+  line-height: 1.5;
+}
+
+/* ── Cell detail: Research Tag ───────────────────────────────────── */
+.research-tag {
+  display: inline-block;
+  padding: 4px 14px;
+  margin-bottom: 18px;
+  background: #1a0a14;
+  border: 1px solid #ff3399;
+  color: #ff3399;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+
+/* ── Cell detail: Evidence markdown renderer ─────────────────────── */
+.evidence-section { margin-bottom: 32px; }
+.evidence-markdown {
+  padding: 20px 24px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #e0f0ff;
+}
+.evidence-markdown h1,
+.evidence-markdown h2,
+.evidence-markdown h3,
+.evidence-markdown h4 {
+  color: #ffcc00;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin: 18px 0 10px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #00384a;
+}
+.evidence-markdown h1 { font-size: 15px; color: #00ff88; }
+.evidence-markdown h2 { font-size: 13px; }
+.evidence-markdown h3 { font-size: 12px; color: #66ccff; }
+.evidence-markdown h4 { font-size: 11px; color: #5fa8b8; border-bottom: none; }
+.evidence-markdown p { margin: 8px 0; }
+.evidence-markdown strong { color: #ffcc00; font-weight: bold; }
+.evidence-markdown em { color: #66ffbb; font-style: italic; }
+.evidence-markdown code {
+  background: #001830;
+  color: #66ffbb;
+  padding: 1px 6px;
+  font-size: 12px;
+  border: 1px solid #003040;
+}
+.evidence-markdown pre {
+  background: #000800;
+  border: 1px solid #003040;
+  padding: 10px 14px;
+  overflow-x: auto;
+  margin: 10px 0;
+}
+.evidence-markdown pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: #66ffbb;
+}
+.evidence-markdown ul,
+.evidence-markdown ol {
+  margin: 8px 0 8px 20px;
+  padding-left: 14px;
+}
+.evidence-markdown li { margin: 4px 0; }
+.evidence-markdown blockquote {
+  border-left: 3px solid #ff3399;
+  padding: 4px 14px;
+  margin: 10px 0;
+  color: #66ccff;
+  background: rgba(255, 51, 153, 0.05);
+}
+.evidence-markdown a {
+  color: #00ff88;
+  text-decoration: none;
+  border-bottom: 1px dashed #00ff88;
+}
+.evidence-markdown a:hover { color: #ffcc00; border-bottom-color: #ffcc00; }
+.evidence-markdown hr {
+  border: none;
+  border-top: 1px solid #00384a;
+  margin: 16px 0;
+}
+.evidence-empty {
+  color: #5fa8b8;
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.5px;
+  padding: 12px 16px;
+}
+
+/* ── Cell detail: Citations list ─────────────────────────────────── */
+.citations-section { margin-bottom: 32px; }
+.citations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.citation-card {
+  position: relative;
+}
+.citation-card .citation-title {
+  display: block;
+  color: #00ff88;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  text-decoration: none;
+  word-break: break-word;
+}
+.citation-card .citation-title:hover { color: #ffcc00; text-decoration: underline; }
+.citation-card .citation-url {
+  display: block;
+  color: #5fa8b8;
+  font-size: 11px;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.citation-card .citation-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+.citation-card .citation-direction {
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  text-transform: uppercase;
+  font-weight: bold;
+}
+.citation-card .citation-direction.supports { color: #00ff88; }
+.citation-card .citation-direction.contradicts { color: #ff6b6b; }
+.citation-card .citation-direction.neutral { color: #5fa8b8; }
+.citation-card .citation-hierarchy { color: #66ccff; }
+.citation-card .citation-agent { color: #5fa8b8; font-style: italic; }
+.citation-card .citation-finding {
+  color: #e0f0ff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.citations-empty {
+  color: #5fa8b8;
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.5px;
+  padding: 12px 16px;
+}
+
+/* ── Cell detail: Rendered event log rows (no raw JSON) ─────────── */
+.cell-logs-section { margin-bottom: 32px; }
+.cell-log-row {
+  display: grid;
+  grid-template-columns: 70px 160px 1fr;
+  gap: 14px;
+  padding: 9px 14px;
+  margin-bottom: 4px;
+  background: rgba(0, 16, 24, 0.6);
+  border-left: 2px solid #00ccff;
+  font-size: 12px;
+  line-height: 1.5;
+  align-items: start;
+}
+.cell-log-row:hover {
+  background: #001830;
+  border-left-color: #ffcc00;
+}
+.cell-log-row .cell-log-time {
+  color: #ffcc00;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.cell-log-row .cell-log-type {
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid currentColor;
+  text-align: center;
+  align-self: start;
+}
+.cell-log-row .cell-log-body {
+  color: #e0f0ff;
+  word-break: break-word;
+}
+.cell-log-row .cell-log-body strong { color: #ffcc00; font-weight: bold; }
+.cell-log-row .cell-log-body a { color: #00ff88; text-decoration: none; border-bottom: 1px dashed #00ff88; }
+.cell-log-row .cell-log-body a:hover { color: #ffcc00; border-bottom-color: #ffcc00; }
+.cell-log-row .cell-log-agent {
+  display: block;
+  color: #66ccff;
+  font-size: 11px;
+  margin-top: 2px;
+}
+.cell-log-row .cell-log-verdict-pass { color: #00ff88; font-weight: bold; }
+.cell-log-row .cell-log-verdict-fail { color: #ff6b6b; font-weight: bold; }
+.cell-logs-empty {
+  color: #5fa8b8;
+  font-size: 12px;
+  font-style: italic;
+  padding: 12px 16px;
+}
+
+/* ── Loading / Empty States ──────────────────────────────────────── */
+.loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); font-size: 14px; }
+.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border-bright); border-top-color: var(--green); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- Audio -->
+<audio id="bgm" loop preload="auto">
+  <source src="/assets/WBA Free Track - Proletariat FINAL MIX.mp3" type="audio/mpeg">
+</audio>
+<button id="mute-btn" title="Toggle Music">&#9835;</button>
+
+<!-- Title Screen -->
+<div id="screen-title" class="screen active">
+  <div class="title-bg">
+    <img src="/assets/petri-title-screen.svg" alt="PETRI">
+  </div>
+  <div class="title-enter">ENTER PETRI LAB</div>
+</div>
+
+<!-- Computer / CRT terminal (also hosts onboarding when .petri is missing) -->
+<div id="screen-computer" class="screen hud-screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
+    <div class="header-nav">
+      <button class="nav-tab" data-view="lab">Lab</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+      <button class="nav-tab active" data-view="computer">Computer</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
+  <div class="crt-frame" id="crt-frame">
+    <div class="crt-xterm" id="crt-xterm"></div>
+    <div class="crt-input-row" id="crt-input-row">
+      <span class="crt-prompt">PETRI $</span>
+      <input type="text" class="crt-cmd" id="term-cmd"
+             placeholder='type: petri check  ·  petri seed "claim"  ·  petri grow'
+             autocomplete="off" spellcheck="false" />
+      <button id="term-detach-btn" title="Run detached (don't stream output)">DETACH</button>
+      <button id="term-stop-btn" class="stop" disabled>STOP</button>
+    </div>
+    <div class="crt-scanlines"></div>
+  </div>
+</div>
+
+<!-- Lab Overview -->
+<div id="screen-lab" class="screen hud-screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
+    <div class="header-nav">
+      <button class="nav-tab active" data-view="lab">Lab</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+      <button class="nav-tab" data-view="computer">Computer</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge" id="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
+  <div class="lab-content" id="lab-content">
+    <div class="loading"><span class="spinner"></span>Loading...</div>
+  </div>
+</div>
+
+<!-- Colony DAG -->
+<div id="screen-colony" class="screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
+    <div class="header-nav">
+      <button class="nav-tab" data-view="lab">Lab</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+      <button class="nav-tab" data-view="computer">Computer</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="dag-container" id="dag-container">
+    <div class="dag-hud-top">
+      <span class="hud-label">CELLS</span>
+      <span class="hud-value" id="dag-stat-cells">000</span>
+      <span class="hud-label">ACTIVE</span>
+      <span class="hud-value" id="dag-stat-active">00</span>
+      <span class="hud-title" id="dag-title">&mdash;</span>
+      <span class="hud-label">LEVELS</span>
+      <span class="hud-value" id="dag-stat-levels">00</span>
+    </div>
+    <button class="dag-back" id="dag-back-btn">&larr; BACK</button>
+    <div class="dag-corner tl"></div>
+    <div class="dag-corner tr"></div>
+    <div class="dag-corner bl"></div>
+    <div class="dag-corner br"></div>
+    <svg class="dag-svg" id="dag-svg"></svg>
+    <div class="dag-hud-bottom" id="dag-legend"></div>
+    <div class="dag-tooltip" id="dag-tooltip"></div>
+  </div>
+</div>
+
+<!-- Research Logs -->
+<div id="screen-logs" class="screen hud-screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
+    <div class="header-nav">
+      <button class="nav-tab" data-view="lab">Lab</button>
+      <button class="nav-tab active" data-view="logs">Logs</button>
+      <button class="nav-tab" data-view="computer">Computer</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
+  <div class="logs-toolbar">
+    <input class="logs-filter" id="filter-cell" placeholder="Filter cell..." />
+    <input class="logs-filter" id="filter-agent" placeholder="Filter agent..." />
+    <select class="logs-filter" id="filter-type">
+      <option value="">All types</option>
+      <option>search_executed</option>
+      <option>source_reviewed</option>
+      <option>freshness_checked</option>
+      <option>verdict_issued</option>
+      <option>evidence_appended</option>
+      <option>debate_mediated</option>
+      <option>convergence_checked</option>
+      <option>cell_reopened</option>
+      <option>propagation_triggered</option>
+      <option>decomposition_created</option>
+      <option>decomposition_audit</option>
+    </select>
+  </div>
+  <div class="logs-feed" id="logs-feed">
+    <div class="logs-empty">Waiting for events...</div>
+  </div>
+</div>
+
+<!-- Cell Detail -->
+<div id="screen-cell" class="screen hud-screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
+    <div class="header-nav">
+      <button class="nav-tab" data-view="lab">Lab</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+      <button class="nav-tab" data-view="computer">Computer</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
+  <div class="cell-content" id="cell-content">
+    <div class="loading"><span class="spinner"></span>Loading cell...</div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   PETRI LAB — Single-file SPA
+   All data comes from the backend API; no user-supplied content is
+   rendered without escaping via textContent or createTextNode.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+var API = '';
+
+// ── Color Maps ──────────────────────────────────────────────────────────
+
+var STATUS_COLORS = $status_colors_json;
+
+var EVENT_COLORS = $event_colors_json;
+
+var QUEUE_ACTIVE_STATES = $queue_active_states_json;
+
+var PASS_VERDICTS = new Set($pass_verdicts_json);
+
+// ── State ───────────────────────────────────────────────────────────────
+
+var State = {
+  cells: [],
+  queue: [],
+  stats: {},
+  events: [],
+  sseConnected: false,
+  currentView: 'title',
+  currentColony: null,
+  currentCell: null,
+};
+
+// ── Utility ─────────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+  var el = document.createElement('span');
+  el.textContent = str || '';
+  return el.innerHTML;
+}
+
+function setText(parent, text) {
+  parent.textContent = '';
+  parent.appendChild(document.createTextNode(text || ''));
+}
+
+function buildEl(tag, attrs, children) {
+  var el = document.createElement(tag);
+  if (attrs) {
+    Object.keys(attrs).forEach(function(key) {
+      if (key === 'className') el.className = attrs[key];
+      else if (key === 'onclick') el.addEventListener('click', attrs[key]);
+      else if (key === 'style' && typeof attrs[key] === 'object') {
+        Object.keys(attrs[key]).forEach(function(prop) { el.style[prop] = attrs[key][prop]; });
+      } else el.setAttribute(key, attrs[key]);
+    });
+  }
+  if (typeof children === 'string') el.textContent = children;
+  else if (Array.isArray(children)) children.forEach(function(child) { if (child) el.appendChild(child); });
+  return el;
+}
+
+function buildSVGEl(tag, attrs) {
+  var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) Object.keys(attrs).forEach(function(key) { el.setAttribute(key, attrs[key]); });
+  return el;
+}
+
+// ── Audio Manager ───────────────────────────────────────────────────────
+
+var bgm = document.getElementById('bgm');
+var muteBtn = document.getElementById('mute-btn');
+var audioStarted = false;
+var muted = localStorage.getItem('petri-muted') === 'true';
+
+function updateMuteUI() {
+  bgm.muted = muted;
+  // Glyph stays ♫ in both states; the .muted class drives color +
+  // the diagonal strike-through pseudo-element.
+  muteBtn.textContent = '\u266B';
+  muteBtn.classList.toggle('muted', muted);
+}
+updateMuteUI();
+
+muteBtn.addEventListener('click', function(evt) {
+  evt.stopPropagation();
+  muted = !muted;
+  localStorage.setItem('petri-muted', String(muted));
+  updateMuteUI();
+  // Do NOT auto-start audio here. The mute button only flips the
+  // muted state — audio playback begins the first time the user
+  // actively presses Enter (or clicks) on the title screen via
+  // handleTitleActivation(). This keeps the landing experience
+  // silent until the user has intentionally chosen to enter.
+});
+
+function startAudio() {
+  if (audioStarted) return;
+  audioStarted = true;
+  bgm.volume = 0.4;
+  bgm.play().catch(function() {});
+  updateMuteUI();
+}
+
+// ── Router ──────────────────────────────────────────────────────────────
+
+function navigate(view, param) {
+  if (param) location.hash = view + '/' + encodeURIComponent(param);
+  else location.hash = view;
+}
+
+function handleRoute() {
+  var hash = location.hash.slice(1) || 'title';
+  var parts = hash.split('/');
+  var view = parts[0];
+  var param = parts.slice(1).join('/');
+  if (param) param = decodeURIComponent(param);
+
+  State.currentView = view;
+
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+
+  switch (view) {
+    case 'title':
+      document.getElementById('screen-title').classList.add('active');
+      break;
+    case 'computer':
+      document.getElementById('screen-computer').classList.add('active');
+      updateNavTabs('computer');
+      loadComputer();
+      break;
+    case 'lab':
+      document.getElementById('screen-lab').classList.add('active');
+      updateNavTabs('lab');
+      loadLabData();
+      break;
+    case 'colony':
+      document.getElementById('screen-colony').classList.add('active');
+      updateNavTabs(null);
+      State.currentColony = param;
+      loadColonyDAG(param);
+      break;
+    case 'logs':
+      document.getElementById('screen-logs').classList.add('active');
+      updateNavTabs('logs');
+      loadLogs();
+      break;
+    case 'cell':
+      document.getElementById('screen-cell').classList.add('active');
+      updateNavTabs(null);
+      State.currentCell = param;
+      loadCellDetail(param);
+      break;
+    default:
+      document.getElementById('screen-title').classList.add('active');
+  }
+}
+
+window.addEventListener('hashchange', handleRoute);
+
+function updateNavTabs(activeView) {
+  document.querySelectorAll('.nav-tab').forEach(function(tab) {
+    tab.classList.toggle('active', tab.dataset.view === activeView);
+  });
+}
+
+document.querySelectorAll('.nav-tab').forEach(function(tab) {
+  tab.addEventListener('click', function() { navigate(tab.dataset.view); });
+});
+
+document.getElementById('dag-back-btn').addEventListener('click', function() { navigate('lab'); });
+
+// ── Title Screen ────────────────────────────────────────────────────────
+
+function handleTitleActivation() {
+  startAudio();
+  // Every entry to the title screen is a fresh start. The Computer tab
+  // is the first stop — its own loadComputer() decides whether to run
+  // the onboarding wizard (if no .petri) or drop into command mode.
+  navigate('computer');
+}
+
+document.getElementById('screen-title').addEventListener('click', handleTitleActivation);
+document.addEventListener('keydown', function(evt) {
+  if (State.currentView !== 'title') return;
+  if (evt.key === 'Enter' || evt.key === ' ') {
+    evt.preventDefault();
+    handleTitleActivation();
+  }
+});
+
+// ── SSE Manager ─────────────────────────────────────────────────────────
+
+var eventSource = null;
+
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(API + '/api/stream');
+
+  eventSource.addEventListener('connected', function() {
+    State.sseConnected = true;
+    document.querySelectorAll('.live-badge').forEach(function(b) { b.classList.add('connected'); });
+  });
+
+  eventSource.addEventListener('event_inserted', function(evt) {
+    var data = JSON.parse(evt.data);
+    State.events.unshift(data);
+    if (State.events.length > 500) State.events.length = 500;
+    if (State.currentView === 'logs') appendLogRow(data);
+    if (State.currentView === 'lab') loadLabData();
+    if (State.currentView === 'colony' && State.currentColony) loadColonyDAG(State.currentColony);
+    if (State.currentView === 'cell' && State.currentCell === data.cell_id) loadCellDetail(State.currentCell);
+    // Interleave live events as dim lines in the Computer terminal when
+    // it's idle — same vibe as a background `tail -f` next to your shell.
+    if (State.currentView === 'computer' && TerminalState.mode === 'idle' && XTERM) {
+      var line = '[' + (data.type || '?') + '] ' + (data.cell_id || '') + ' · ' + (data.agent || '');
+      XTERM.writeln(ANSI.grey + ANSI.dim + line + ANSI.reset);
+    }
+  });
+
+  eventSource.onerror = function() {
+    State.sseConnected = false;
+    document.querySelectorAll('.live-badge').forEach(function(b) { b.classList.remove('connected'); });
+    setTimeout(connectSSE, 5000);
+  };
+}
+
+// ── API Helpers ──────────────────────────────────────────────────────────
+
+function fetchJSON(url) {
+  return fetch(API + url).then(function(res) {
+    if (!res.ok) throw new Error(String(res.status));
+    return res.json();
+  });
+}
+
+// ── Lab Overview ────────────────────────────────────────────────────────
+
+function loadLabData() {
+  Promise.all([
+    fetchJSON('/api/cells'),
+    fetchJSON('/api/queue'),
+    fetchJSON('/api/stats'),
+  ]).then(function(results) {
+    State.cells = results[0];
+    State.queue = results[1];
+    State.stats = results[2];
+    renderLab();
+  }).catch(function(err) {
+    var container = document.getElementById('lab-content');
+    container.textContent = '';
+    container.appendChild(buildEl('div', { className: 'loading' }, 'Failed to load: ' + err.message));
+  });
+}
+
+function renderLab() {
+  var container = document.getElementById('lab-content');
+  container.textContent = '';
+
+  var stats = State.stats;
+  var cells = State.cells;
+  var queue = State.queue;
+
+  // Group cells by colony
+  var colonies = {};
+  cells.forEach(function(cell) {
+    var cid = cell.colony_id || 'unknown';
+    if (!colonies[cid]) colonies[cid] = [];
+    colonies[cid].push(cell);
+  });
+
+  var queueEntries = Array.isArray(queue) ? queue : Object.values(queue.entries || queue);
+  var activeQueue = queueEntries.filter(function(entry) {
+    return QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1;
+  });
+
+  // Stats ribbon — each stat is a cut-corner cyan HUD panel with a
+  // big yellow value and a dim cyan label underneath.
+  var ribbon = buildEl('div', { className: 'stats-ribbon' });
+  [
+    [stats.total_events || 0, 'Events'],
+    [cells.length, 'Cells'],
+    [stats.queue_size || 0, 'In Queue'],
+    [activeQueue.length, 'Active'],
+  ].forEach(function(pair) {
+    var card = buildEl('div', { className: 'hud-panel compact' });
+    card.appendChild(buildEl('div', { className: 'hud-label' }, pair[1]));
+    card.appendChild(buildEl('div', { className: 'hud-value big' }, String(pair[0])));
+    ribbon.appendChild(card);
+  });
+  container.appendChild(ribbon);
+
+  // Colony cards — each colony is a clickable HUD panel.
+  var colonyKeys = Object.keys(colonies);
+  if (colonyKeys.length > 0) {
+    container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Colonies'));
+    var grid = buildEl('div', { className: 'colony-grid' });
+
+    colonyKeys.forEach(function(colonyId) {
+      var colonyCells = colonies[colonyId];
+      var hasActive = colonyCells.some(function(cell) {
+        return queueEntries.some(function(entry) {
+          return entry.cell_id === cell.cell_id && QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1;
+        });
+      });
+
+      var statusCounts = {};
+      colonyCells.forEach(function(cell) {
+        statusCounts[cell.status] = (statusCounts[cell.status] || 0) + 1;
+      });
+
+      var displayName = colonyId.split('-').slice(1).join('-') || colonyId;
+
+      var card = buildEl('div', { className: 'hud-panel', onclick: function() { navigate('colony', colonyId); } });
+
+      var nameEl = buildEl('div', { className: 'colony-name-text' });
+      if (hasActive) nameEl.appendChild(buildEl('span', { className: 'active-dot' }));
+      nameEl.appendChild(document.createTextNode(displayName));
+      card.appendChild(nameEl);
+
+      card.appendChild(buildEl('div', { className: 'colony-meta-row' }, colonyCells.length + ' cells'));
+
+      var bar = buildEl('div', { className: 'colony-status-bar' });
+      var total = colonyCells.length;
+      Object.keys(statusCounts).forEach(function(status) {
+        var pct = (statusCounts[status] / total * 100).toFixed(1);
+        var color = STATUS_COLORS[status] || '#555';
+        bar.appendChild(buildEl('div', { className: 'colony-status-seg', title: status + ': ' + statusCounts[status], style: { width: pct + '%', background: color } }));
+      });
+      card.appendChild(bar);
+      grid.appendChild(card);
+    });
+
+    container.appendChild(grid);
+  } else {
+    container.appendChild(buildEl('div', { className: 'logs-empty' }, 'No colonies yet. Run petri seed to create one.'));
+  }
+
+  // Active queue — dense HUD panels, yellow state badges.
+  if (activeQueue.length > 0) {
+    container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Active Processing'));
+    var panel = buildEl('div', { className: 'queue-list' });
+    activeQueue.forEach(function(entry) {
+      var row = buildEl('div', { className: 'hud-panel dense' });
+      var cellLink = buildEl('span', { className: 'queue-cell-link', onclick: function() { navigate('cell', entry.cell_id); } }, entry.cell_id);
+      row.appendChild(cellLink);
+      row.appendChild(buildEl('span', { className: 'queue-state' }, entry.queue_state));
+      if (entry.iteration) row.appendChild(buildEl('span', { className: 'queue-agent' }, 'iter ' + entry.iteration));
+      panel.appendChild(row);
+    });
+    container.appendChild(panel);
+  }
+}
+
+// ── Colony DAG View ─────────────────────────────────────────────────────
+
+function loadColonyDAG(colonyId) {
+  Promise.all([fetchJSON('/api/cells'), fetchJSON('/api/queue')]).then(function(results) {
+    var allCells = results[0];
+    var queue = results[1];
+    var colonyCells = allCells.filter(function(cell) { return cell.colony_id === colonyId; });
+    if (colonyCells.length === 0) {
+      setText(document.getElementById('dag-title'), 'NOT FOUND');
+      return;
+    }
+
+    var queueEntries = Array.isArray(queue) ? queue : Object.values(queue.entries || queue);
+    var activeSet = {};
+    queueEntries.forEach(function(entry) {
+      if (QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1) {
+        activeSet[entry.cell_id] = entry.queue_state;
+      }
+    });
+
+    var displayName = (colonyId.split('-').slice(1).join('-') || colonyId).toUpperCase();
+    var maxLevel = 0;
+    colonyCells.forEach(function(cell) { if (cell.level > maxLevel) maxLevel = cell.level; });
+    var activeCount = colonyCells.filter(function(cell) { return activeSet[cell.cell_id]; }).length;
+
+    var padLeft = function(num, width) {
+      var str = String(num);
+      while (str.length < width) str = '0' + str;
+      return str;
+    };
+
+    setText(document.getElementById('dag-title'), displayName);
+    setText(document.getElementById('dag-stat-cells'),  padLeft(colonyCells.length, 3));
+    setText(document.getElementById('dag-stat-active'), padLeft(activeCount, 2));
+    setText(document.getElementById('dag-stat-levels'), padLeft(maxLevel + 1, 2));
+
+    renderDAG(colonyCells, allCells, colonyId, activeSet);
+    renderDAGLegend();
+  });
+}
+
+function renderDAG(colonyCells, allCells, colonyId, activeSet) {
+  var svg = document.getElementById('dag-svg');
+  var container = document.getElementById('dag-container');
+  var width = container.clientWidth;
+  var height = container.clientHeight;
+  var centerX = width / 2;
+  var centerY = height / 2;
+
+  var maxLevel = 0;
+  colonyCells.forEach(function(cell) { if (cell.level > maxLevel) maxLevel = cell.level; });
+
+  // Fixed cell dimensions — large enough to show ID + a few wrapped lines
+  // of claim context. Seed hub is bigger, cross-colony ghost stubs smaller.
+  var CELL_W = 200;
+  var CELL_H = 68;
+  var HUB_W  = 230;
+  var HUB_H  = 82;
+  var GHOST_W = 140;
+  var GHOST_H = 48;
+
+  // Ring spacing needs to fit a CELL_W-wide cell on every ring without
+  // siblings overlapping. 240 is empirically comfortable for 6+ siblings.
+  var ringSpacing = Math.max(240, Math.min(width, height) * 0.22);
+
+  // Group cells by level so siblings can be distributed around each ring.
+  var byLevel = {};
+  colonyCells.forEach(function(cell) {
+    (byLevel[cell.level] = byLevel[cell.level] || []).push(cell);
+  });
+
+  var simCells = [];
+  var simMap = {};
+  Object.keys(byLevel).forEach(function(levelKey) {
+    var level = parseInt(levelKey, 10);
+    var siblings = byLevel[levelKey];
+    var ringRadius = level === 0 ? 0 : level * ringSpacing;
+    siblings.forEach(function(cell, idx) {
+      var angle = (idx / siblings.length) * Math.PI * 2 + level * 0.35;
+      var edgeCount = (cell.dependencies || []).length + (cell.dependents || []).length;
+      var isCenter = (level === 0);
+      var sim = {
+        id: cell.cell_id,
+        data: cell,
+        x: centerX + Math.cos(angle) * ringRadius,
+        y: centerY + Math.sin(angle) * ringRadius,
+        vx: 0, vy: 0,
+        level: level,
+        ringRadius: ringRadius,
+        edgeCount: edgeCount,
+        width:  isCenter ? HUB_W : CELL_W,
+        height: isCenter ? HUB_H : CELL_H,
+        // Border thickness scales with edge count (gravity/importance)
+        borderWidth: Math.max(1, Math.min(5, 1 + Math.floor(edgeCount / 2))),
+        isCenter: isCenter,
+        isGhost: false,
+      };
+      simCells.push(sim);
+      simMap[sim.id] = sim;
+    });
+  });
+
+  // Build edges. Cross-colony dependencies get a dimmed ghost stub on the
+  // outer rim so the user can see them reach into neighboring colonies.
+  var allCellMap = {};
+  (allCells || []).forEach(function(cell) { allCellMap[cell.cell_id] = cell; });
+
+  var simEdges = [];
+  var crossStubs = {};
+  colonyCells.forEach(function(cell) {
+    (cell.dependencies || []).forEach(function(depId) {
+      var dep = allCellMap[depId];
+      if (!dep) return;
+      if (dep.colony_id === colonyId) {
+        simEdges.push({ source: cell.cell_id, target: depId, kind: 'intra' });
+        return;
+      }
+      if (!crossStubs[depId]) {
+        var srcSim = simMap[cell.cell_id];
+        var outerR = (maxLevel + 1.5) * ringSpacing;
+        var ang = Math.atan2(srcSim.y - centerY, srcSim.x - centerX);
+        var stub = {
+          id: depId,
+          data: dep,
+          x: centerX + Math.cos(ang) * outerR,
+          y: centerY + Math.sin(ang) * outerR,
+          vx: 0, vy: 0,
+          level: -1,
+          ringRadius: outerR,
+          edgeCount: 0,
+          width:  GHOST_W,
+          height: GHOST_H,
+          borderWidth: 1,
+          isCenter: false,
+          isGhost: true,
+        };
+        crossStubs[depId] = stub;
+        simCells.push(stub);
+        simMap[depId] = stub;
+      }
+      simEdges.push({ source: cell.cell_id, target: depId, kind: 'cross' });
+    });
+  });
+
+  // Light relaxation: radial pull toward target ring + rectangular AABB
+  // minimum-translation repulsion. Seed stays pinned, ghost stubs stay
+  // pinned on the outer rim.
+  var TICKS = 60;
+  for (var tick = 0; tick < TICKS; tick++) {
+    var alpha = 1 - tick / TICKS;
+
+    simCells.forEach(function(simCell) {
+      if (simCell.isCenter) { simCell.x = centerX; simCell.y = centerY; simCell.vx = 0; simCell.vy = 0; return; }
+      if (simCell.isGhost) return;
+      var dxc = simCell.x - centerX;
+      var dyc = simCell.y - centerY;
+      var curR = Math.sqrt(dxc * dxc + dyc * dyc) || 1;
+      var pull = (simCell.ringRadius - curR) * 0.08 * alpha;
+      simCell.vx += (dxc / curR) * pull;
+      simCell.vy += (dyc / curR) * pull;
+    });
+
+    for (var i = 0; i < simCells.length; i++) {
+      for (var j = i + 1; j < simCells.length; j++) {
+        var a = simCells[i];
+        var b = simCells[j];
+        var dx = b.x - a.x;
+        var dy = b.y - a.y;
+        // Rectangular overlap with ~20 px x / 16 px y padding.
+        var xOverlap = (a.width  + b.width)  / 2 + 20 - Math.abs(dx);
+        var yOverlap = (a.height + b.height) / 2 + 16 - Math.abs(dy);
+        if (xOverlap > 0 && yOverlap > 0) {
+          // Separate along the axis with the smaller overlap (MTV).
+          if (xOverlap < yOverlap) {
+            var pushX = (dx < 0 ? -1 : 1) * xOverlap * 0.5 * alpha;
+            if (!a.isCenter && !a.isGhost) a.vx -= pushX;
+            if (!b.isCenter && !b.isGhost) b.vx += pushX;
+          } else {
+            var pushY = (dy < 0 ? -1 : 1) * yOverlap * 0.5 * alpha;
+            if (!a.isCenter && !a.isGhost) a.vy -= pushY;
+            if (!b.isCenter && !b.isGhost) b.vy += pushY;
+          }
+        }
+      }
+    }
+
+    simCells.forEach(function(simCell) {
+      if (simCell.isCenter || simCell.isGhost) return;
+      simCell.vx *= 0.80;
+      simCell.vy *= 0.80;
+      simCell.x += simCell.vx;
+      simCell.y += simCell.vy;
+    });
+  }
+
+  // Given a rectangle centered at (rect.x, rect.y) with rect.width /
+  // rect.height, return the point on its border that lies along the
+  // ray toward (towardsX, towardsY). Handles the degenerate cases
+  // (dx == 0 or dy == 0) explicitly. Used by straightPath to trim a
+  // center-to-center line so it touches the rectangle borders
+  // without crossing into them.
+  function rectBorderPoint(rect, towardsX, towardsY) {
+    var dx = towardsX - rect.x;
+    var dy = towardsY - rect.y;
+    if (dx === 0 && dy === 0) {
+      return { x: rect.x, y: rect.y };
+    }
+    var halfWidth = rect.width / 2;
+    var halfHeight = rect.height / 2;
+    var scale;
+    if (dx === 0) {
+      scale = halfHeight / Math.abs(dy);
+    } else if (dy === 0) {
+      scale = halfWidth / Math.abs(dx);
+    } else {
+      scale = Math.min(halfWidth / Math.abs(dx), halfHeight / Math.abs(dy));
+    }
+    return {
+      x: rect.x + dx * scale,
+      y: rect.y + dy * scale,
+    };
+  }
+
+  // Straight line from the source cell's border to the target cell's
+  // border. The line goes directly from src-center to tgt-center, but
+  // trimmed at each rectangle's border so the stroke doesn't cross
+  // into the cell interiors. Replaces the old two-segment elbow path
+  // — straight edges read cleaner on dense colony graphs.
+  function straightPath(src, tgt) {
+    var srcBorder = rectBorderPoint(src, tgt.x, tgt.y);
+    var tgtBorder = rectBorderPoint(tgt, src.x, src.y);
+    return 'M' + Math.round(srcBorder.x) + ',' + Math.round(srcBorder.y) +
+           ' L' + Math.round(tgtBorder.x) + ',' + Math.round(tgtBorder.y);
+  }
+
+  // Build a compact ID label: "<colony-slug> · L<level>.<seq>".
+  function cellIdLabel(simCell) {
+    var fullId = simCell.id || '';
+    var colonyId = simCell.data.colony_id || '';
+    var suffix = fullId;
+    if (colonyId && fullId.indexOf(colonyId) === 0) {
+      suffix = fullId.slice(colonyId.length + 1); // drop the leading "-"
+    }
+    var parts = suffix.split('-');
+    var levelSeq = parts.length >= 2
+      ? 'L' + parts[0] + '.' + parts[1]
+      : (suffix || ('L' + simCell.level));
+    var slug = colonyId.split('-').slice(1).join('-') || colonyId;
+    return (slug ? slug + ' · ' : '') + levelSeq;
+  }
+
+  // Clear SVG completely and build two explicit sub-groups so the layer
+  // order is obvious: edges on the bottom, cells on top, always.
+  while (svg.lastChild) svg.removeChild(svg.lastChild);
+
+  var viewX = 0, viewY = 0, viewScale = 1;
+  var group = buildSVGEl('g', { id: 'dag-group' });
+  svg.appendChild(group);
+  var edgeLayer = buildSVGEl('g', { class: 'dag-edge-layer' });
+  var cellLayer = buildSVGEl('g', { class: 'dag-cell-layer' });
+  group.appendChild(edgeLayer);
+  group.appendChild(cellLayer);
+
+  // Edges — straight lines from source border to target border, on
+  // the bottom layer. Replaces the previous two-segment elbow paths,
+  // which looked noisy on dense colony graphs.
+  simEdges.forEach(function(edge) {
+    var src = simMap[edge.source];
+    var tgt = simMap[edge.target];
+    if (!src || !tgt) return;
+    edgeLayer.appendChild(buildSVGEl('path', {
+      d: straightPath(src, tgt),
+      class: 'dag-edge ' + (edge.kind === 'cross' ? 'cross' : 'intra'),
+    }));
+  });
+
+  // Cells — rectangular rects with foreignObject HTML content, top layer.
+  simCells.forEach(function(simCell) {
+    var groupClasses = ['dag-cell'];
+    if (simCell.isCenter) groupClasses.push('is-seed');
+    if (simCell.isGhost)  groupClasses.push('is-ghost');
+    var cellGroup = buildSVGEl('g', { class: groupClasses.join(' '), 'data-id': simCell.id });
+
+    var isActive = !!activeSet[simCell.id];
+    var statusColor = STATUS_COLORS[simCell.data.status] || '#001018';
+    // Seed hub keeps the Petri brand green border; other cells use cyan.
+    var borderColor = simCell.isCenter ? '#00ff88' : '#00ccff';
+    var halfW = simCell.width  / 2;
+    var halfH = simCell.height / 2;
+    var rx = Math.round(simCell.x - halfW);
+    var ry = Math.round(simCell.y - halfH);
+
+    // Active-cell pulse — yellow dashed outer ring, pulses via @keyframes.
+    if (isActive) {
+      cellGroup.appendChild(buildSVGEl('rect', {
+        x: String(rx - 4), y: String(ry - 4),
+        width:  String(simCell.width  + 8),
+        height: String(simCell.height + 8),
+        fill: 'none', stroke: '#ffcc00', 'stroke-width': '1',
+        'stroke-dasharray': '2 2',
+        class: 'cell-active',
+      }));
+    }
+
+    cellGroup.appendChild(buildSVGEl('rect', {
+      x: String(rx), y: String(ry),
+      width:  String(simCell.width),
+      height: String(simCell.height),
+      fill: statusColor,
+      stroke: borderColor,
+      'stroke-width': String(simCell.borderWidth),
+      opacity: simCell.isGhost ? '0.75' : '1',
+    }));
+
+    // Seed hub "H" glyph — tucked into the top-left corner of the cell
+    // body so it doesn't collide with the HTML label content.
+    if (simCell.isCenter) {
+      var markX = rx + 6;
+      var markY = ry + 6;
+      [[0, 0, 1, 6], [4, 0, 1, 6], [1, 2, 3, 1]].forEach(function(segment) {
+        cellGroup.appendChild(buildSVGEl('rect', {
+          x: String(markX + segment[0]),
+          y: String(markY + segment[1]),
+          width:  String(segment[2]),
+          height: String(segment[3]),
+          fill: '#00ff88',
+        }));
+      });
+    }
+
+    // HTML body: ID line + wrapped claim text via <foreignObject>.
+    var fo = buildSVGEl('foreignObject', {
+      x: String(rx), y: String(ry),
+      width:  String(simCell.width),
+      height: String(simCell.height),
+    });
+    var body = document.createElement('div');
+    body.className = 'cell-body';
+
+    var idDiv = document.createElement('div');
+    idDiv.className = 'cell-id';
+    idDiv.textContent = cellIdLabel(simCell);
+    body.appendChild(idDiv);
+
+    var claimDiv = document.createElement('div');
+    claimDiv.className = 'cell-claim';
+    claimDiv.textContent = simCell.data.claim_text || '(no claim text)';
+    body.appendChild(claimDiv);
+
+    fo.appendChild(body);
+    cellGroup.appendChild(fo);
+
+    cellGroup.addEventListener('click', function() {
+      if (simCell.isGhost) { navigate('colony', simCell.data.colony_id); }
+      else                 { navigate('cell', simCell.id); }
+    });
+
+    var tooltip = document.getElementById('dag-tooltip');
+    cellGroup.addEventListener('mouseenter', function(evt) {
+      tooltip.textContent = '';
+      var claimLine = buildEl('div', { className: 'tt-claim' }, simCell.data.claim_text || simCell.id);
+      var statusSpan = buildEl('span', { className: 'tt-status', style: { background: statusColor } }, simCell.data.status);
+      var levelSpan = buildEl('span', { style: { marginLeft: '8px', color: '#5fa8b8', fontSize: '9px', letterSpacing: '1px' } }, 'LVL ' + simCell.data.level);
+      tooltip.appendChild(claimLine);
+      tooltip.appendChild(statusSpan);
+      tooltip.appendChild(levelSpan);
+      tooltip.style.display = 'block';
+      tooltip.style.left = (evt.clientX + 12) + 'px';
+      tooltip.style.top = (evt.clientY + 12) + 'px';
+    });
+    cellGroup.addEventListener('mousemove', function(evt) {
+      tooltip.style.left = (evt.clientX + 12) + 'px';
+      tooltip.style.top = (evt.clientY + 12) + 'px';
+    });
+    cellGroup.addEventListener('mouseleave', function() { tooltip.style.display = 'none'; });
+
+    cellLayer.appendChild(cellGroup);
+  });
+
+  // Pan & Zoom — preserved. Guard against starting a pan from HUD chrome.
+  var isPanning = false, panStartX = 0, panStartY = 0;
+  function updateTransform() {
+    group.setAttribute('transform', 'translate(' + viewX + ',' + viewY + ') scale(' + viewScale + ')');
+  }
+  container.addEventListener('mousedown', function(evt) {
+    if (evt.target.closest('.dag-cell') ||
+        evt.target.closest('.dag-back') ||
+        evt.target.closest('.dag-hud-top') ||
+        evt.target.closest('.dag-hud-bottom')) return;
+    isPanning = true;
+    panStartX = evt.clientX - viewX;
+    panStartY = evt.clientY - viewY;
+    container.classList.add('grabbing');
+  });
+  document.addEventListener('mousemove', function(evt) {
+    if (!isPanning) return;
+    viewX = evt.clientX - panStartX;
+    viewY = evt.clientY - panStartY;
+    updateTransform();
+  });
+  document.addEventListener('mouseup', function() { isPanning = false; container.classList.remove('grabbing'); });
+  container.addEventListener('wheel', function(evt) {
+    evt.preventDefault();
+    var delta = evt.deltaY > 0 ? 0.9 : 1.1;
+    var newScale = Math.max(0.2, Math.min(5, viewScale * delta));
+    var rect = container.getBoundingClientRect();
+    var mx = evt.clientX - rect.left, my = evt.clientY - rect.top;
+    viewX = mx - (mx - viewX) * (newScale / viewScale);
+    viewY = my - (my - viewY) * (newScale / viewScale);
+    viewScale = newScale;
+    updateTransform();
+  }, { passive: false });
+}
+
+function renderDAGLegend() {
+  var legend = document.getElementById('dag-legend');
+  legend.textContent = '';
+  ['NEW', 'RESEARCH', 'RED_TEAM', 'VALIDATED', 'DISPROVEN', 'STALLED'].forEach(function(status) {
+    var chip = buildEl('span', { className: 'legend-chip' });
+    chip.appendChild(buildEl('span', { className: 'legend-swatch', style: { background: STATUS_COLORS[status] } }));
+    chip.appendChild(document.createTextNode(status));
+    legend.appendChild(chip);
+  });
+}
+
+// ── Research Logs ───────────────────────────────────────────────────────
+
+function loadLogs() {
+  fetchJSON('/api/events?limit=200').then(function(events) {
+    var feed = document.getElementById('logs-feed');
+    feed.textContent = '';
+    events.reverse().forEach(function(evt) { appendLogRow(evt, true); });
+    if (events.length === 0) {
+      feed.appendChild(buildEl('div', { className: 'logs-empty' }, 'No events recorded yet. Run petri grow to start.'));
+    }
+  });
+}
+
+function appendLogRow(evt, skipScroll) {
+  var feed = document.getElementById('logs-feed');
+
+  var filterCell = document.getElementById('filter-cell').value.toLowerCase();
+  var filterAgent = document.getElementById('filter-agent').value.toLowerCase();
+  var filterType = document.getElementById('filter-type').value;
+
+  if (filterCell && (evt.cell_id || '').toLowerCase().indexOf(filterCell) === -1) return;
+  if (filterAgent && (evt.agent || '').toLowerCase().indexOf(filterAgent) === -1) return;
+  if (filterType && evt.type !== filterType) return;
+
+  var empty = feed.querySelector('.logs-empty');
+  if (empty) empty.remove();
+
+  var row = buildEl('div', { className: 'log-row' });
+  var time = (evt.timestamp || '').substring(11, 19) || '--:--:--';
+  var typeColor = EVENT_COLORS[evt.type] || '#666';
+
+  row.appendChild(buildEl('span', { className: 'log-time' }, time));
+  var badge = buildEl('span', { className: 'log-type-badge', style: { background: typeColor + '22', color: typeColor } }, (evt.type || '').replace(/_/g, ' '));
+  row.appendChild(badge);
+  row.appendChild(buildEl('span', { className: 'log-agent' }, evt.agent || ''));
+  row.appendChild(buildEl('span', { className: 'log-cell', onclick: function() { navigate('cell', evt.cell_id); } }, evt.cell_id || ''));
+  row.appendChild(buildEl('span', { className: 'log-iter' }, 'iter ' + (evt.iteration || 0)));
+
+  feed.insertBefore(row, feed.firstChild);
+  while (feed.children.length > 500) feed.removeChild(feed.lastChild);
+  if (!skipScroll) feed.scrollTop = 0;
+}
+
+['filter-cell', 'filter-agent', 'filter-type'].forEach(function(id) {
+  document.getElementById(id).addEventListener('input', function() {
+    if (State.currentView === 'logs') loadLogs();
+  });
+});
+
+// ── Cell Detail ─────────────────────────────────────────────────────────
+
+function loadCellDetail(cellId) {
+  var container = document.getElementById('cell-content');
+  container.textContent = '';
+  var loading = buildEl('div', { className: 'loading' });
+  loading.appendChild(buildEl('span', { className: 'spinner' }));
+  loading.appendChild(document.createTextNode('Loading cell...'));
+  container.appendChild(loading);
+
+  fetchJSON('/api/cell/' + encodeURIComponent(cellId)).then(function(cell) {
+    renderCellDetail(cell);
+  }).catch(function() {
+    container.textContent = '';
+    container.appendChild(buildEl('div', { className: 'loading' }, 'Cell not found: ' + cellId));
+  });
+}
+
+function renderCellDetail(cell) {
+  var container = document.getElementById('cell-content');
+  container.textContent = '';
+  var statusColor = STATUS_COLORS[cell.status] || '#555';
+  var events = cell.events || [];
+
+  // ── Back link ──
+  var backDiv = buildEl('div', { className: 'cell-back' });
+  backDiv.appendChild(buildEl('button', { className: 'hud-btn', onclick: function() { history.back(); } }, '\u2190 BACK'));
+  container.appendChild(backDiv);
+
+  // ── 1. Research Tag ──
+  container.appendChild(buildEl('div', { className: 'research-tag' }, '\u25B8 Research Cell'));
+
+  // ── 2. Title + status badge ──
+  var header = buildEl('div', { className: 'cell-header' });
+  header.appendChild(buildEl('div', { className: 'cell-claim-text' }, cell.claim_text || cell.cell_id));
+  header.appendChild(buildEl('span', {
+    className: 'cell-status-badge',
+    style: { background: statusColor + '22', color: statusColor },
+  }, cell.status));
+  container.appendChild(header);
+
+  // ── 3. Info Cards (meta grid) ──
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Info'));
+  var metaGrid = buildEl('div', { className: 'cell-meta-grid' });
+
+  function addMetaItem(label, valueContent) {
+    var item = buildEl('div', { className: 'hud-panel compact' });
+    item.appendChild(buildEl('div', { className: 'meta-item-label' }, label));
+    var valDiv = buildEl('div', { className: 'meta-item-value' });
+    if (typeof valueContent === 'string') valDiv.textContent = valueContent;
+    else valDiv.appendChild(valueContent);
+    item.appendChild(valDiv);
+    metaGrid.appendChild(item);
+  }
+
+  addMetaItem('Cell ID', cell.cell_id);
+  addMetaItem('Colony', cell.colony_id || '');
+  addMetaItem('Level', String(cell.level));
+
+  var depsDiv = document.createDocumentFragment();
+  (cell.dependencies || []).forEach(function(depId) {
+    var link = buildEl('span', { className: 'meta-item-value link', onclick: function() { navigate('cell', depId); } }, depId);
+    depsDiv.appendChild(link);
+    depsDiv.appendChild(document.createElement('br'));
+  });
+  if ((cell.dependencies || []).length === 0) depsDiv.appendChild(buildEl('span', { style: { color: '#5fa8b8' } }, 'None'));
+  addMetaItem('Dependencies (' + (cell.dependencies || []).length + ')', depsDiv);
+
+  var depntsDiv = document.createDocumentFragment();
+  (cell.dependents || []).forEach(function(depId) {
+    depntsDiv.appendChild(buildEl('span', { className: 'meta-item-value link', onclick: function() { navigate('cell', depId); } }, depId));
+    depntsDiv.appendChild(document.createElement('br'));
+  });
+  if ((cell.dependents || []).length === 0) depntsDiv.appendChild(buildEl('span', { style: { color: '#5fa8b8' } }, 'None'));
+  addMetaItem('Dependents (' + (cell.dependents || []).length + ')', depntsDiv);
+
+  container.appendChild(metaGrid);
+
+  // ── 4. Verdicts (latest per agent only) ──
+  // Dedupe by agent so the table shows one row per verdict-issuing
+  // agent: the most recent verdict wins (higher iteration beats older;
+  // equal iteration falls back to latest timestamp). The Cell Logs
+  // section below still shows the full verdict history.
+  var latestVerdictByAgent = {};
+  events.forEach(function(evt) {
+    if (evt.type !== 'verdict_issued') return;
+    var agent = evt.agent || 'unknown';
+    var prior = latestVerdictByAgent[agent];
+    var iter = evt.iteration || 0;
+    var ts = evt.timestamp || '';
+    if (!prior) { latestVerdictByAgent[agent] = evt; return; }
+    var priorIter = prior.iteration || 0;
+    var priorTs = prior.timestamp || '';
+    if (iter > priorIter || (iter === priorIter && ts > priorTs)) {
+      latestVerdictByAgent[agent] = evt;
+    }
+  });
+  var latestVerdicts = Object.keys(latestVerdictByAgent)
+    .sort()
+    .map(function(agent) { return latestVerdictByAgent[agent]; });
+
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Verdicts'));
+  var verdictSection = buildEl('div', { className: 'verdict-section' });
+  if (latestVerdicts.length > 0) {
+    var table = buildEl('table', { className: 'verdict-table' });
+    var thead = buildEl('thead');
+    var headRow = buildEl('tr');
+    ['Agent', 'Latest Verdict', 'Confidence', 'Iteration'].forEach(function(h) { headRow.appendChild(buildEl('th', {}, h)); });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = buildEl('tbody');
+    latestVerdicts.forEach(function(evt) {
+      var verdict = (evt.data && evt.data.verdict) || '';
+      var isPass = PASS_VERDICTS.has(verdict);
+      var row = buildEl('tr');
+      row.appendChild(buildEl('td', {}, evt.agent || ''));
+      row.appendChild(buildEl('td', { className: isPass ? 'verdict-pass' : 'verdict-block' }, verdict));
+      row.appendChild(buildEl('td', {}, String((evt.data && evt.data.confidence) || '')));
+      row.appendChild(buildEl('td', {}, String(evt.iteration)));
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    verdictSection.appendChild(table);
+  } else {
+    verdictSection.appendChild(buildEl('div', { className: 'citations-empty' }, 'No verdicts issued yet.'));
+  }
+  container.appendChild(verdictSection);
+
+  // ── 5. Evidence Summary (cell_lead's digest of evidence.md) ──
+  // The raw evidence.md is kept in the API response for debugging but
+  // the UI renders summary.md — a concise cell_lead digest regenerated
+  // at the end of every iteration and once more after final evaluation.
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Evidence Summary'));
+  var evidenceSection = buildEl('div', { className: 'evidence-section' });
+  var summaryMd = cell.summary_md || '';
+  if (summaryMd.trim().length > 0 && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+    var mdPanel = buildEl('div', { className: 'hud-panel' });
+    var mdBody = buildEl('div', { className: 'evidence-markdown' });
+    // Render markdown → HTML → sanitize via DOMPurify before touching
+    // the DOM. DOMPurify strips <script>, inline event handlers, and
+    // anything else that could execute; this is the only place we set
+    // innerHTML in the whole SPA.
+    try {
+      var rawHtml = marked.parse(summaryMd, { breaks: true, gfm: true });
+      mdBody.innerHTML = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
+    } catch (err) {
+      mdBody.textContent = summaryMd;
+    }
+    mdPanel.appendChild(mdBody);
+    evidenceSection.appendChild(mdPanel);
+  } else if (summaryMd.trim().length > 0) {
+    // Fallback: renderer libs failed to load — display raw markdown as
+    // preformatted text so the user still sees the content.
+    var pre = buildEl('pre', { className: 'expand-content', style: { display: 'block' } }, summaryMd);
+    evidenceSection.appendChild(pre);
+  } else {
+    evidenceSection.appendChild(buildEl('div', { className: 'evidence-empty' }, 'Summary not generated yet. cell_lead writes one at the end of each iteration.'));
+  }
+  container.appendChild(evidenceSection);
+
+  // ── 6. Citations (source_reviewed events with URL + finding) ──
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Citations'));
+  var citationsSection = buildEl('div', { className: 'citations-section' });
+  var sourceEvents = events.filter(function(evt) { return evt.type === 'source_reviewed' && evt.data && evt.data.url; });
+  if (sourceEvents.length > 0) {
+    var citationsList = buildEl('div', { className: 'citations-list' });
+    sourceEvents.forEach(function(evt) {
+      var data = evt.data || {};
+      var card = buildEl('div', { className: 'hud-panel compact citation-card' });
+
+      var titleLink = buildEl('a', {
+        className: 'citation-title',
+        href: data.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+      }, data.title || data.url);
+      card.appendChild(titleLink);
+
+      var urlEl = buildEl('span', { className: 'citation-url' }, data.url);
+      card.appendChild(urlEl);
+
+      var metaRow = buildEl('div', { className: 'citation-meta' });
+      var direction = (data.supports_or_contradicts || '').toLowerCase();
+      if (direction) {
+        var dirClass = 'neutral';
+        if (direction.indexOf('support') !== -1) dirClass = 'supports';
+        else if (direction.indexOf('contradict') !== -1) dirClass = 'contradicts';
+        metaRow.appendChild(buildEl('span', { className: 'citation-direction ' + dirClass }, direction));
+      }
+      if (data.hierarchy_level) {
+        metaRow.appendChild(buildEl('span', { className: 'citation-hierarchy' }, 'Level ' + data.hierarchy_level));
+      }
+      metaRow.appendChild(buildEl('span', { className: 'citation-agent' }, 'via ' + (evt.agent || 'unknown')));
+      card.appendChild(metaRow);
+
+      if (data.finding) {
+        card.appendChild(buildEl('div', { className: 'citation-finding' }, data.finding));
+      }
+      citationsList.appendChild(card);
+    });
+    citationsSection.appendChild(citationsList);
+  } else {
+    citationsSection.appendChild(buildEl('div', { className: 'citations-empty' }, 'No citations recorded for this cell yet.'));
+  }
+  container.appendChild(citationsSection);
+
+  // ── 7. Cell Logs (friendly-rendered, no raw JSON) ──
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Cell Logs (' + events.length + ' events)'));
+  var logsSection = buildEl('div', { className: 'cell-logs-section' });
+  if (events.length > 0) {
+    // Most-recent first, across all iterations.
+    var sortedEvents = events.slice().sort(function(a, b) {
+      return (b.timestamp || '').localeCompare(a.timestamp || '');
+    });
+    sortedEvents.forEach(function(evt) {
+      logsSection.appendChild(renderCellLogRow(evt));
+    });
+  } else {
+    logsSection.appendChild(buildEl('div', { className: 'cell-logs-empty' }, 'No events recorded for this cell yet.'));
+  }
+  container.appendChild(logsSection);
+}
+
+// Render a single event log row with human-readable body instead of
+// raw JSON. Each event type gets its own formatting so the reader
+// sees "Reviewed <url> (SUPPORTS)" instead of a JSON blob.
+function renderCellLogRow(evt) {
+  var data = evt.data || {};
+  var typeColor = EVENT_COLORS[evt.type] || '#5fa8b8';
+  var time = (evt.timestamp || '').substring(11, 19) || '--:--:--';
+
+  var row = buildEl('div', { className: 'cell-log-row' });
+  row.appendChild(buildEl('span', { className: 'cell-log-time' }, time));
+
+  var typeBadge = buildEl('span', {
+    className: 'cell-log-type',
+    style: { background: typeColor + '22', color: typeColor, borderColor: typeColor },
+  }, (evt.type || '').replace(/_/g, ' '));
+  row.appendChild(typeBadge);
+
+  var body = buildEl('div', { className: 'cell-log-body' });
+
+  // Event-type-specific friendly formatting. All user-supplied strings
+  // go through textContent/createTextNode so there's no XSS path.
+  if (evt.type === 'verdict_issued') {
+    var verdict = data.verdict || '';
+    var isPass = PASS_VERDICTS.has(verdict);
+    body.appendChild(buildEl('strong', {}, verdict || '—'));
+    body.appendChild(document.createTextNode(' '));
+    body.appendChild(buildEl('span', {
+      className: isPass ? 'cell-log-verdict-pass' : 'cell-log-verdict-fail',
+    }, isPass ? 'PASS' : 'BLOCK'));
+    if (typeof data.confidence !== 'undefined' && data.confidence !== null) {
+      body.appendChild(document.createTextNode(' · confidence ' + data.confidence));
+    }
+    if (data.summary) {
+      body.appendChild(document.createElement('br'));
+      body.appendChild(document.createTextNode(String(data.summary).substring(0, 280)));
+    }
+  } else if (evt.type === 'search_executed') {
+    body.appendChild(document.createTextNode('Searched: '));
+    body.appendChild(buildEl('strong', {}, '"' + (data.query || '') + '"'));
+    if (data.sources_found) {
+      body.appendChild(document.createTextNode(' · ' + data.sources_found + ' sources'));
+    }
+  } else if (evt.type === 'source_reviewed') {
+    if (data.url) {
+      var srcLink = buildEl('a', {
+        href: data.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+      }, data.title || data.url);
+      body.appendChild(srcLink);
+    } else {
+      body.appendChild(buildEl('strong', {}, data.title || 'Unknown source'));
+    }
+    if (data.supports_or_contradicts) {
+      body.appendChild(document.createTextNode(' · '));
+      body.appendChild(buildEl('strong', {}, String(data.supports_or_contradicts).toUpperCase()));
+    }
+    if (data.finding) {
+      body.appendChild(document.createElement('br'));
+      body.appendChild(document.createTextNode(String(data.finding).substring(0, 200)));
+    }
+  } else if (evt.type === 'evidence_appended') {
+    body.appendChild(document.createTextNode(data.summary || 'Evidence appended'));
+  } else if (evt.type === 'debate_mediated') {
+    body.appendChild(document.createTextNode('Debate: '));
+    body.appendChild(buildEl('strong', {}, (data.from_agent || '?') + ' vs ' + (data.to_agent || '?')));
+    if (data.summary) {
+      body.appendChild(document.createElement('br'));
+      body.appendChild(document.createTextNode(String(data.summary).substring(0, 200)));
+    }
+  } else if (evt.type === 'convergence_checked') {
+    var converged = !!data.converged;
+    body.appendChild(buildEl('strong', {
+      className: converged ? 'cell-log-verdict-pass' : 'cell-log-verdict-fail',
+    }, converged ? 'CONVERGED' : 'NOT CONVERGED'));
+    if (data.weakest_link) {
+      body.appendChild(document.createTextNode(' · weakest: ' + data.weakest_link));
+    }
+  } else if (evt.type === 'cell_reopened' || evt.type === 'propagation_triggered') {
+    body.appendChild(document.createTextNode(data.reason || data.summary || evt.type.replace(/_/g, ' ')));
+  } else if (evt.type === 'decomposition_created') {
+    var childCount = (data.child_cell_ids || []).length;
+    body.appendChild(document.createTextNode('Decomposed into ' + childCount + ' child cell' + (childCount === 1 ? '' : 's')));
+  } else if (evt.type === 'decomposition_audit') {
+    body.appendChild(document.createTextNode(data.summary || 'Decomposition audited'));
+  } else if (data.summary) {
+    body.appendChild(document.createTextNode(data.summary));
+  } else {
+    // Unknown event type — show a terse single-line key=value pair dump
+    // (still human-readable, no stringified JSON braces).
+    var parts = [];
+    Object.keys(data).slice(0, 4).forEach(function(k) {
+      var v = data[k];
+      if (typeof v === 'string') parts.push(k + '=' + v.substring(0, 60));
+      else if (typeof v === 'number' || typeof v === 'boolean') parts.push(k + '=' + v);
+    });
+    body.appendChild(document.createTextNode(parts.join(' · ') || '—'));
+  }
+
+  // Agent attribution (small line under body).
+  body.appendChild(buildEl('span', { className: 'cell-log-agent' }, (evt.agent || 'unknown') + ' · iter ' + (evt.iteration || 0)));
+
+  row.appendChild(body);
+  return row;
+}
+
+// ── Onboarding wizard (runs inline inside xterm) ───────────────────────
+//
+// The wizard and the command mode share a single xterm.js surface —
+// there is no separate static-DOM "CRT" layer anymore. Typed boot
+// messages, prompts, and command output all write into the same xterm.
+// User input happens through the persistent bottom input row, which
+// dispatches to one of:
+//   - a pending wizard prompt callback (TerminalState.pendingPrompt)
+//   - the command runner (termRun) in the default/idle case.
+
+function xtermSleep(ms) {
+  return new Promise(function(r) { setTimeout(r, ms); });
+}
+
+// Type text character-by-character into xterm with the given color
+// (keys from the ANSI helper). Returns a Promise that resolves when
+// the whole line has been written plus a trailing CRLF.
+function xtermTypeLine(text, color) {
+  return new Promise(function(resolve) {
+    if (!XTERM) { resolve(); return; }
+    var prefix = color && ANSI[color] ? ANSI[color] : '';
+    var suffix = prefix ? ANSI.reset : '';
+    XTERM.write(prefix);
+    var idx = 0;
+    function step() {
+      if (idx >= text.length) {
+        XTERM.write(suffix + '\r\n');
+        resolve();
+        return;
+      }
+      XTERM.write(text.charAt(idx));
+      idx++;
+      setTimeout(step, 15);
+    }
+    step();
+  });
+}
+
+// Instant-write a line with color (no typing animation).
+function xtermInstantLine(text, color) {
+  if (!XTERM) return;
+  var prefix = color && ANSI[color] ? ANSI[color] : '';
+  var suffix = prefix ? ANSI.reset : '';
+  XTERM.writeln(prefix + text + suffix);
+}
+
+// Prompt the user for a text answer inside xterm. Writes the prompt
+// line, focuses the bottom input with the default value preselected,
+// and resolves when the user presses Enter. The user's answer is
+// echoed back into xterm so it stays as part of the wizard history.
+function xtermPromptText(promptStr, defaultVal) {
+  return new Promise(function(resolve) {
+    if (XTERM) {
+      XTERM.write(ANSI.yellow + promptStr + ' ' + ANSI.reset);
+    }
+    var input = document.getElementById('term-cmd');
+    var oldPlaceholder = input ? input.placeholder : '';
+    if (input) {
+      input.value = defaultVal || '';
+      input.placeholder = '';
+      input.focus();
+      input.select();
+    }
+    TerminalState.pendingPrompt = function(raw) {
+      var finalVal = (raw || '').trim() || defaultVal || '';
+      if (XTERM) {
+        XTERM.write(ANSI.white + finalVal + ANSI.reset + '\r\n');
+      }
+      if (input) input.placeholder = oldPlaceholder;
+      resolve(finalVal);
+    };
+  });
+}
+
+// Prompt the user to pick one of several options. Renders the options
+// as styled lines in xterm, uses arrow keys captured on the bottom
+// input to move a ▸ marker, and resolves when the user presses Enter.
+// Redraws are done via ANSI cursor-up + clear-line sequences, so the
+// option block updates in place instead of scrolling.
+function xtermPromptSelect(promptStr, options, defaultIdx) {
+  return new Promise(function(resolve) {
+    var selected = defaultIdx || 0;
+    var n = options.length;
+
+    if (XTERM) {
+      XTERM.writeln(ANSI.yellow + promptStr + ANSI.reset);
+    }
+
+    function renderLine(idx, isSelected) {
+      var marker = isSelected ? (ANSI.green + '▸ ' + ANSI.reset) : '  ';
+      var style = isSelected ? (ANSI.green + ANSI.bold) : ANSI.grey;
+      return marker + style + options[idx].label + ANSI.reset;
+    }
+
+    if (XTERM) {
+      options.forEach(function(opt, idx) {
+        XTERM.writeln(renderLine(idx, idx === selected));
+      });
+    }
+
+    function redraw() {
+      if (!XTERM) return;
+      // Move cursor up n lines, then rewrite each option in place.
+      XTERM.write('\x1b[' + n + 'A');
+      for (var i = 0; i < n; i++) {
+        XTERM.write('\r\x1b[2K' + renderLine(i, i === selected) + '\r\n');
+      }
+    }
+
+    var input = document.getElementById('term-cmd');
+    var oldPlaceholder = input ? input.placeholder : '';
+    if (input) {
+      input.value = '';
+      input.placeholder = 'use ↑↓ to select, enter to confirm';
+      input.focus();
+    }
+
+    TerminalState.pendingArrowHandler = function(direction) {
+      if (direction === 'up') selected = Math.max(0, selected - 1);
+      else if (direction === 'down') selected = Math.min(n - 1, selected + 1);
+      redraw();
+    };
+    TerminalState.pendingPrompt = function() {
+      TerminalState.pendingArrowHandler = null;
+      if (input) input.placeholder = oldPlaceholder;
+      if (XTERM) {
+        XTERM.writeln(ANSI.grey + '  selected: ' + options[selected].label + ANSI.reset);
+      }
+      resolve(options[selected].value);
+    };
+  });
+}
+
+function startOnboarding() {
+  // The wizard drives the same xterm that command mode uses. xterm
+  // must already be mounted by loadComputer() before this runs.
+  if (!XTERM) termInitXterm();
+
+  var config = { name: '', model: 'claude-sonnet-4-6', max_concurrent: 4, max_iterations: 3 };
+
+  (async function runOnboarding() {
+    await xtermTypeLine('PETRI RESEARCH OS $petri_version', 'green');
+    await xtermSleep(300);
+    await xtermTypeLine('Initializing subsystems...', 'grey');
+    await xtermSleep(200);
+    xtermInstantLine('[OK] Event log engine', 'grey');
+    await xtermSleep(150);
+    xtermInstantLine('[OK] Queue state machine (13 states)', 'grey');
+    await xtermSleep(150);
+    xtermInstantLine('[OK] Agent roster (13 agents)', 'grey');
+    await xtermSleep(150);
+    xtermInstantLine('[OK] Convergence checker', 'grey');
+    await xtermSleep(150);
+    xtermInstantLine('[OK] Colony graph engine', 'grey');
+    await xtermSleep(400);
+    xtermInstantLine('');
+    await xtermTypeLine('No petri dish detected. Starting initialization...', 'green');
+    xtermInstantLine('');
+    await xtermTypeLine('$ petri init', 'yellow');
+    xtermInstantLine('');
+
+    config.name = await xtermPromptText('Dish name [my-research]:', 'my-research');
+    xtermInstantLine('');
+
+    config.model = await xtermPromptSelect('Inference model:', [
+      { label: 'claude-sonnet-4-6  (fast, cost-effective)', value: 'claude-sonnet-4-6' },
+      { label: 'claude-opus-4-6  (most capable, higher cost)', value: 'claude-opus-4-6' },
+    ], 0);
+    xtermInstantLine('');
+
+    var concStr = await xtermPromptText('Max concurrent agents [4]:', '4');
+    config.max_concurrent = parseInt(concStr, 10) || 4;
+    xtermInstantLine('');
+
+    var iterStr = await xtermPromptText('Max iterations per cycle [3]:', '3');
+    config.max_iterations = parseInt(iterStr, 10) || 3;
+    xtermInstantLine('');
+
+    await xtermTypeLine('Initializing petri dish...', 'green');
+
+    try {
+      var initRes = await fetch(API + '/api/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      var initData = await initRes.json();
+      if (initData.status === 'ok' || initData.status === 'already_exists') {
+        xtermInstantLine('[OK] Dish "' + config.name + '" initialized', 'green');
+      } else {
+        xtermInstantLine('[ERROR] ' + JSON.stringify(initData), 'red');
+      }
+    } catch (err) {
+      xtermInstantLine('[ERROR] Init failed: ' + err.message, 'red');
+    }
+
+    xtermInstantLine('');
+    await xtermSleep(400);
+
+    var starterClaim = '$starter_claim';
+    await xtermTypeLine('Seeding starter colony...', 'grey');
+    xtermInstantLine('');
+    await xtermSleep(300);
+
+    // Transition into command mode. termEnterCommandMode() is now a
+    // tiny no-op-ish state flip that writes the command-mode banner —
+    // the user stays inside the same xterm surface the wizard was
+    // already driving, so the handoff is invisible.
+    termEnterCommandMode();
+
+    // Kick off seed as a real subprocess via the PTY path that also
+    // powers `petri grow` in command mode.
+    setTimeout(function() {
+      var escapedClaim = starterClaim.replace(/"/g, '\\"');
+      termRun('petri seed "' + escapedClaim + '"');
+    }, 100);
+  })();
+}
+
+// ── Computer Terminal (command mode) ────────────────────────────────────
+
+var TerminalState = {
+  mode: null,       // null | 'onboarding' | 'idle' | 'running'
+  sessionId: null,
+  eventSource: null,
+  history: [],
+  historyIndex: -1,
+  detachNext: false,
+  inputHandlerBound: false,
+  // Wizard dispatch slots — set by xtermPromptText / xtermPromptSelect
+  // so the shared bottom input can hand user input back to the
+  // currently-active wizard prompt instead of calling termRun.
+  pendingPrompt: null,
+  pendingArrowHandler: null,
+};
+
+var XTERM = null;
+var XTERM_FIT = null;
+var XTERM_DECODER = null;
+
+var PETRI_SUBCOMMANDS = [
+  'init', 'seed', 'grow', 'check', 'feed', 'stop',
+  'scan', 'graph', 'connect', 'inspect', 'launch',
+];
+
+// ANSI SGR color helpers for system/banner/event lines written to xterm.
+var ANSI = {
+  reset:    '\x1b[0m',
+  dim:      '\x1b[2m',
+  bold:     '\x1b[1m',
+  red:      '\x1b[91m',
+  green:    '\x1b[92m',
+  yellow:   '\x1b[93m',
+  blue:     '\x1b[94m',
+  magenta:  '\x1b[95m',
+  cyan:     '\x1b[96m',
+  white:    '\x1b[97m',
+  grey:     '\x1b[90m',
+};
+
+function termInitXterm() {
+  if (XTERM) return XTERM;
+  if (typeof Terminal === 'undefined') {
+    return null;  // xterm.js CDN failed to load — caller falls back
+  }
+  var mount = document.getElementById('crt-xterm');
+  if (!mount) return null;
+  mount.style.display = 'block';
+
+  XTERM = new Terminal({
+    // The bottom #term-cmd input is the only way the user types into
+    // this surface — xterm itself is a write-only display. disableStdin
+    // tells xterm to ignore its own keyboard events, and the click
+    // handler below redirects focus to #term-cmd whenever the user
+    // clicks anywhere in the xterm area, so xterm's hidden textarea
+    // never silently steals focus away from the real input.
+    cursorBlink: true,
+    disableStdin: true,
+    fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+    fontSize: 13,
+    lineHeight: 1.2,
+    scrollback: 5000,
+    convertEol: true,
+    theme: {
+      background: '#000800',
+      foreground: '#00ff88',
+      cursor: '#00ff88',
+      cursorAccent: '#000800',
+      selectionBackground: 'rgba(0, 255, 136, 0.35)',
+      black:         '#000800',
+      red:           '#ff6b6b',
+      green:         '#00ff88',
+      yellow:        '#ffcc00',
+      blue:          '#00ccff',
+      magenta:       '#ff3399',
+      cyan:          '#66ffbb',
+      white:         '#e0f0ff',
+      brightBlack:   '#116644',
+      brightRed:     '#ff9999',
+      brightGreen:   '#66ffbb',
+      brightYellow:  '#ffee66',
+      brightBlue:    '#66ccff',
+      brightMagenta: '#ff66bb',
+      brightCyan:    '#99ffdd',
+      brightWhite:   '#ffffff',
+    },
+  });
+
+  if (typeof FitAddon !== 'undefined') {
+    XTERM_FIT = new FitAddon.FitAddon();
+    XTERM.loadAddon(XTERM_FIT);
+  }
+  XTERM.open(mount);
+  if (XTERM_FIT) {
+    try { XTERM_FIT.fit(); } catch (e) {}
+  }
+  // Refit on viewport changes so the terminal grows with the window.
+  window.addEventListener('resize', function() {
+    if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
+  });
+
+  // Click-to-redirect: when the user clicks anywhere in the xterm
+  // surface, focus the bottom #term-cmd input instead. Without this,
+  // xterm's hidden textarea grabs focus and the user's keystrokes
+  // disappear into a void. We skip the redirect when the user is
+  // actively selecting text (so copy still works).
+  mount.addEventListener('mouseup', function() {
+    if (window.getSelection && window.getSelection().toString().length > 0) {
+      return;
+    }
+    var input = document.getElementById('term-cmd');
+    if (input) input.focus();
+  });
+
+  XTERM_DECODER = (typeof TextDecoder !== 'undefined')
+    ? new TextDecoder('utf-8', { fatal: false })
+    : null;
+
+  return XTERM;
+}
+
+// Decode a base64-encoded byte chunk from the backend PTY into a form
+// xterm.write can consume. Prefer Uint8Array so escape bytes survive
+// untouched; fall back to a string if TextDecoder is unavailable.
+function termDecodeB64Chunk(b64) {
+  var bin = atob(b64);
+  var arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+function xtermWriteRaw(chunkBytes) {
+  if (XTERM) XTERM.write(chunkBytes);
+}
+
+function xtermWriteLine(text, color) {
+  if (!XTERM) return;
+  var prefix = color ? ANSI[color] : '';
+  var suffix = color ? ANSI.reset : '';
+  XTERM.writeln(prefix + text + suffix);
+}
+
+function termSetRunning(running) {
+  TerminalState.mode = running ? 'running' : 'idle';
+  var stopBtn = document.getElementById('term-stop-btn');
+  if (stopBtn) stopBtn.disabled = !running;
+}
+
+function termTokenize(raw) {
+  var tokens = [];
+  var buf = '';
+  var inQuote = false;
+  for (var i = 0; i < raw.length; i++) {
+    var ch = raw[i];
+    if (ch === '"') { inQuote = !inQuote; continue; }
+    if (ch === ' ' && !inQuote) {
+      if (buf.length) { tokens.push(buf); buf = ''; }
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.length) tokens.push(buf);
+  return tokens;
+}
+
+function termBindInputHandlers() {
+  var input = document.getElementById('term-cmd');
+  var stopBtn = document.getElementById('term-stop-btn');
+  var detachBtn = document.getElementById('term-detach-btn');
+  if (!input || TerminalState.inputHandlerBound) return;
+  TerminalState.inputHandlerBound = true;
+
+  input.addEventListener('keydown', function(evt) {
+    // Wizard prompt dispatch: when the onboarding wizard has
+    // registered a pendingPrompt callback, Enter hands the current
+    // input value off to it and clears. Arrow keys dispatch to the
+    // pendingArrowHandler (for select-style menus). This keeps the
+    // wizard and command mode sharing one input surface.
+    if (evt.key === 'Enter') {
+      evt.preventDefault();
+      var raw = input.value;
+      input.value = '';
+      if (TerminalState.pendingPrompt) {
+        var cb = TerminalState.pendingPrompt;
+        TerminalState.pendingPrompt = null;
+        cb(raw);
+        return;
+      }
+      var trimmed = raw.trim();
+      if (trimmed.length === 0) return;
+      TerminalState.history.push(trimmed);
+      TerminalState.historyIndex = -1;
+      termRun(trimmed);
+      return;
+    }
+    if (evt.key === 'ArrowUp') {
+      if (TerminalState.pendingArrowHandler) {
+        evt.preventDefault();
+        TerminalState.pendingArrowHandler('up');
+        return;
+      }
+      if (TerminalState.history.length === 0) return;
+      evt.preventDefault();
+      if (TerminalState.historyIndex === -1) {
+        TerminalState.historyIndex = TerminalState.history.length - 1;
+      } else if (TerminalState.historyIndex > 0) {
+        TerminalState.historyIndex--;
+      }
+      input.value = TerminalState.history[TerminalState.historyIndex];
+      return;
+    }
+    if (evt.key === 'ArrowDown') {
+      if (TerminalState.pendingArrowHandler) {
+        evt.preventDefault();
+        TerminalState.pendingArrowHandler('down');
+        return;
+      }
+      if (TerminalState.historyIndex === -1) return;
+      evt.preventDefault();
+      if (TerminalState.historyIndex < TerminalState.history.length - 1) {
+        TerminalState.historyIndex++;
+        input.value = TerminalState.history[TerminalState.historyIndex];
+      } else {
+        TerminalState.historyIndex = -1;
+        input.value = '';
+      }
+      return;
+    }
+    if ((evt.ctrlKey || evt.metaKey) && evt.key === 'c' && TerminalState.mode === 'running') {
+      evt.preventDefault();
+      termStop();
+    }
+  });
+
+  stopBtn.addEventListener('click', termStop);
+  detachBtn.addEventListener('click', function() {
+    TerminalState.detachNext = !TerminalState.detachNext;
+    detachBtn.classList.toggle('active', TerminalState.detachNext);
+  });
+}
+
+function termEnterCommandMode() {
+  // Unified-surface version: xterm is already mounted by loadComputer()
+  // at page-load time, and the command input row is always visible.
+  // This function's only job now is to flip the mode flag and write
+  // the command-mode banner into the same xterm the wizard was
+  // driving. There is no layer switch.
+  TerminalState.mode = 'idle';
+  if (XTERM) {
+    XTERM.writeln('');
+    XTERM.writeln(ANSI.green + ANSI.bold + '─── PETRI COMPUTER · command mode ───' + ANSI.reset);
+    XTERM.writeln(ANSI.grey + 'type full commands:  ' + ANSI.yellow + 'petri check' + ANSI.grey +
+                  '   ·   ' + ANSI.yellow + 'petri seed "your claim"' + ANSI.reset);
+    XTERM.writeln(ANSI.grey + 'subcommands: ' + PETRI_SUBCOMMANDS.join(' ') + ANSI.reset);
+    XTERM.writeln(ANSI.grey + 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right' + ANSI.reset);
+    XTERM.writeln('');
+    if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
+  }
+  termBindInputHandlers();
+  setTimeout(function() {
+    var input = document.getElementById('term-cmd');
+    if (input) input.focus();
+  }, 30);
+}
+
+// Write a line to xterm with a semantic color class. All output flows
+// here now — there is no DOM fallback because xterm is the only
+// display surface.
+function termEcho(kind, text) {
+  if (!XTERM) return;
+  var color = {
+    cmd: 'yellow', stdout: 'white', stderr: 'red',
+    system: 'cyan', dim: 'grey', bright: 'green', event: 'grey',
+  }[kind] || 'white';
+  xtermWriteLine(text, color);
+}
+
+function termRun(raw) {
+  if (TerminalState.mode === 'running') {
+    termEcho('system', '(a command is already running — press STOP first)');
+    return;
+  }
+  var tokens = termTokenize(raw);
+  if (tokens.length === 0) return;
+
+  // Enforce `petri <subcommand> [args]` so the UX matches the real CLI.
+  if (tokens[0] !== 'petri') {
+    termEcho('stderr', 'Commands must start with "petri". Try: petri ' + (tokens[0] || 'check'));
+    return;
+  }
+  if (tokens.length < 2) {
+    termEcho('stderr', 'Missing subcommand. Try: petri check');
+    return;
+  }
+  var command = tokens[1];
+  var args = tokens.slice(2);
+
+  if (PETRI_SUBCOMMANDS.indexOf(command) === -1) {
+    termEcho('stderr', 'Unknown petri subcommand: ' + command);
+    termEcho('dim', 'Allowed: ' + PETRI_SUBCOMMANDS.join(', '));
+    return;
+  }
+
+  termEcho('cmd', '$ ' + raw);
+  var detach = !!TerminalState.detachNext;
+
+  fetch(API + '/api/proc/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: command, args: args, detach: detach }),
+  }).then(function(res) {
+    return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+  }).then(function(wrap) {
+    if (!wrap.ok) {
+      termEcho('stderr', 'start failed: ' + ((wrap.data && wrap.data.detail) || 'unknown'));
+      return;
+    }
+    TerminalState.sessionId = wrap.data.stream_id;
+    termSetRunning(true);
+
+    if (detach) {
+      termEcho('dim', '[detached; running in background as PID ' + wrap.data.pid + ']');
+      TerminalState.sessionId = null;
+      termSetRunning(false);
+      return;
+    }
+    termStreamOutput(wrap.data.stream_id);
+  }).catch(function(err) {
+    termEcho('stderr', 'start failed: ' + err.message);
+  });
+}
+
+function termStreamOutput(streamId) {
+  if (TerminalState.eventSource) TerminalState.eventSource.close();
+  var source = new EventSource(API + '/api/proc/stream/' + encodeURIComponent(streamId));
+  TerminalState.eventSource = source;
+
+  // The backend wraps every PTY chunk as {"line": "<base64>"}. Decode
+  // into raw bytes and hand them straight to xterm.write so ANSI
+  // escapes, carriage-return animations, and the multi-spinner all
+  // pass through untouched.
+  function onChunk(evt) {
+    var payload;
+    try { payload = JSON.parse(evt.data); } catch (e) { return; }
+    var raw = payload.line || '';
+    if (XTERM) xtermWriteRaw(termDecodeB64Chunk(raw));
+  }
+  source.addEventListener('stdout', onChunk);
+  source.addEventListener('stderr', onChunk);
+  source.addEventListener('system', function(evt) {
+    try { termEcho('system', JSON.parse(evt.data).line); } catch (e) {}
+  });
+
+  source.addEventListener('done', function(evt) {
+    var payload = {};
+    try { payload = JSON.parse(evt.data); } catch (e) {}
+    var code = payload.code;
+    if (XTERM) {
+      var color = code === 0 ? ANSI.green : ANSI.red;
+      XTERM.writeln('\r\n' + color + '[done ' + code + ']' + ANSI.reset);
+    }
+    source.close();
+    TerminalState.eventSource = null;
+    TerminalState.sessionId = null;
+    termSetRunning(false);
+  });
+  source.onerror = function() {
+    source.close();
+    if (TerminalState.eventSource === source) {
+      TerminalState.eventSource = null;
+      termSetRunning(false);
+    }
+  };
+}
+
+function termStop() {
+  if (!TerminalState.sessionId) return;
+  fetch(API + '/api/proc/stop/' + encodeURIComponent(TerminalState.sessionId), { method: 'POST' })
+    .catch(function() {});  // done event will fire regardless
+}
+
+function loadComputer() {
+  // xterm is the only display surface — mount it lazily on first
+  // entry to the Computer tab so the onboarding wizard and command
+  // mode both share the exact same terminal instance.
+  if (!XTERM) termInitXterm();
+  termBindInputHandlers();
+
+  // Always focus the bottom command input the moment we enter the
+  // Computer tab. This is the only typing surface; the user should
+  // never have to click before they can type.
+  setTimeout(function() {
+    var input = document.getElementById('term-cmd');
+    if (input) input.focus();
+    if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
+  }, 30);
+
+  // Re-entry: if we're already in a live mode, do not restart the
+  // wizard or banner — the xterm scrollback already has them.
+  if (TerminalState.mode === 'idle' || TerminalState.mode === 'running' || TerminalState.mode === 'onboarding') {
+    return;
+  }
+
+  // Fresh entry — decide whether to run the wizard or drop straight
+  // into command mode based on whether any dishes exist.
+  fetch(API + '/api/dishes').then(function(res) { return res.json(); }).then(function(dishes) {
+    if (Array.isArray(dishes) && dishes.length > 0) {
+      termEnterCommandMode();
+      if (XTERM) {
+        XTERM.writeln(ANSI.green + 'PETRI COMPUTER · localhost' + ANSI.reset);
+        XTERM.writeln(ANSI.grey + 'Dishes: ' + dishes.map(function(d) { return d.id; }).join(', ') + ANSI.reset);
+        XTERM.writeln('');
+      }
+      return;
+    }
+    TerminalState.mode = 'onboarding';
+    startOnboarding();
+  }).catch(function(err) {
+    if (XTERM) {
+      XTERM.writeln(ANSI.red + 'Could not reach /api/dishes: ' + err.message + ANSI.reset);
+    }
+    termEnterCommandMode();
+  });
+}
+
+// ── Petri logo sprite (pixel-art P E T R I) ────────────────────────────
+//
+// Ported from petri/assets/petri-sprites/01-title.html. Each letter is a
+// 1/0 grid of pixel-font rows; we draw them with a 15-color blue-chrome
+// palette plus an edge-highlighted 3D look. Used for the small logo in
+// every screen's header bar. The title screen's own centered splash
+// still uses petri-title-screen.svg.
+
+var PETRI_LOGO_LETTERS = {
+  P: [
+    "111111111111111100","111111111111111110","111100000000011111",
+    "111100000000001111","111100000000001111","111100000000001111",
+    "111100000000011111","111111111111111110","111111111111111100",
+    "111111111111110000","111100000000000000","111100000000000000",
+    "111100000000000000","111100000000000000","111100000000000000",
+    "111100000000000000","111100000000000000","111100000000000000",
+  ],
+  E: [
+    "111111111111111111","111111111111111111","111100000000000000",
+    "111100000000000000","111100000000000000","111100000000000000",
+    "111111111111111100","111111111111111100","111111111111111100",
+    "111100000000000000","111100000000000000","111100000000000000",
+    "111100000000000000","111100000000000000","111100000000000000",
+    "111100000000000000","111111111111111111","111111111111111111",
+  ],
+  T: [
+    "111111111111111111","111111111111111111","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+  ],
+  R: [
+    "111111111111111100","111111111111111110","111100000000011111",
+    "111100000000001111","111100000000001111","111100000000001111",
+    "111100000000011111","111111111111111110","111111111111111100",
+    "111111111110000000","111100011111000000","111100001111100000",
+    "111100000111110000","111100000011111000","111100000001111100",
+    "111100000000111110","111100000000011111","111100000000001111",
+  ],
+  I: [
+    "111111111111","111111111111","000011110000","000011110000",
+    "000011110000","000011110000","000011110000","000011110000",
+    "000011110000","000011110000","000011110000","000011110000",
+    "000011110000","000011110000","000011110000","000011110000",
+    "111111111111","111111111111",
+  ],
+};
+
+var PETRI_LOGO_CHROME = [
+  '#e8f0ff','#d0e4ff','#b4dcff','#9ccfff','#84c0f0',
+  '#6caee4','#5898d0','#4682c8','#3870b8','#2e5ca0',
+  '#1e4888','#1a3c78','#142850','#0f1e3c','#0a1428',
+];
+
+// Render the pixel-art PETRI logo into a target canvas. Scale is the
+// per-pixel size in screen pixels — 2 gives a nice crisp 216×52-ish
+// canvas that CSS then fits to the header height with pixelated
+// downscaling. Height matches the sprite's native 26 rows.
+function drawPetriLogo(canvas, scale) {
+  var ctx = canvas.getContext('2d');
+  var word = 'PETRI';
+  var letterSpacing = 4;
+  var totalWidth = 0;
+  for (var i = 0; i < word.length; i++) {
+    totalWidth += PETRI_LOGO_LETTERS[word[i]][0].length;
+  }
+  totalWidth += (word.length - 1) * letterSpacing;
+  var totalHeight = 18;
+  canvas.width = (totalWidth + 8) * scale;
+  canvas.height = (totalHeight + 8) * scale;
+  ctx.imageSmoothingEnabled = false;
+
+  // Glow layer: draw the word onto a tiny offscreen canvas, then blit it
+  // back with a blur filter so the letters have a soft blue halo.
+  var glow = document.createElement('canvas');
+  glow.width = totalWidth + 8;
+  glow.height = totalHeight + 8;
+  var gctx = glow.getContext('2d');
+  var gx = 4;
+  for (var gi = 0; gi < word.length; gi++) {
+    var ggrid = PETRI_LOGO_LETTERS[word[gi]];
+    for (var gr = 0; gr < ggrid.length; gr++) {
+      for (var gc = 0; gc < ggrid[gr].length; gc++) {
+        if (ggrid[gr][gc] === '1') {
+          gctx.fillStyle = '#3c8cff';
+          gctx.fillRect(gx + gc, 4 + gr, 1, 1);
+        }
+      }
+    }
+    gx += ggrid[0].length + letterSpacing;
+  }
+  ctx.save();
+  ctx.filter = 'blur(' + (5 * scale) + 'px)';
+  ctx.globalAlpha = 0.55;
+  ctx.drawImage(glow, 0, 0, glow.width, glow.height, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // Main letters with per-row / per-column palette variation and edge
+  // highlights so each pixel gets a chrome 3D look.
+  var xOff = 4;
+  for (var li = 0; li < word.length; li++) {
+    var grid = PETRI_LOGO_LETTERS[word[li]];
+    var gridWidth = grid[0].length;
+    for (var row = 0; row < grid.length; row++) {
+      for (var col = 0; col < grid[row].length; col++) {
+        if (grid[row][col] !== '1') continue;
+        var isTop    = row === 0 || grid[row - 1][col] !== '1';
+        var isBottom = row === grid.length - 1 || grid[row + 1][col] !== '1';
+        var isLeft   = col === 0 || grid[row][col - 1] !== '1';
+        var isRight  = col === grid[row].length - 1 || grid[row][col + 1] !== '1';
+
+        var rowIndex = Math.floor((row / grid.length) * PETRI_LOGO_CHROME.length);
+        var colBias = Math.floor((col / gridWidth) * 3) - 1;
+        var idx = Math.max(0, Math.min(PETRI_LOGO_CHROME.length - 1, rowIndex + colBias));
+
+        if (isTop) {
+          idx = Math.max(0, rowIndex - 2);
+        } else if (isLeft) {
+          idx = Math.max(0, rowIndex - 1);
+        } else if (isRight || isBottom) {
+          idx = Math.min(PETRI_LOGO_CHROME.length - 1, rowIndex + 1);
+        }
+        ctx.fillStyle = PETRI_LOGO_CHROME[idx];
+        ctx.fillRect((xOff + col) * scale, (4 + row) * scale, scale, scale);
+      }
+    }
+    xOff += grid[0].length + letterSpacing;
+  }
+}
+
+function renderAllPetriLogos() {
+  document.querySelectorAll('.petri-logo-canvas').forEach(function(canvas) {
+    drawPetriLogo(canvas, 2);
+  });
+}
+
+// ── Initialize ──────────────────────────────────────────────────────────
+
+renderAllPetriLogos();
+handleRoute();
+connectSSE();
+</script>
+</body>
+</html>

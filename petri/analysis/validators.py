@@ -1,6 +1,6 @@
 """Source hierarchy enforcement for terminal decisions.
 
-Ensures that nodes can only reach a terminal verdict (VALIDATED or DISPROVEN)
+Ensures that cells can only reach a terminal verdict (VALIDATED or DISPROVEN)
 when backed by sufficiently strong evidence -- at least one source at
 hierarchy Level 1-4 (direct measurement, authoritative docs, derived
 calculation, or corroborated expert consensus).
@@ -50,12 +50,12 @@ def load_source_hierarchy(config_path: Path) -> dict:
 
 def validate_terminal_sources(
     events_path: Path,
-    node_id: str,
+    cell_id: str,
     min_level: int | None = None,
 ) -> dict:
-    """Validate that a node has Level 1-4 sources for terminal decisions.
+    """Validate that a cell has Level 1-4 sources for terminal decisions.
 
-    Scans ``source_reviewed`` events for the given *node_id* in the JSONL file
+    Scans ``source_reviewed`` events for the given *cell_id* in the JSONL file
     at *events_path*.  A terminal decision (VALIDATED or DISPROVEN) requires at
     least one source with ``hierarchy_level`` between 1 and *min_level*
     inclusive.
@@ -71,13 +71,13 @@ def validate_terminal_sources(
     sources = [
         event
         for event in events
-        if event.get("type") == "source_reviewed" and event.get("node_id") == node_id
+        if event.get("type") == "source_reviewed" and event.get("cell_id") == cell_id
     ]
 
     if not sources:
         return {
             "pass": False,
-            "details": "No source_reviewed events found for node",
+            "details": "No source_reviewed events found for cell",
             "sources": [],
             "highest_level": None,
         }

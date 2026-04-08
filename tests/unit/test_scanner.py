@@ -12,7 +12,7 @@ import pytest
 
 from petri.analysis.scanner import ScanIssue, auto_fix, scan, scan_loop
 
-from tests.conftest import CANONICAL_NODE_IDS
+from tests.conftest import CANONICAL_CELL_IDS
 
 
 class TestScanBaseline:
@@ -118,9 +118,9 @@ class TestQueueSchema:
             "version": 1,
             "last_updated": None,
             "entries": {
-                CANONICAL_NODE_IDS["premise1"]: {
+                CANONICAL_CELL_IDS["premise1"]: {
                     "queue_state": "INVALID_STATE",
-                    "node_id": CANONICAL_NODE_IDS["premise1"],
+                    "cell_id": CANONICAL_CELL_IDS["premise1"],
                 }
             },
         }
@@ -151,14 +151,14 @@ class TestRoleSeparation:
         agents_dir.mkdir(parents=True)
 
         # Create lead agent without re-read instruction
-        (agents_dir / "node_lead.md").write_text(
-            "# Node Lead\nYou are the node lead.\n"
+        (agents_dir / "cell_lead.md").write_text(
+            "# Cell Lead\nYou are the cell lead.\n"
         )
 
         issues = scan(petri_dir, generated)
         role_issues = [
             i for i in issues
-            if i.category == "role_separation" and "node_lead" in i.description
+            if i.category == "role_separation" and "cell_lead" in i.description
         ]
         assert any("re-read" in i.description.lower() for i in role_issues)
 

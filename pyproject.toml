@@ -6,16 +6,14 @@ build-backend = "setuptools.build_meta"
 name = "petri-grow"
 version = "0.2.3"
 description = "An agent orchestration framework to grow your AI's context."
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = "Apache-2.0"
 authors = [{name = "On the Mark Data LLC", email = "mark@onthemarkdata.com"}]
 readme = "README.md"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [

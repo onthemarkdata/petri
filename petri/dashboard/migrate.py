@@ -19,22 +19,22 @@ from petri.storage.event_log import rollup_to_combined
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS events (
     id          TEXT PRIMARY KEY,
-    node_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
     timestamp   TEXT NOT NULL,
     type        TEXT NOT NULL,
     agent       TEXT NOT NULL,
     iteration   INTEGER NOT NULL DEFAULT 0,
     data        TEXT NOT NULL DEFAULT '{}'
 );
-CREATE INDEX IF NOT EXISTS idx_events_node_id ON events(node_id);
-CREATE INDEX IF NOT EXISTS idx_events_node_iteration ON events(node_id, iteration);
+CREATE INDEX IF NOT EXISTS idx_events_cell_id ON events(cell_id);
+CREATE INDEX IF NOT EXISTS idx_events_cell_iteration ON events(cell_id, iteration);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 """
 
 _INSERT_SQL = (
     "INSERT OR IGNORE INTO events "
-    "(id, node_id, timestamp, type, agent, iteration, data) "
+    "(id, cell_id, timestamp, type, agent, iteration, data) "
     "VALUES (?, ?, ?, ?, ?, ?, ?)"
 )
 
@@ -55,7 +55,7 @@ def init_db(db_path: Path) -> None:
 def rebuild_sqlite(petri_dir: Path, db_path: Path) -> int:
     """Full cold-start rebuild of the SQLite read index.
 
-    1. Rolls up per-node JSONL files into ``combined.jsonl``.
+    1. Rolls up per-cell JSONL files into ``combined.jsonl``.
     2. Creates the database (if needed).
     3. Reads every line of ``combined.jsonl`` and inserts into SQLite.
     4. Returns the number of events inserted.
@@ -83,7 +83,7 @@ def rebuild_sqlite(petri_dir: Path, db_path: Path) -> int:
                     _INSERT_SQL,
                     (
                         evt["id"],
-                        evt["node_id"],
+                        evt["cell_id"],
                         evt["timestamp"],
                         evt["type"],
                         evt["agent"],
@@ -148,7 +148,7 @@ def incremental_sync(
                 _INSERT_SQL,
                 (
                     evt["id"],
-                    evt["node_id"],
+                    evt["cell_id"],
                     evt["timestamp"],
                     evt["type"],
                     evt["agent"],
