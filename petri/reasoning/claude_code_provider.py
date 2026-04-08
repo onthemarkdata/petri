@@ -11,10 +11,51 @@ import logging
 import re
 import shutil
 import subprocess
+from typing import Callable, Optional
 
 from petri.config import LLM_INFERENCE_MODEL
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_text_delta(event: dict) -> str:
+    """Extract assistant-text delta from a stream-json event.
+
+    Defensive: returns "" for any event shape we don't recognise so the
+    spinner stays empty rather than crashing if the format ever changes.
+    Handles the common Anthropic streaming shapes:
+      - {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "..."}}
+      - {"type": "stream_event", "event": {<the above>}}
+      - {"type": "assistant", "message": {"content": [{"type": "text", "text": "..."}]}}
+    """
+    if not isinstance(event, dict):
+        return ""
+
+    # Direct content_block_delta
+    if event.get("type") == "content_block_delta":
+        delta = event.get("delta") or {}
+        if isinstance(delta, dict) and delta.get("type") == "text_delta":
+            text = delta.get("text", "")
+            return text if isinstance(text, str) else ""
+
+    # Wrapped stream_event
+    if event.get("type") == "stream_event":
+        return _extract_text_delta(event.get("event") or {})
+
+    # Full assistant message (sent as one event in some modes)
+    if event.get("type") == "assistant":
+        message = event.get("message") or {}
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "".join(parts)
+
+    return ""
 
 
 
@@ -67,7 +108,10 @@ def _parse_verdict(text: str, valid_verdicts: list[str]) -> str:
     for verdict in valid_verdicts:
         if verdict in upper:
             return verdict
-    return valid_verdicts[0]
+    raise ValueError(
+        f"Model output did not contain any recognized verdict. "
+        f"Expected one of {valid_verdicts}; got: {text[:200]!r}"
+    )
 
 
 class ClaudeCodeProvider:
@@ -83,8 +127,23 @@ class ClaudeCodeProvider:
                 "Run 'petri inspect' to check all prerequisites."
             )
 
-    def _ask(self, prompt: str) -> str:
-        """Send a prompt to claude CLI in print mode."""
+    def _ask(
+        self,
+        prompt: str,
+        on_progress: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        """Send a prompt to claude CLI in print mode.
+
+        If ``on_progress`` is supplied, streams output via stream-json so the
+        caller can display the model's text as it's generated. Otherwise uses
+        the simpler one-shot path.
+        """
+        if on_progress is None:
+            return self._ask_oneshot(prompt)
+        return self._ask_streaming(prompt, on_progress)
+
+    def _ask_oneshot(self, prompt: str) -> str:
+        """One-shot subprocess call. No progress feedback."""
         try:
             result = subprocess.run(
                 [
@@ -115,7 +174,89 @@ class ClaudeCodeProvider:
                 )
         return result.stdout.strip()
 
-    def assess_claim_substance(self, claim: str) -> dict:
+    def _ask_streaming(
+        self, prompt: str, on_progress: Callable[[str], None]
+    ) -> str:
+        """Stream claude output line-by-line, feeding progress to on_progress.
+
+        Uses ``--output-format stream-json --include-partial-messages`` so
+        each line of stdout is a JSON event. Assistant-text deltas are
+        accumulated into a buffer; on each new chunk we feed the most recent
+        line of accumulated text to ``on_progress``. Returns the full
+        accumulated text on completion.
+        """
+        cmd = [
+            "claude",
+            "--print",
+            "--model", self.model,
+            "--output-format", "stream-json",
+            "--include-partial-messages",
+            "--verbose",
+            prompt,
+        ]
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "Claude Code CLI ('claude') not found on PATH. "
+                "Install: https://docs.anthropic.com/en/docs/claude-code"
+            ) from None
+
+        buffer: list[str] = []
+        assert proc.stdout is not None
+        try:
+            for raw_line in proc.stdout:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    # Plain text fallback — treat the whole line as a chunk
+                    buffer.append(line)
+                    on_progress(line)
+                    continue
+                chunk = _extract_text_delta(event)
+                if not chunk:
+                    continue
+                buffer.append(chunk)
+                joined = "".join(buffer)
+                last_line = joined.rsplit("\n", 1)[-1]
+                if last_line:
+                    on_progress(last_line)
+        finally:
+            try:
+                proc.wait(timeout=300)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+        if proc.returncode != 0:
+            stderr = ""
+            if proc.stderr is not None:
+                try:
+                    stderr = proc.stderr.read() or ""
+                except Exception:
+                    stderr = ""
+            logger.warning(
+                "claude CLI streaming error (exit %d): %s",
+                proc.returncode,
+                stderr.strip()[:1000],
+            )
+
+        return "".join(buffer).strip()
+
+    def assess_claim_substance(
+        self,
+        claim: str,
+        on_progress: Optional[Callable[[str], None]] = None,
+    ) -> dict:
         """Decide whether a claim is substantive enough to warrant a wizard.
 
         The model flags placeholder/test/empty input ("this is a test claim",
@@ -139,7 +280,7 @@ class ClaudeCodeProvider:
             '  "suggested_rewrite": "tighter rephrasing, or empty string"\n'
             "}\n"
         )
-        raw = self._ask(prompt)
+        raw = self._ask(prompt, on_progress=on_progress)
         parsed = _extract_json(raw)
         if not isinstance(parsed, dict):
             # Treat parse failure as substantive — fall through to the wizard
@@ -152,7 +293,10 @@ class ClaudeCodeProvider:
         }
 
     def generate_clarifying_questions(
-        self, claim: str, max_questions: int = 5
+        self,
+        claim: str,
+        max_questions: int = 5,
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> list[dict]:
         prompt = (
             f"Generate {max_questions} CLAIM-SPECIFIC clarifying questions for this research claim. "
@@ -165,7 +309,7 @@ class ClaudeCodeProvider:
             "Return ONLY a JSON array: "
             '[{"question": "...", "options": ["...", "..."]}, ...]'
         )
-        raw = self._ask(prompt)
+        raw = self._ask(prompt, on_progress=on_progress)
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, list):
@@ -179,7 +323,12 @@ class ClaudeCodeProvider:
         return []
 
     def decompose_claim(
-        self, claim: str, clarifications: list[dict], guidance: str = ""
+        self,
+        claim: str,
+        clarifications: list[dict],
+        guidance: str = "",
+        max_premises: int = 5,
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> dict:
         clarification_text = ""
         if clarifications:
@@ -194,25 +343,46 @@ class ClaudeCodeProvider:
             )
 
         prompt = (
-            "Decompose this claim using FIRST PRINCIPLES thinking.\n"
-            "Break it down to fundamental, irreducible truths that can be independently verified.\n\n"
-            "DO NOT just rephrase the claim. Ask 'WHY?' repeatedly until you reach bedrock facts.\n"
-            "Identify key DEFINITIONS, ASSUMPTIONS, and EVIDENCE needed.\n\n"
+            "Decompose this claim into first-principles premises.\n\n"
             f"Claim: \"{claim}\"{clarification_text}{guidance_text}\n\n"
-            "Return JSON with 'nodes' and 'edges' arrays.\n"
-            "Each node: {level, seq, claim_text, dependencies: [{level, seq}]}\n"
-            "Each edge: {from: {level, seq}, to: {level, seq}}\n"
-            "Level 0 = original claim. Level 1 = core assumptions. "
-            "Level 2 = fundamental facts.\n\n"
-            "Return ONLY the JSON object."
+            "Work through this in four explicit steps. Show your reasoning as "
+            "you go — the user is watching this stream live.\n\n"
+            "STEP 1 — BRAINSTORM (overgenerate).\n"
+            "List 10-15 candidate premises that, if false, would invalidate "
+            "the claim. Cast a wide net. Cover different angles: definitions, "
+            "mechanisms, scope boundaries, counterfactuals, hidden assumptions. "
+            "Number them 1..N. Do NOT filter at this stage.\n\n"
+            "STEP 2 — PRIORITIZE.\n"
+            "For each candidate, score on three dimensions:\n"
+            "  - LOAD-BEARING: would the claim collapse if this were false? (HIGH/MED/LOW)\n"
+            "  - CONTESTABLE: is this actually in question, not trivially true? (HIGH/MED/LOW)\n"
+            "  - DISTINCT: does it cover ground the other top candidates don't?\n"
+            "Briefly justify each score.\n\n"
+            "STEP 3 — SELECT.\n"
+            f"Pick the TOP {max_premises} premises after ranking. Order them by "
+            "importance (most important first). Drop duplicates and trivial restatements. "
+            "Do not pick the first ones you wrote down — pick the ones that scored highest.\n\n"
+            "STEP 4 — EMIT JSON.\n"
+            "Return a JSON object on the final lines:\n"
+            '{"nodes": [{"level": 1, "seq": 1, "claim_text": "..."}, ...], "edges": []}\n\n'
+            f"The JSON must contain AT MOST {max_premises} nodes (fewer is fine if "
+            "fewer genuine first-principles premises exist). Return no commentary "
+            "after the JSON."
         )
-        raw = self._ask(prompt)
+        raw = self._ask(prompt, on_progress=on_progress)
         parsed = _extract_json(raw)
         if parsed and "nodes" in parsed:
             return parsed
         return {"nodes": [], "edges": []}
 
-    def decompose_why(self, premise: str, parent_level: int, parent_seq: int) -> list[dict]:
+    def decompose_why(
+        self,
+        premise: str,
+        parent_level: int,
+        parent_seq: int,
+        max_premises: int = 5,
+        on_progress: Optional[Callable[[str], None]] = None,
+    ) -> list[dict]:
         """Five Whys: ask 'Why is this true?' for a single premise.
 
         Returns a list of sub-premise dicts: [{claim_text, is_atomic}].
@@ -220,19 +390,32 @@ class ClaudeCodeProvider:
         an empty list.
         """
         prompt = (
-            "FIVE WHYS DECOMPOSITION — one level deeper.\n\n"
+            "FIVE WHYS — drill one level deeper into a parent premise.\n\n"
             f"Premise: \"{premise}\"\n\n"
-            "Ask: WHY is this true? What must be true for this premise to hold?\n\n"
-            "If this premise is already ATOMIC (a directly verifiable fact, a "
-            "definition, or a measurement that can be looked up), return:\n"
+            "Work through this in four explicit steps. Show your reasoning "
+            "as you go — the user is watching this stream live.\n\n"
+            "STEP 1 — BRAINSTORM (overgenerate).\n"
+            "List 6-10 candidate sub-premises that must hold for the parent "
+            "premise to be true. Number them 1..N. Don't filter yet.\n\n"
+            "STEP 2 — PRIORITIZE.\n"
+            "For each candidate, score on:\n"
+            "  - FOUNDATIONALITY: closer to bedrock = higher (HIGH/MED/LOW)\n"
+            "  - INDEPENDENCE: separately verifiable from the others (HIGH/MED/LOW)\n"
+            "  - LOAD-BEARING: would the parent collapse if this sub-premise were false?\n"
+            "Briefly justify each score.\n\n"
+            "STEP 3 — SELECT.\n"
+            f"Pick the TOP {max_premises} sub-premises. Drop redundant or "
+            "surface-level ones. Do not pick the first ones you wrote down — "
+            "pick the ones that scored highest.\n\n"
+            "If the parent is already ATOMIC (a directly verifiable fact, "
+            "definition, or measurement), skip steps 1-3 and return:\n"
             '{"sub_premises": [], "is_atomic": true, "reason": "why it is atomic"}\n\n'
-            "Otherwise, break it into 2-4 sub-premises that are more fundamental. "
-            "Each sub-premise should be closer to a bedrock, independently verifiable truth.\n"
-            "Return:\n"
-            '{"sub_premises": [{"claim_text": "...", "is_atomic": false}], "is_atomic": false}\n\n'
-            "Return ONLY the JSON object."
+            "STEP 4 — EMIT JSON.\n"
+            'Return: {"sub_premises": [{"claim_text": "...", "is_atomic": false}, ...], "is_atomic": false}\n\n'
+            f"The sub_premises list must contain AT MOST {max_premises} items. "
+            "Return no commentary after the JSON."
         )
-        raw = self._ask(prompt)
+        raw = self._ask(prompt, on_progress=on_progress)
         parsed = _extract_json(raw)
         if parsed and parsed.get("is_atomic", False):
             return []
@@ -246,7 +429,13 @@ class ClaudeCodeProvider:
         from petri.config import get_agent_verdicts, get_agent_instruction
         from petri.models import AssessmentResult, SourceCitation
 
-        valid_verdicts = get_agent_verdicts(agent_role) or ["PASS"]
+        valid_verdicts = get_agent_verdicts(agent_role)
+        if not valid_verdicts:
+            raise ValueError(
+                f"Unknown agent role {agent_role!r}: not declared in agents.yaml. "
+                "Add it to .petri/defaults/petri.yaml under 'agents:' with explicit "
+                "verdicts_pass and verdicts_block lists."
+            )
         verdict_list = ", ".join(valid_verdicts)
         role_instruction = get_agent_instruction(agent_role) or "Assess this claim thoroughly."
 
@@ -301,9 +490,25 @@ class ClaudeCodeProvider:
         parsed = _extract_json(raw)
 
         if parsed and "verdict" in parsed:
-            validated_verdict = parsed["verdict"].upper()
-            if validated_verdict not in valid_verdicts:
-                validated_verdict = _parse_verdict(raw, valid_verdicts)
+            raw_verdict = _coerce_str(parsed["verdict"]).upper()
+            if raw_verdict in valid_verdicts:
+                validated_verdict = raw_verdict
+            else:
+                # JSON had a verdict field but its value isn't valid for
+                # this agent — try to recover from the raw text. If THAT
+                # also fails, surface as EXECUTION_ERROR rather than
+                # silently returning the first pass verdict.
+                try:
+                    validated_verdict = _parse_verdict(raw, valid_verdicts)
+                except ValueError:
+                    return AssessmentResult(
+                        agent=agent_role,
+                        verdict="EXECUTION_ERROR",
+                        summary=(
+                            f"Model returned unrecognized verdict {raw_verdict!r}. "
+                            f"Raw output: {raw[:300]}"
+                        ),
+                    )
 
             # Coerce sources_cited to SourceCitation models
             raw_sources = parsed.get("sources_cited", [])
@@ -324,7 +529,19 @@ class ClaudeCodeProvider:
                 sources_cited=sources,
             )
 
-        verdict = _parse_verdict(raw, valid_verdicts)
+        # No JSON could be extracted — total failure path. Try to salvage
+        # a verdict from raw text; otherwise surface EXECUTION_ERROR.
+        try:
+            verdict = _parse_verdict(raw, valid_verdicts)
+        except ValueError:
+            return AssessmentResult(
+                agent=agent_role,
+                verdict="EXECUTION_ERROR",
+                summary=(
+                    f"Model output could not be parsed as JSON or matched "
+                    f"against a valid verdict. Raw output: {raw[:300]}"
+                ),
+            )
         return AssessmentResult(
             agent=agent_role,
             verdict=verdict,

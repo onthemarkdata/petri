@@ -381,3 +381,31 @@ def sync_check(queue_path: Path, nodes_dir: Path) -> dict:
         "conflicts": conflicts,
         "reconciled": reconciled,
     }
+
+
+# ── Terminal State Helpers ──────────────────────────────────────────────
+
+
+TERMINAL_STATES: frozenset[str] = frozenset({
+    "done", "needs_human", "deferred_closed",
+})
+
+
+def is_terminal_state(state: str) -> bool:
+    """A node in a terminal state needs no further work this run.
+
+    ``deferred_open`` is intentionally NOT terminal -- it can re-enter the
+    queue if new evidence arrives. ``stalled`` is also not terminal because
+    it can transition back to ``queued`` via human intervention.
+    """
+    return state in TERMINAL_STATES
+
+
+def get_state_summary(queue_path: Path) -> dict[str, int]:
+    """Return ``{state_name: count}`` across all queue entries."""
+    queue = load_queue(queue_path)
+    summary: dict[str, int] = {}
+    for entry in queue.get("entries", {}).values():
+        state = entry.get("queue_state", "")
+        summary[state] = summary.get(state, 0) + 1
+    return summary

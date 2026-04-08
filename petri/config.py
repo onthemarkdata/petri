@@ -66,6 +66,21 @@ def get_max_decomposition_depth(config: dict | None = None) -> int:
     return int(value)
 
 
+def get_max_nodes_per_layer(config: dict | None = None) -> int:
+    """Per-layer cap on nodes created during seed-time decomposition.
+
+    The decomposer asks the LLM to brainstorm broadly, prioritise, then
+    return the top N most important premises at each level. This bound
+    keeps the seed minimal so growth happens later via feed/grow rather
+    than producing 100+ nodes up front.
+    """
+    cfg = config or load_config()
+    value = cfg.get("max_nodes_per_layer")
+    if value is None:
+        raise KeyError("Missing 'max_nodes_per_layer' in petri.yaml")
+    return int(value)
+
+
 def get_minimum_terminal_level(config: dict | None = None) -> int:
     cfg = config or load_config()
     hierarchy = cfg.get("source_hierarchy")

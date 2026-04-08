@@ -28,7 +28,7 @@ DEFAULTS_DIR = Path(__file__).parent / "defaults"
 # ── Helper Functions ─────────────────────────────────────────────────────
 
 
-def _run_substance_check(claim: str, provider, questionary):
+def _run_substance_check(claim: str, provider, questionary, *, force_plain: bool = False):
     """Agentic substance check before the clarifying-question wizard.
 
     Returns (claim, skip_wizard, aborted). If the model classifies the claim
@@ -36,9 +36,14 @@ def _run_substance_check(claim: str, provider, questionary):
     re-runs the check on the new text. ``skip_wizard`` is True when the user
     chooses Continue (so the wizard is bypassed).
     """
+    from petri.cli_ui import Spinner
+
     while True:
         try:
-            assessment = provider.assess_claim_substance(claim)
+            with Spinner("substance check", force_plain=force_plain) as sp:
+                assessment = provider.assess_claim_substance(
+                    claim, on_progress=sp.update
+                )
         except Exception as exc:
             typer.echo(
                 f"Warning: substance check failed ({exc}); continuing anyway.",
@@ -349,6 +354,9 @@ def seed(
     petri_dir = _find_petri_dir()
     dish_id = _get_dish_id(petri_dir)
 
+    from petri.cli_ui import Spinner
+    from petri.graph.colony import ColonyGraph, serialize_colony
+    from petri.models import Colony, Edge, Node, build_node_key
     from petri.reasoning.decomposer import (
         decompose_claim,
         format_colony_display,
@@ -356,6 +364,7 @@ def seed(
         generate_colony_name,
     )
     from petri.reasoning.ingest import ingest
+    from petri.storage.event_log import append_event
 
     # ── Resolve provider up front; hard-fail if unavailable ──
     try:
@@ -398,6 +407,7 @@ def seed(
     import sys
 
     interactive = sys.stdin.isatty() and not no_questions
+    force_plain_spinner = not interactive
     questionary = None
     if interactive:
         try:
@@ -410,25 +420,95 @@ def seed(
                 err=True,
             )
             interactive = False
+            force_plain_spinner = True
 
     # ── Agentic substance check ──
     skip_wizard = no_questions
     if interactive and not skip_wizard:
         claim, skip_wizard, aborted = _run_substance_check(
-            claim, provider, questionary
+            claim, provider, questionary, force_plain=force_plain_spinner
         )
         if aborted:
             typer.echo("Aborted.")
             raise typer.Exit(code=1)
 
-    # ── Clarifying questions wizard (per-question skip) ──
+    # ── Print finalized claim so the user has a permanent record ──
+    typer.echo()
+    typer.echo(f"Claim: {claim}")
+    typer.echo()
+
+    # ── Phase C: Pre-create colony directory + center node ──
+    colony_name = colony or generate_colony_name(claim)
+    colony_id = f"{dish_id}-{colony_name}"
+    center_id = build_node_key(dish_id, colony_name, 0, 0)
+    colony_path = petri_dir / "petri-dishes" / colony_name
+
+    # Wipe any leftover from a previous run before we start writing
+    if colony_path.exists():
+        shutil.rmtree(colony_path)
+
+    center_node = Node(
+        id=center_id,
+        colony_id=colony_id,
+        claim_text=claim,
+        level=0,
+    )
+    graph = ColonyGraph(colony_id=colony_id)
+    graph.add_node(center_node)
+
+    colony_model = Colony(
+        id=colony_id,
+        dish=dish_id,
+        center_claim=claim,
+        center_node_id=center_id,
+        clarifications=[],
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    serialize_colony(graph, colony_model, colony_path)
+
+    def _events_path_for(node_id: str) -> Path:
+        rel = colony_model.node_paths.get(node_id)
+        if not rel:
+            parts = node_id.split("-")
+            rel = f"{parts[-2]}-{parts[-1]}"
+        return colony_path / rel / "events.jsonl"
+
+    def _log(node_id: str, event_type: str, data: dict | None = None) -> None:
+        try:
+            append_event(
+                events_path=_events_path_for(node_id),
+                node_id=node_id,
+                event_type=event_type,
+                agent="decomposition_lead",
+                iteration=0,
+                data=data or {},
+            )
+        except Exception as exc:
+            typer.echo(
+                f"Warning: failed to log event {event_type} for {node_id}: {exc}",
+                err=True,
+            )
+
+    _log(center_id, "seed_started", {"claim": claim, "no_questions": no_questions})
+
+    # ── Phase D: Clarifying questions wizard ──
     clarifications: list[dict] = []
     if interactive and not skip_wizard:
+        _log(center_id, "clarifying_questions_requested")
         try:
-            questions = generate_clarifying_questions(claim, provider=provider)
+            with Spinner("clarifying questions", force_plain=force_plain_spinner) as sp:
+                questions = generate_clarifying_questions(
+                    claim, provider=provider, on_progress=sp.update
+                )
         except Exception as exc:
+            _log(center_id, "clarifying_questions_failed", {"error": str(exc)})
             typer.echo(f"Failed to generate clarifying questions: {exc}", err=True)
             raise typer.Exit(code=2)
+        _log(
+            center_id,
+            "clarifying_questions_received",
+            {"count": len(questions)},
+        )
 
         for question in questions:
             question_text = question.question
@@ -449,30 +529,100 @@ def seed(
                 raise typer.Exit(code=1)
 
             if answer == "Skip" or not answer.strip():
+                _log(
+                    center_id,
+                    "clarification_skipped",
+                    {"question": question_text},
+                )
                 continue
 
             clarifications.append(
                 {"question": question_text, "answer": answer}
             )
-
-    # Generate colony name if not provided
-    colony_name = colony or generate_colony_name(claim)
-
-    # ── Decompose → Accept / Regenerate / Abort loop ──
-    guidance = ""
-    while True:
-        try:
-            result = decompose_claim(
-                claim=claim,
-                clarifications=clarifications,
-                dish_id=dish_id,
-                colony_name=colony_name,
-                provider=provider,
-                guidance=guidance,
+            _log(
+                center_id,
+                "clarification_recorded",
+                {"question": question_text, "answer": answer},
             )
+
+        # Persist user clarifications onto the colony so a kill mid-flow
+        # doesn't lose them.
+        colony_model.clarifications = clarifications
+        serialize_colony(graph, colony_model, colony_path)
+
+    # ── Phase E: Decompose / Accept / Regenerate / Abort loop ──
+    guidance = ""
+    result = None
+    while True:
+        # Each re-roll wipes the colony dir and rebuilds — no stale state
+        if colony_path.exists():
+            shutil.rmtree(colony_path)
+        graph = ColonyGraph(colony_id=colony_id)
+        graph.add_node(center_node)
+        serialize_colony(graph, colony_model, colony_path)
+
+        _log(
+            center_id,
+            "decomposition_started",
+            {"guidance": guidance or None},
+        )
+
+        try:
+            with Spinner(
+                "decomposing claim", force_plain=force_plain_spinner
+            ) as sp:
+                def _on_node_created(node: Node, new_edges: list[Edge]) -> None:
+                    try:
+                        graph.add_node(node)
+                        for edge in new_edges:
+                            graph.add_edge(edge)
+                        # Re-serialize incrementally — serialize_colony
+                        # preserves existing events.jsonl files (touch only
+                        # on first create).
+                        serialize_colony(graph, colony_model, colony_path)
+                        _log(
+                            node.id,
+                            "node_created",
+                            {
+                                "level": node.level,
+                                "parents": [e.from_node for e in new_edges],
+                            },
+                        )
+                        # Print the new claim as a permanent line above
+                        # the live spinner so the user has a record of
+                        # what was just created.
+                        sp.print_line(node.claim_text)
+                    except Exception as exc:
+                        typer.echo(
+                            f"Warning: failed to persist node {node.id}: {exc}",
+                            err=True,
+                        )
+
+                result = decompose_claim(
+                    claim=claim,
+                    clarifications=clarifications,
+                    dish_id=dish_id,
+                    colony_name=colony_name,
+                    provider=provider,
+                    guidance=guidance,
+                    on_progress=sp.update,
+                    on_node_created=_on_node_created,
+                    center=center_node,
+                )
         except Exception as exc:
+            _log(
+                center_id,
+                "decomposition_failed",
+                {"error": str(exc)},
+            )
             typer.echo(f"Decomposition failed: {exc}", err=True)
             raise typer.Exit(code=2)
+
+        _log(
+            center_id,
+            "decomposition_completed",
+            {"node_count": len(result.nodes)},
+        )
 
         typer.echo(format_colony_display(result))
 
@@ -486,6 +636,8 @@ def seed(
         ).ask()
 
         if action is None or action == "Abort":
+            if colony_path.exists():
+                shutil.rmtree(colony_path)
             typer.echo("Decomposition rejected.")
             raise typer.Exit(code=1)
 
@@ -497,63 +649,22 @@ def seed(
             "What should change? (free text, press Enter to re-roll as-is)"
         ).ask()
         if guidance is None:
+            if colony_path.exists():
+                shutil.rmtree(colony_path)
             typer.echo("Cancelled.")
             raise typer.Exit(code=1)
-        # Loop iterates with the new guidance threaded into decompose_claim
+        # Loop iterates: top of the loop wipes the colony dir and rebuilds
 
-    # Serialize colony to filesystem
-    from petri.graph.colony import ColonyGraph, serialize_colony
-    from petri.storage.event_log import append_event
-    from petri.models import Colony, Edge, Node
-
-    now = datetime.now(timezone.utc).isoformat()
-    colony_id = f"{dish_id}-{colony_name}"
-
-    # Build the graph
-    graph = ColonyGraph(colony_id=colony_id)
-    nodes = result.nodes
-    edges = result.edges
-
-    for node in nodes:
-        graph.add_node(node)
-    for edge in edges:
-        graph.add_edge(edge)
-
-    # Create Colony model
-    center_node_id = nodes[0].id if nodes else ""
-    colony_model = Colony(
-        id=colony_id,
-        dish=dish_id,
-        center_claim=claim,
-        center_node_id=center_node_id,
-        clarifications=clarifications,
-        created_at=now,
-    )
-
-    # Write to filesystem
-    colony_path = petri_dir / "petri-dishes" / colony_name
+    # Final colony.json rewrite — ensures node_paths is consistent and
+    # persists the user's clarifications alongside the approved decomposition.
+    colony_model.clarifications = clarifications
     serialize_colony(graph, colony_model, colony_path)
+    _log(center_id, "colony_approved", {"node_count": len(result.nodes) if result else 0})
 
-    # Log decomposition_created events for each node
-    for node in nodes:
-        child_ids = [
-            e.from_node for e in edges if e.to_node == node.id
-        ]
-        node_rel_path = colony_model.node_paths.get(node.id, f"{node.id.split('-')[-2]}-{node.id.split('-')[-1]}")
-        events_path = colony_path / node_rel_path / "events.jsonl"
-        append_event(
-            events_path=events_path,
-            node_id=node.id,
-            event_type="decomposition_created",
-            agent="decomposition_lead",
-            iteration=0,
-            data={
-                "parent_node_id": node.id,
-                "child_node_ids": child_ids,
-            },
-        )
-
-    typer.echo(f"\nColony '{colony_name}' created with {len(nodes)} nodes.")
+    typer.echo(
+        f"\nColony '{colony_name}' created with "
+        f"{len(result.nodes) if result else 0} nodes."
+    )
 
 
 @app.command()
@@ -928,6 +1039,195 @@ def _render_dot(graph, colony) -> None:
     typer.echo("}")
 
 
+# ── grow loop primitives ─────────────────────────────────────────────────
+
+# Status thread tick interval. Module-level so tests can monkeypatch it
+# down to a tiny value.  Configurable only via code edit for now.
+GROW_STATUS_INTERVAL_SECONDS: float = 60.0
+
+
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+
+@dataclass
+class _GrowLoopOutcome:
+    """Result of running ``_grow_loop`` to termination."""
+
+    reason: str  # "all_terminal" | "stop_signal" | "no_progress" | "interrupted"
+    final_states: dict[str, int] = field(default_factory=dict)
+    last_result: Any = None
+    passes_run: int = 0
+
+
+def _all_states_terminal(state_counts: dict[str, int]) -> bool:
+    """True iff every present state is terminal AND there is at least one entry.
+
+    An empty dict is treated as not-yet-terminal — the queue may not be
+    populated yet on the very first poll.
+    """
+    from petri.storage.queue import is_terminal_state
+
+    if not state_counts:
+        return False
+    return all(is_terminal_state(state) for state in state_counts.keys())
+
+
+def _grow_loop(
+    *,
+    run_one_pass: Callable[[], Any],
+    get_states: Callable[[], dict[str, int]],
+    is_stopped: Callable[[], bool],
+    on_pass_complete: Callable[[dict[str, int], Any], None] | None = None,
+    max_no_progress_passes: int = 2,
+) -> _GrowLoopOutcome:
+    """Drive ``run_one_pass`` until a terminal condition is reached.
+
+    Termination rules:
+      * ``stop_signal``  — ``is_stopped()`` returns True (checked BEFORE each pass).
+      * ``all_terminal`` — every present queue state is in ``TERMINAL_STATES``.
+      * ``no_progress``  — ``max_no_progress_passes`` consecutive passes
+        with ``processed == 0`` AND an unchanged state signature.
+      * Otherwise loop continues.
+
+    ``KeyboardInterrupt`` is propagated to the caller.
+    """
+    last_state_signature: tuple[tuple[str, int], ...] | None = None
+    consecutive_zero_progress = 0
+    last_result: Any = None
+    passes_run = 0
+    current_states: dict[str, int] = {}
+
+    while True:
+        # Stop check happens BEFORE every pass — including the first.  A
+        # caller that pre-sets the stop sentinel gets zero passes run.
+        if is_stopped():
+            return _GrowLoopOutcome(
+                reason="stop_signal",
+                final_states=current_states,
+                last_result=last_result,
+                passes_run=passes_run,
+            )
+
+        last_result = run_one_pass()
+        passes_run += 1
+
+        current_states = get_states()
+
+        if on_pass_complete is not None:
+            try:
+                on_pass_complete(current_states, last_result)
+            except Exception:
+                # Callbacks must never break the loop
+                pass
+
+        if _all_states_terminal(current_states):
+            return _GrowLoopOutcome(
+                reason="all_terminal",
+                final_states=current_states,
+                last_result=last_result,
+                passes_run=passes_run,
+            )
+
+        processed_count = getattr(last_result, "processed", 0) or 0
+        state_signature = tuple(sorted(current_states.items()))
+
+        if processed_count == 0 and state_signature == last_state_signature:
+            consecutive_zero_progress += 1
+        else:
+            consecutive_zero_progress = 0
+
+        last_state_signature = state_signature
+
+        if consecutive_zero_progress >= max_no_progress_passes:
+            return _GrowLoopOutcome(
+                reason="no_progress",
+                final_states=current_states,
+                last_result=last_result,
+                passes_run=passes_run,
+            )
+
+
+def _format_state_summary(state_counts: dict[str, int]) -> str:
+    """Compact one-line summary like ``research_active=2 done=1``."""
+    if not state_counts:
+        return "queue empty"
+    parts = [f"{state}={count}" for state, count in sorted(state_counts.items())]
+    return " ".join(parts)
+
+
+def _grow_status_loop(
+    *,
+    petri_dir: Path,
+    queue_path: Path,
+    spinner,
+    stop_event,
+) -> None:
+    """Daemon-thread body that prints periodic progress lines.
+
+    Each tick (``GROW_STATUS_INTERVAL_SECONDS``):
+      * snapshot queue state via ``get_state_summary``
+      * walk every ``events.jsonl`` under ``petri-dishes/`` and pull recent
+        ``verdict_issued`` and ``convergence_checked`` events written since
+        the previous tick (newest-first, top 5)
+      * print all of that as permanent lines above the live spinner
+
+    Shuts down promptly when ``stop_event`` is set.
+    """
+    from petri.storage.event_log import query_events
+    from petri.storage.queue import get_state_summary
+
+    cutoff_iso = datetime.now(timezone.utc).isoformat()
+    dishes_dir = petri_dir / "petri-dishes"
+
+    while not stop_event.is_set():
+        # Wait first so the very first status line lands one interval in,
+        # not at t=0 (which would race with the loop's own startup output).
+        if stop_event.wait(timeout=GROW_STATUS_INTERVAL_SECONDS):
+            return
+
+        try:
+            state_counts = get_state_summary(queue_path)
+        except Exception:
+            state_counts = {}
+
+        spinner.print_line(f"status: {_format_state_summary(state_counts)}")
+
+        recent_events: list[dict] = []
+        if dishes_dir.is_dir():
+            for events_file in dishes_dir.rglob("events.jsonl"):
+                try:
+                    for event_type in ("verdict_issued", "convergence_checked"):
+                        recent_events.extend(
+                            query_events(
+                                events_file,
+                                event_type=event_type,
+                                since=cutoff_iso,
+                            )
+                        )
+                except Exception:
+                    continue
+
+        recent_events.sort(
+            key=lambda evt: evt.get("timestamp", ""), reverse=True
+        )
+
+        for event in recent_events[:5]:
+            event_type = event.get("type", "")
+            node_id = event.get("node_id", "")
+            agent = event.get("agent", "")
+            data = event.get("data", {}) or {}
+            verdict = data.get("verdict") or data.get("status") or ""
+            summary_text = data.get("summary", "")
+            line = f"{event_type} {node_id} {agent} {verdict}".strip()
+            if summary_text:
+                line = f"{line} — {summary_text}"
+            spinner.print_line(line)
+
+        # Advance the cutoff so the next tick only fetches truly new events
+        cutoff_iso = datetime.now(timezone.utc).isoformat()
+
+
 # ── Stub Commands (Later Phases) ─────────────────────────────────────────
 
 
@@ -945,9 +1245,16 @@ def grow(
         False, "--dry-run", help="Show what would process"
     ),
 ) -> None:
-    """Enqueue nodes and process through validation pipeline."""
+    """Enqueue nodes and process through validation pipeline.
+
+    Loops calling ``process_queue`` until every queue entry is in a
+    terminal state, the cross-process stop sentinel appears, or two
+    consecutive passes make no progress at all.  A daemon status thread
+    prints periodic progress lines above a persistent spinner.
+    """
+    import threading
+
     petri_dir = _find_petri_dir()
-    dish_id = _get_dish_id(petri_dir)
 
     # Preflight: check claude CLI before attempting processing
     from petri.engine.preflight import check_claude_cli
@@ -958,22 +1265,117 @@ def grow(
         typer.echo("Run 'petri inspect' to check all prerequisites.", err=True)
         raise typer.Exit(code=1)
 
-    from petri.engine.processor import NoProviderError, process_queue
+    from petri.cli_ui import Spinner
+    from petri.engine.processor import (
+        NoProviderError,
+        clear_stop_file,
+        is_stop_file_present,
+        process_queue,
+    )
+    from petri.storage.queue import get_state_summary
 
     # Resolve the inference provider from petri.yaml config
     provider = _resolve_provider(petri_dir)
 
-    try:
-        result = process_queue(
+    queue_path = petri_dir / "queue.json"
+
+    # Drop any stale stop sentinel from a previous interrupted run.
+    clear_stop_file(petri_dir)
+
+    # ── dry-run path: single pass, no loop, no spinner ──
+    if dry_run:
+        try:
+            dry_result = process_queue(
+                petri_dir=petri_dir,
+                provider=provider,
+                max_concurrent=max_concurrent,
+                node_ids=nodes,
+                colony_filter=colony_name,
+                all_nodes=all_nodes,
+                dry_run=True,
+            )
+        except NoProviderError:
+            typer.echo(
+                "Error: No inference provider configured.\n"
+                "Set model and harness in .petri/petri.yaml to enable processing.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        would_process = dry_result.would_process
+        if would_process:
+            typer.echo(f"Would process {len(would_process)} nodes:")
+            for node_id in would_process:
+                typer.echo(f"  {node_id}")
+        else:
+            typer.echo("No eligible nodes found.")
+        raise typer.Exit(code=0)
+
+    # ── live path: loop until terminal/stopped/no-progress ──
+    def _run_one_pass():
+        return process_queue(
             petri_dir=petri_dir,
             provider=provider,
             max_concurrent=max_concurrent,
             node_ids=nodes,
             colony_filter=colony_name,
             all_nodes=all_nodes,
-            dry_run=dry_run,
+            dry_run=False,
         )
-    except NoProviderError:
+
+    def _get_states() -> dict[str, int]:
+        try:
+            return get_state_summary(queue_path)
+        except Exception:
+            return {}
+
+    def _is_stopped() -> bool:
+        return is_stop_file_present(petri_dir)
+
+    outcome: _GrowLoopOutcome | None = None
+    interrupted = False
+    no_provider = False
+    status_stop_event = threading.Event()
+    status_thread: threading.Thread | None = None
+
+    try:
+        with Spinner("growing") as spinner:
+            status_thread = threading.Thread(
+                target=_grow_status_loop,
+                kwargs={
+                    "petri_dir": petri_dir,
+                    "queue_path": queue_path,
+                    "spinner": spinner,
+                    "stop_event": status_stop_event,
+                },
+                daemon=True,
+            )
+            status_thread.start()
+
+            def _on_pass_complete(state_counts: dict[str, int], pass_result) -> None:
+                spinner.update(
+                    f"pass complete — {_format_state_summary(state_counts)}"
+                )
+
+            try:
+                outcome = _grow_loop(
+                    run_one_pass=_run_one_pass,
+                    get_states=_get_states,
+                    is_stopped=_is_stopped,
+                    on_pass_complete=_on_pass_complete,
+                )
+            except NoProviderError:
+                no_provider = True
+            except KeyboardInterrupt:
+                interrupted = True
+                typer.echo("\nInterrupted by Ctrl+C")
+    finally:
+        status_stop_event.set()
+        if status_thread is not None:
+            status_thread.join(timeout=2.0)
+        clear_stop_file(petri_dir)
+
+    if no_provider:
         typer.echo(
             "Error: No inference provider configured.\n"
             "Set model and harness in .petri/petri.yaml to enable processing.",
@@ -981,35 +1383,37 @@ def grow(
         )
         raise typer.Exit(code=1)
 
-    if dry_run:
-        would_process = result.would_process
-        if would_process:
-            typer.echo(f"Would process {len(would_process)} nodes:")
-            for nid in would_process:
-                typer.echo(f"  {nid}")
-        else:
-            typer.echo("No eligible nodes found.")
-        raise typer.Exit(code=0)
-
-    processed = result.processed
-    succeeded = result.succeeded
-    failed = result.failed
-    stalled = result.stalled
-
-    typer.echo(f"\nProcessing complete: {processed} nodes processed")
-    typer.echo(f"  Succeeded: {succeeded}")
-    if stalled:
-        typer.echo(f"  Stalled:   {stalled}")
-    if failed:
-        typer.echo(f"  Failed:    {failed}")
-
-    # Show per-node results
-    for node_result in result.results:
-        typer.echo(f"  {node_result.node_id}: {node_result.final_state} ({node_result.iterations} iterations, {node_result.events_logged} events)")
-
-    if stalled:
+    if interrupted:
         raise typer.Exit(code=1)
-    raise typer.Exit(code=0)
+
+    assert outcome is not None  # set unless an exception bubbled up
+
+    final_states = outcome.final_states
+    last_result = outcome.last_result
+
+    typer.echo(
+        f"\nGrow loop finished: {outcome.reason} "
+        f"after {outcome.passes_run} pass(es)"
+    )
+    typer.echo(f"  Final queue: {_format_state_summary(final_states)}")
+
+    if last_result is not None:
+        typer.echo(f"  Last pass processed: {last_result.processed} nodes")
+        typer.echo(f"    Succeeded: {last_result.succeeded}")
+        if last_result.stalled:
+            typer.echo(f"    Stalled:   {last_result.stalled}")
+        if last_result.failed:
+            typer.echo(f"    Failed:    {last_result.failed}")
+        for node_result in last_result.results:
+            typer.echo(
+                f"    {node_result.node_id}: {node_result.final_state} "
+                f"({node_result.iterations} iterations, "
+                f"{node_result.events_logged} events)"
+            )
+
+    if outcome.reason == "all_terminal":
+        raise typer.Exit(code=0)
+    raise typer.Exit(code=1)
 
 
 @app.command()
@@ -1019,14 +1423,15 @@ def stop(
     """Gracefully stop all running tasks."""
     petri_dir = _find_petri_dir()
 
-    from petri.engine.processor import request_stop
+    from petri.engine.processor import request_stop, request_stop_file
     from petri.storage.queue import list_queue, update_state
     from petri.storage.event_log import append_event
 
     queue_path = petri_dir / "queue.json"
 
-    # Signal the processor to stop
+    # Signal the processor to stop (in-process threads + cross-process sentinel)
     request_stop()
+    request_stop_file(petri_dir)
 
     # Find active nodes and stall them
     active_states = {"socratic_active", "research_active", "critique_active", "mediating", "red_team_active", "evaluating"}

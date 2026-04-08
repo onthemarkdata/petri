@@ -17,9 +17,12 @@ import pytest
 from tests.conftest import CANONICAL_NODE_IDS
 
 from petri.storage.queue import (
+    TERMINAL_STATES,
     VALID_TRANSITIONS,
     add_to_queue,
     get_next,
+    get_state_summary,
+    is_terminal_state,
     list_queue,
     load_queue,
     new_cycle,
@@ -581,3 +584,77 @@ class TestConcurrentAccess:
         entries = list_queue(qp)
         stored_ids = {e["node_id"] for e in entries}
         assert stored_ids == set(node_ids)
+
+
+# ── Terminal State Helper Tests ────────────────────────────────────────────
+
+
+class TestIsTerminalState:
+    def test_is_terminal_state_done(self):
+        assert is_terminal_state("done") is True
+
+    def test_is_terminal_state_needs_human(self):
+        assert is_terminal_state("needs_human") is True
+
+    def test_is_terminal_state_deferred_closed(self):
+        assert is_terminal_state("deferred_closed") is True
+
+    def test_is_terminal_state_deferred_open(self):
+        # Key edge case: deferred_open can re-enter the queue, so it is NOT
+        # terminal even though the name suggests finality.
+        assert is_terminal_state("deferred_open") is False
+
+    def test_is_terminal_state_stalled(self):
+        # stalled transitions back to queued via human intervention.
+        assert is_terminal_state("stalled") is False
+
+    def test_is_terminal_state_queued(self):
+        assert is_terminal_state("queued") is False
+
+    def test_terminal_states_frozenset_contents(self):
+        assert TERMINAL_STATES == frozenset(
+            {"done", "needs_human", "deferred_closed"}
+        )
+
+
+class TestGetStateSummary:
+    def test_get_state_summary_counts_correctly(self, tmp_path):
+        queue_path = _queue_path(tmp_path)
+
+        # Build a small queue with multiple nodes in different states.
+        queued_node = CANONICAL_NODE_IDS["premise1"]
+        socratic_node = CANONICAL_NODE_IDS["premise2"]
+        research_node = CANONICAL_NODE_IDS["cell1"]
+        done_node = CANONICAL_NODE_IDS["cell2"]
+
+        add_to_queue(queue_path, queued_node)
+
+        add_to_queue(queue_path, socratic_node)
+        _transition_to(tmp_path, socratic_node, "socratic_active")
+
+        add_to_queue(queue_path, research_node)
+        _transition_to(tmp_path, research_node, "research_active")
+
+        add_to_queue(queue_path, done_node)
+        _transition_to(tmp_path, done_node, "done")
+
+        summary = get_state_summary(queue_path)
+        assert summary == {
+            "queued": 1,
+            "socratic_active": 1,
+            "research_active": 1,
+            "done": 1,
+        }
+
+    def test_get_state_summary_empty_queue(self, tmp_path):
+        queue_path = _queue_path(tmp_path)
+        assert get_state_summary(queue_path) == {}
+
+    def test_get_state_summary_multiple_in_same_state(self, tmp_path):
+        queue_path = _queue_path(tmp_path)
+        add_to_queue(queue_path, CANONICAL_NODE_IDS["premise1"])
+        add_to_queue(queue_path, CANONICAL_NODE_IDS["premise2"])
+        add_to_queue(queue_path, CANONICAL_NODE_IDS["cell1"])
+
+        summary = get_state_summary(queue_path)
+        assert summary == {"queued": 3}

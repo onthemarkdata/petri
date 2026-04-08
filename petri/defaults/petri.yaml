@@ -18,6 +18,10 @@ harness: claude-code
 max_iterations: 3
 max_concurrent: 4
 max_decomposition_depth: 3  # Five Whys: how many levels deep to decompose
+max_nodes_per_layer: 5      # Cap on nodes created at each level during seed-time
+                            # decomposition. The model is asked to brainstorm
+                            # broadly, then pick the top N most important. More
+                            # nodes can be added later by feed/grow processes.
 
 # ── Source Hierarchy ────────────────────────────────────────────────────
 # 6-level evidence credibility ranking (strongest to weakest)
@@ -265,3 +269,19 @@ agents:
       hierarchy level, supporting vs contradicting. Weigh all evidence
       from investigation, critique, and red team phases.
       Summary: 1-3 sentences with verdict reasoning and confidence.
+
+  # === Phase 0 (Exploratory, non-blocking) ===
+
+  socratic_questioner:
+    display_name: Socratic Questioner
+    is_lead: false
+    scope: null
+    phase: null
+    blocking: false
+    verdicts_pass: [CLARIFIED, ASSUMPTIONS_CHALLENGED, EVIDENCE_MAPPED, VERIFIED]
+    verdicts_block: []
+    redirect_on_block: null
+    instruction: >
+      Ask Socratic questions to surface hidden assumptions, define terms,
+      and map the evidence space before research begins. This agent is
+      exploratory — it does not block convergence.

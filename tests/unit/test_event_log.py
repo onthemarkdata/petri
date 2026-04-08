@@ -517,3 +517,79 @@ class TestRollupToCombined:
         combined_path = rollup_to_combined(tmp_path)
         assert combined_path == tmp_path / "combined.jsonl"
         assert combined_path.exists()
+
+
+# ── serialize_colony incremental write contract ─────────────────────────
+
+
+class TestSerializeColonyEventPreservation:
+    """The CLI's incremental seed flow re-runs ``serialize_colony`` after
+    each new node is created. ``serialize_colony`` must NOT clobber any
+    existing ``events.jsonl`` content during these re-serializations,
+    otherwise we'd lose every event written during the LLM call window.
+    """
+
+    def test_existing_events_survive_reserialize(self, tmp_path: Path):
+        from petri.graph.colony import ColonyGraph, serialize_colony
+        from petri.models import Colony, Node, build_node_key
+
+        dish_id = "test-dish"
+        colony_name = "preserve"
+        colony_id = f"{dish_id}-{colony_name}"
+
+        center_id = build_node_key(dish_id, colony_name, 0, 0)
+        center = Node(
+            id=center_id,
+            colony_id=colony_id,
+            claim_text="center claim",
+            level=0,
+        )
+        graph = ColonyGraph(colony_id=colony_id)
+        graph.add_node(center)
+
+        colony_model = Colony(
+            id=colony_id,
+            dish=dish_id,
+            center_claim="center claim",
+            center_node_id=center_id,
+            created_at="2026-04-07T00:00:00+00:00",
+        )
+
+        colony_path = tmp_path / colony_name
+        serialize_colony(graph, colony_model, colony_path)
+
+        # Append an event the way the CLI does
+        center_events = colony_path / colony_model.node_paths[center_id] / "events.jsonl"
+        append_event(
+            events_path=center_events,
+            node_id=center_id,
+            event_type="seed_started",
+            agent="decomposition_lead",
+            iteration=0,
+            data={"claim": "center claim"},
+        )
+
+        # Add a new level-1 node and re-serialize (the incremental flow)
+        premise_id = build_node_key(dish_id, colony_name, 1, 1)
+        premise = Node(
+            id=premise_id,
+            colony_id=colony_id,
+            claim_text="premise A",
+            level=1,
+            dependents=[center_id],
+        )
+        graph.add_node(premise)
+        center.dependencies = [premise_id]
+        serialize_colony(graph, colony_model, colony_path)
+
+        # The earlier event must still be present
+        events = load_events(center_events)
+        assert any(evt["type"] == "seed_started" for evt in events), (
+            f"seed_started event was clobbered by re-serialize. "
+            f"Events seen: {[e['type'] for e in events]}"
+        )
+
+        # And the new node's events.jsonl should exist (and be empty until
+        # the CLI logs node_created against it)
+        new_events = colony_path / colony_model.node_paths[premise_id] / "events.jsonl"
+        assert new_events.is_file()

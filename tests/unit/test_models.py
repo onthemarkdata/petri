@@ -296,7 +296,7 @@ class TestValidateSlug:
 class TestInferenceProviderProtocol:
     def test_conforming_class_satisfies_protocol(self):
         class GoodProvider:
-            def assess_claim_substance(self, claim: str) -> dict:
+            def assess_claim_substance(self, claim: str, on_progress=None) -> dict:
                 return {
                     "is_substantive": True,
                     "reason": "",
@@ -304,7 +304,7 @@ class TestInferenceProviderProtocol:
                 }
 
             def generate_clarifying_questions(
-                self, claim: str, max_questions: int = 5
+                self, claim: str, max_questions: int = 5, on_progress=None
             ) -> list[dict]:
                 return []
 
@@ -313,8 +313,20 @@ class TestInferenceProviderProtocol:
                 claim: str,
                 clarifications: list[dict],
                 guidance: str = "",
+                max_premises: int = 5,
+                on_progress=None,
             ) -> dict:
                 return {"nodes": [], "edges": []}
+
+            def decompose_why(
+                self,
+                premise: str,
+                parent_level: int,
+                parent_seq: int,
+                max_premises: int = 5,
+                on_progress=None,
+            ) -> list[dict]:
+                return []
 
             def assess_node(
                 self,

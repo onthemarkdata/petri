@@ -45,39 +45,70 @@ class FakeProvider:
             "edges": [],
         }
         self.why_response: list[dict] = []
+        # When non-empty, each call to a streaming method emits these chunks
+        # to ``on_progress`` (if supplied) before returning.
+        self.progress_chunks: list[str] = []
 
         # Call recorders
         self.substance_calls: list[str] = []
         self.questions_calls: list[tuple[str, int]] = []
         self.decompose_calls: list[dict] = []
-        self.why_calls: list[tuple[str, int, int]] = []
+        self.why_calls: list[dict] = []
 
-    def assess_claim_substance(self, claim: str) -> dict:
+    def _emit_progress(self, on_progress) -> None:
+        if on_progress is None:
+            return
+        for chunk in self.progress_chunks:
+            on_progress(chunk)
+
+    def assess_claim_substance(self, claim: str, on_progress=None) -> dict:
         self.substance_calls.append(claim)
+        self._emit_progress(on_progress)
         return self.substance_response
 
     def generate_clarifying_questions(
-        self, claim: str, max_questions: int = 5
+        self, claim: str, max_questions: int = 5, on_progress=None
     ) -> list[dict]:
         self.questions_calls.append((claim, max_questions))
+        self._emit_progress(on_progress)
         return self.questions_response
 
     def decompose_claim(
-        self, claim: str, clarifications: list[dict], guidance: str = ""
+        self,
+        claim: str,
+        clarifications: list[dict],
+        guidance: str = "",
+        max_premises: int = 5,
+        on_progress=None,
     ) -> dict:
         self.decompose_calls.append(
             {
                 "claim": claim,
                 "clarifications": clarifications,
                 "guidance": guidance,
+                "max_premises": max_premises,
             }
         )
+        self._emit_progress(on_progress)
         return self.decompose_response
 
     def decompose_why(
-        self, premise: str, parent_level: int, parent_seq: int
+        self,
+        premise: str,
+        parent_level: int,
+        parent_seq: int,
+        max_premises: int = 5,
+        on_progress=None,
     ) -> list[dict]:
-        self.why_calls.append((premise, parent_level, parent_seq))
+        self.why_calls.append(
+            {
+                "premise": premise,
+                "parent_level": parent_level,
+                "parent_seq": parent_seq,
+                "max_premises": max_premises,
+            }
+        )
+        self._emit_progress(on_progress)
         return self.why_response
 
 

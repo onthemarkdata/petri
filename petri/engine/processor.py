@@ -24,7 +24,7 @@ from petri.analysis.convergence import (
     load_agent_roles,
 )
 from petri.reasoning.debate import load_debate_pairings, log_debate, mediate_debate
-from petri.storage.event_log import append_event, get_verdicts
+from petri.storage.event_log import append_event, get_verdicts, query_events
 from petri.models import (
     ConvergenceOutcome,
     EvaluationResult,
@@ -66,6 +66,35 @@ def is_stop_requested() -> bool:
 def reset_stop() -> None:
     """Clear the stop signal."""
     _stop_event.clear()
+
+
+# ── File-based Stop Sentinel ─────────────────────────────────────────────
+# The in-process ``threading.Event`` above only signals threads inside the
+# current process.  ``grow`` may run in a detached child process, so the CLI
+# also writes a sentinel file that the worker polls.
+
+_STOP_FILE_NAME = ".stop"
+
+
+def request_stop_file(petri_dir: Path) -> Path:
+    """Create the cross-process stop sentinel file."""
+    stop_path = petri_dir / _STOP_FILE_NAME
+    stop_path.write_text("stop\n", encoding="utf-8")
+    return stop_path
+
+
+def is_stop_file_present(petri_dir: Path) -> bool:
+    """Return True if the cross-process stop sentinel is currently set."""
+    return (petri_dir / _STOP_FILE_NAME).exists()
+
+
+def clear_stop_file(petri_dir: Path) -> None:
+    """Remove the cross-process stop sentinel if present (idempotent)."""
+    stop_path = petri_dir / _STOP_FILE_NAME
+    try:
+        stop_path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 # ── Path Helpers ─────────────────────────────────────────────────────────
@@ -232,7 +261,7 @@ _LEVEL_NAMES = {
 
 
 def _log_sources_from_result(
-    events_p: Path, node_id: str, agent: str, iteration: int, result: object,
+    events_file: Path, node_id: str, agent: str, iteration: int, result: object,
 ) -> None:
     """Extract sources_cited from agent output and log source_reviewed events."""
     sources = _get(result, "sources_cited", [])
@@ -511,7 +540,9 @@ _SOCRATIC_STEPS = [
             "Identify every key term that needs a precise definition. "
             "What is ambiguous? What could be interpreted multiple ways? "
             "Return JSON with: \"definitions\" (key terms and their meanings), "
-            "\"ambiguities\" (what's unclear), \"refined_claim\" (the claim restated precisely)."
+            "\"ambiguities\" (what's unclear), \"refined_claim\" (the claim restated precisely). "
+            "Set \"verdict\" to exactly \"CLARIFIED\" once the claim has been restated "
+            "precisely and every key term has been defined."
         ),
     },
     {
@@ -523,19 +554,23 @@ _SOCRATIC_STEPS = [
             "this assumption were false? "
             "Return JSON with: \"assumptions\" (list of hidden premises), "
             "\"if_false\" (what changes if each assumption fails), "
-            "\"strongest_assumption\" (the most load-bearing one)."
+            "\"strongest_assumption\" (the most load-bearing one). "
+            "Set \"verdict\" to exactly \"ASSUMPTIONS_CHALLENGED\" once every hidden "
+            "assumption has been surfaced and pressure-tested."
         ),
     },
     {
         "step": "identify_evidence_needed",
         "prompt": (
-            "SOCRATIC STEP 3 — IDENTIFY WHAT WE NEED TO KNOW: Based on the "
+            "SOCRATIC STEP 3 — MAP EVIDENCE: Based on the "
             "definitions and assumptions identified, what specific evidence would "
             "confirm or deny this claim? What would prove it false (falsification "
             "conditions)? What's the minimum evidence needed for a judgment? "
             "Return JSON with: \"evidence_needed\" (specific evidence to seek), "
             "\"falsification_conditions\" (what would disprove the claim), "
-            "\"minimum_threshold\" (least evidence needed for a judgment)."
+            "\"minimum_threshold\" (least evidence needed for a judgment). "
+            "Set \"verdict\" to exactly \"EVIDENCE_MAPPED\" once the evidence plan "
+            "and falsification conditions are on the table."
         ),
     },
 ]
@@ -549,9 +584,29 @@ def _run_socratic_phase(
     iteration: int,
     provider: InferenceProvider,
 ) -> None:
-    """Phase 0: Socratic questioning — clarify, challenge assumptions, identify evidence needed."""
+    """Phase 0: Socratic questioning — clarify, challenge assumptions, identify evidence needed.
+
+    This phase is **idempotent**.  If the node's event log already contains a
+    ``verdict_issued`` event from any ``socratic_*`` agent, the phase is a
+    no-op: it just advances the queue state to ``research_active`` and
+    returns.  This prevents a restarted ``petri grow`` run from re-appending a
+    duplicate ``### Socratic Analysis`` block to ``evidence.md``.
+    """
     events_file = _events_path(petri_dir, node_id, dish_id)
     queue_file = _queue_path(petri_dir)
+
+    # Idempotency guard — if any prior socratic_* verdict exists for this
+    # node, assume the Socratic phase has already run and skip it.
+    prior_verdicts = query_events(
+        events_file, node_id=node_id, event_type="verdict_issued",
+    )
+    for prior_event in prior_verdicts:
+        prior_agent = prior_event.get("agent", "")
+        if isinstance(prior_agent, str) and prior_agent.startswith("socratic_"):
+            update_state(
+                queue_file, node_id, QueueState.research_active.value,
+            )
+            return
 
     lines = ["### Socratic Analysis\n"]
 
@@ -590,9 +645,10 @@ def _run_socratic_phase(
             lines.append(f"\n{arguments}")
         lines.append("")
 
-    # Write Socratic analysis to evidence file
-    content = "\n".join(lines)
-    _append_evidence(petri_dir, node_id, dish_id, "socratic", iteration, content)
+    # NOTE: The Socratic Analysis block is intentionally written to
+    # ``evidence.md`` only ONCE — after the verification step below.
+    # Writing it both before and after verification produced duplicate
+    # ``### Socratic Analysis`` headers on a single run.
 
     # Verify the Socratic analysis was thorough
     verification_context = {
@@ -600,18 +656,21 @@ def _run_socratic_phase(
         "phase": "socratic_verification",
         "prior_evidence": "\n".join(lines),
         "focused_directive": (
-            "Verify that the Socratic analysis above is complete. Check: "
+            "SOCRATIC STEP 4 — VERIFY: Verify that the Socratic analysis above "
+            "is complete. Check: "
             "1) Were key terms actually DEFINED (not just mentioned)? "
             "2) Were ASSUMPTIONS explicitly identified and challenged? "
             "3) Were specific FALSIFICATION CONDITIONS stated? "
-            "If any step was superficial or missing, verdict = SOCRATIC_INCOMPLETE. "
-            "If all three steps were genuinely performed, verdict = SOCRATIC_COMPLETE."
+            "If any step was superficial or missing, set \"verdict\" to "
+            "\"SOCRATIC_INCOMPLETE\". "
+            "If all three prior steps were genuinely performed, set \"verdict\" "
+            "to exactly \"VERIFIED\"."
         ),
     }
     verification = provider.assess_node(
         node_id, claim_text, verification_context, "socratic_questioner"
     )
-    verification_verdict = _get(verification, "verdict", "SOCRATIC_COMPLETE")
+    verification_verdict = _get(verification, "verdict", "VERIFIED")
 
     append_event(
         events_path=events_file,
@@ -622,16 +681,14 @@ def _run_socratic_phase(
         data=_verdict_data(verification),
     )
 
-    # Append verification to evidence
+    # Append verification to the in-memory Socratic block, then write
+    # the complete block to evidence.md exactly once.
     verification_summary = _to_str(_get(verification, "summary", ""))
     if verification_summary:
         lines.append(f"**Socratic Verification:** {verification_verdict}")
         lines.append(f"{verification_summary}\n")
-        content = "\n".join(lines)
-        _append_evidence(petri_dir, node_id, dish_id, "socratic", iteration, content)
-    else:
-        content = "\n".join(lines)
-        _append_evidence(petri_dir, node_id, dish_id, "socratic", iteration, content)
+    content = "\n".join(lines)
+    _append_evidence(petri_dir, node_id, dish_id, "socratic", iteration, content)
 
     # Transition to research phase
     update_state(queue_file, node_id, QueueState.research_active.value)

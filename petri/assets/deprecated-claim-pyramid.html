@@ -1,0 +1,2115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Factory Research — First Principles Decomposition</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0f1117;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow-x: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────────────── */
+  .header {
+    text-align: center;
+    padding: 20px 20px 0;
+    background: #0f1117;
+    z-index: 50;
+    border-bottom: 1px solid #1a1d2a;
+    padding-bottom: 12px;
+    flex-shrink: 0;
+  }
+
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin-bottom: 2px; }
+  .subtitle { color: #888; font-size: 13px; margin-bottom: 10px; }
+
+  /* ── View Tabs ──────────────────────────────────────────────────────── */
+  .view-tabs {
+    display: flex; gap: 0; justify-content: center; margin-bottom: 10px;
+  }
+  .view-tab {
+    padding: 7px 22px; font-size: 13px; font-weight: 500;
+    background: transparent; color: #666; border: 1px solid #2a2d3a;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .view-tab:first-child { border-radius: 6px 0 0 6px; }
+  .view-tab:last-child { border-radius: 0 6px 6px 0; }
+  .view-tab.active {
+    background: #1e2030; color: #e0e0e0; border-color: #3a3d4a;
+  }
+  .view-tab:hover:not(.active) { color: #aaa; background: #151720; }
+
+  /* ── Dependency View header extras ─────────────────────────────────── */
+  .dep-header { text-align: center; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    justify-content: center; margin-bottom: 8px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #999; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+  .stats {
+    display: flex; gap: 18px; justify-content: center;
+    font-size: 12px; color: #666; margin-bottom: 4px;
+  }
+  .stats strong { color: #bbb; }
+
+  /* ── Canvas container (Dependency View) ─────────────────────────────── */
+  .canvas-wrap {
+    position: relative;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  svg.graph {
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* ── Tooltip ────────────────────────────────────────────────────────── */
+  .tooltip {
+    display: none;
+    position: fixed;
+    background: #1e2030;
+    border: 1px solid #555;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13px;
+    max-width: 380px;
+    z-index: 200;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.7);
+    pointer-events: none;
+    line-height: 1.5;
+    transition: opacity 0.15s ease;
+  }
+  .tooltip.locked { border-color: #888; pointer-events: none; }
+  .tooltip .tt-id { font-weight: 700; font-size: 14px; margin-bottom: 3px; }
+  .tooltip .tt-title { color: #ccc; margin-bottom: 6px; }
+  .tooltip .tt-status {
+    font-size: 11px; font-weight: 600; padding: 2px 8px;
+    border-radius: 3px; display: inline-block; color: #fff;
+  }
+  .tooltip .tt-deps { margin-top: 8px; font-size: 11px; color: #888; white-space: pre-line; line-height: 1.6; }
+  .tooltip .tt-deps strong { color: #aaa; }
+  .tooltip .tt-open-btn {
+    display: inline-block; margin-top: 8px; padding: 3px 10px;
+    font-size: 11px; background: #2a2d3a; color: #bbb; border: 1px solid #3a3d4a;
+    border-radius: 4px; cursor: pointer; pointer-events: auto;
+  }
+  .tooltip .tt-open-btn:hover { background: #3a3d4a; color: #fff; }
+
+  /* ── Claim View ─────────────────────────────────────────────────────── */
+  .claim-view {
+    display: none;
+    flex: 1;
+    overflow: hidden;
+  }
+  .claim-view.active { display: flex; }
+
+  /* Left sidebar */
+  .claim-sidebar {
+    width: 260px;
+    min-width: 260px;
+    border-right: 1px solid #1a1d2a;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-search {
+    padding: 10px;
+    border-bottom: 1px solid #1a1d2a;
+  }
+  .sidebar-search input {
+    width: 100%;
+    padding: 7px 10px;
+    background: #1a1d2a;
+    border: 1px solid #2a2d3a;
+    border-radius: 6px;
+    color: #ddd;
+    font-size: 12px;
+    outline: none;
+  }
+  .sidebar-search input::placeholder { color: #555; }
+  .sidebar-search input:focus { border-color: #3a7cc5; }
+
+  .sidebar-list {
+    overflow-y: auto;
+    flex: 1;
+    padding: 6px 0;
+  }
+  .sidebar-layer-label {
+    padding: 8px 14px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #555;
+  }
+  .sidebar-claim {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #999;
+    transition: background 0.1s;
+  }
+  .sidebar-claim:hover { background: #1a1d2a; color: #ccc; }
+  .sidebar-claim.active { background: #1e2030; color: #fff; }
+  .sidebar-claim .sc-dot {
+    width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
+  }
+  .sidebar-claim.working .sc-dot {
+    animation: pulse-dot 1.5s ease-in-out infinite;
+    box-shadow: 0 0 6px 2px rgba(52, 152, 219, 0.6);
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; box-shadow: 0 0 4px 1px rgba(52, 152, 219, 0.4); }
+    50% { opacity: 0.6; box-shadow: 0 0 8px 3px rgba(52, 152, 219, 0.8); }
+  }
+  @keyframes pulse-node {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .sidebar-claim .sc-id {
+    font-weight: 600; min-width: 32px; color: inherit;
+  }
+  .sidebar-claim .sc-title {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* Main content area */
+  .claim-main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Evidence panel */
+  .evidence-panel {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px 32px;
+    min-width: 0;
+  }
+  .ev-header {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #1a1d2a;
+  }
+  .ev-id {
+    font-size: 12px; color: #888; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .ev-title { font-size: 18px; font-weight: 600; line-height: 1.4; margin-bottom: 10px; }
+  .ev-meta {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .ev-status-badge {
+    font-size: 11px; font-weight: 600; padding: 3px 10px;
+    border-radius: 4px; color: #fff;
+  }
+  .ev-activity-badge {
+    font-size: 11px; font-weight: 600; padding: 3px 10px;
+    border-radius: 4px; color: #fff; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .ev-activity-badge.active {
+    background: #2563eb; animation: pulse-badge 1.5s ease-in-out infinite;
+  }
+  .ev-activity-badge.queued { background: #6c757d; }
+  .ev-activity-badge.inactive { background: #374151; color: #9ca3af; }
+  .ev-activity-badge .badge-dot {
+    width: 6px; height: 6px; border-radius: 50%; display: inline-block;
+  }
+  .ev-activity-badge.active .badge-dot { background: #93c5fd; box-shadow: 0 0 6px 2px rgba(147, 197, 253, 0.7); }
+  .ev-activity-badge.queued .badge-dot { background: #9ca3af; }
+  .ev-activity-badge.inactive .badge-dot { background: #6b7280; }
+  @keyframes pulse-badge {
+    0%, 100% { box-shadow: 0 0 4px 1px rgba(37, 99, 235, 0.3); }
+    50% { box-shadow: 0 0 10px 4px rgba(37, 99, 235, 0.6); }
+  }
+  .ev-issue-link {
+    font-size: 12px; color: #3a7cc5; text-decoration: none;
+  }
+  .ev-issue-link:hover { text-decoration: underline; }
+
+  .ev-body { line-height: 1.7; font-size: 14px; color: #ccc; }
+  .ev-body h1, .ev-body h2, .ev-body h3 {
+    color: #e0e0e0; margin-top: 24px; margin-bottom: 8px;
+  }
+  .ev-body h1 { font-size: 18px; }
+  .ev-body h2 { font-size: 16px; }
+  .ev-body h3 { font-size: 14px; }
+  .ev-body p { margin-bottom: 10px; }
+  .ev-body strong { color: #e0e0e0; }
+  .ev-body hr {
+    border: none; border-top: 1px solid #2a2d3a; margin: 20px 0;
+  }
+  .ev-body ul, .ev-body ol {
+    margin: 8px 0 8px 20px;
+  }
+  .ev-body li { margin-bottom: 4px; }
+  .ev-body code {
+    background: #1a1d2a; padding: 2px 6px; border-radius: 3px;
+    font-size: 13px; color: #c0c0c0;
+  }
+  .ev-body pre {
+    background: #1a1d2a; padding: 12px 16px; border-radius: 6px;
+    overflow-x: auto; margin: 10px 0; font-size: 13px;
+  }
+  .ev-body blockquote {
+    border-left: 3px solid #3a3d4a; padding-left: 14px;
+    color: #999; margin: 10px 0;
+  }
+  .ev-empty {
+    color: #555; font-style: italic; padding: 40px 0;
+    text-align: center; font-size: 14px;
+  }
+  .ev-loading { color: #666; padding: 40px 0; text-align: center; }
+
+  /* Citations section */
+  .ev-citations {
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid #2a2d3a;
+  }
+  .ev-citations h2 {
+    font-size: 16px; color: #e0e0e0; margin-bottom: 16px; font-weight: 600;
+  }
+  .citation-card {
+    background: #151720;
+    border: 1px solid #1a1d2a;
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+  }
+  .citation-card:hover { border-color: #2a2d3a; }
+  .citation-title-row {
+    display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px;
+  }
+  .citation-link {
+    color: #7cacf0; text-decoration: none; font-size: 13px;
+    font-weight: 600; line-height: 1.4; flex: 1;
+  }
+  .citation-link:hover { text-decoration: underline; color: #a0c4ff; }
+  .citation-level {
+    font-size: 10px; font-weight: 700; padding: 2px 7px;
+    border-radius: 3px; white-space: nowrap; flex-shrink: 0;
+  }
+  .citation-level-1 { background: #1a3a2a; color: #52b788; }
+  .citation-level-2 { background: #1a3a2a; color: #52b788; }
+  .citation-level-3 { background: #1a2a3a; color: #64b5f6; }
+  .citation-level-4 { background: #1a2a3a; color: #64b5f6; }
+  .citation-level-5 { background: #2a2a1a; color: #d4a020; }
+  .citation-level-6 { background: #2a2a1a; color: #d4a020; }
+  .citation-meta {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 11px; color: #777; margin-bottom: 6px;
+  }
+  .citation-supports { color: #52b788; font-weight: 600; }
+  .citation-contradicts { color: #e57373; font-weight: 600; }
+  .citation-finding {
+    font-size: 12px; color: #999; line-height: 1.5;
+    max-height: 60px; overflow: hidden; transition: max-height 0.2s;
+    cursor: pointer;
+  }
+  .citation-finding.expanded { max-height: none; }
+  .citation-finding-toggle {
+    font-size: 11px; color: #555; cursor: pointer; margin-top: 4px;
+  }
+  .citation-finding-toggle:hover { color: #888; }
+
+  /* Cost tracking */
+  .ev-cost-badge {
+    font-size: 11px; font-weight: 600; padding: 3px 10px;
+    border-radius: 4px; background: #1a2a1a; color: #52b788;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .ev-cost-section {
+    margin-top: 32px; padding-top: 24px;
+    border-top: 1px solid #2a2d3a;
+  }
+  .ev-cost-section h2 {
+    font-size: 16px; color: #e0e0e0; margin-bottom: 16px; font-weight: 600;
+  }
+  .cost-summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px; margin-bottom: 16px;
+  }
+  .cost-stat {
+    background: #151720; border: 1px solid #1a1d2a; border-radius: 6px;
+    padding: 12px 14px; text-align: center;
+  }
+  .cost-stat-value { font-size: 18px; font-weight: 700; color: #52b788; }
+  .cost-stat-label { font-size: 11px; color: #777; margin-top: 4px; }
+  .cost-phase-table {
+    width: 100%; font-size: 12px; border-collapse: collapse;
+  }
+  .cost-phase-table th {
+    text-align: left; color: #888; padding: 6px 8px;
+    border-bottom: 1px solid #2a2d3a; font-weight: 600;
+  }
+  .cost-phase-table td {
+    padding: 6px 8px; border-bottom: 1px solid #1a1d2a; color: #ccc;
+  }
+  .cost-phase-table td.cost-value { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Research log panel */
+  .log-panel {
+    width: 380px;
+    min-width: 380px;
+    border-left: 1px solid #1a1d2a;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .log-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid #1a1d2a;
+    font-size: 13px;
+    font-weight: 600;
+    color: #aaa;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .log-header .log-count {
+    font-size: 11px; background: #2a2d3a; padding: 2px 7px;
+    border-radius: 10px; color: #888; font-weight: 500;
+  }
+  .log-body {
+    overflow-y: auto;
+    flex: 1;
+    padding: 12px;
+  }
+  .log-empty {
+    color: #555; font-style: italic; text-align: center;
+    padding: 40px 16px; font-size: 13px; line-height: 1.6;
+  }
+
+  /* Verdict summary table */
+  .verdict-summary {
+    margin-bottom: 16px;
+    border: 1px solid #1a1d2a;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .verdict-summary-title {
+    font-size: 11px; font-weight: 600; padding: 8px 12px;
+    background: #151720; color: #888; text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .verdict-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-top: 1px solid #1a1d2a;
+    font-size: 11px;
+  }
+  .verdict-agent {
+    min-width: 100px; color: #999; font-weight: 500;
+  }
+  .verdict-badge {
+    padding: 1px 6px; border-radius: 3px; font-weight: 600;
+    font-size: 10px; white-space: nowrap;
+  }
+  .verdict-pass { background: #1a3a2a; color: #52b788; }
+  .verdict-block { background: #3a1a1a; color: #e57373; }
+  .verdict-info { background: #1a2a3a; color: #64b5f6; }
+
+  /* Timeline events */
+  .tl-event {
+    position: relative;
+    padding: 10px 12px 10px 28px;
+    margin-bottom: 2px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .tl-event:hover { background: #1a1d2a; }
+  .tl-event::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 16px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .tl-event[data-type="search_executed"]::before { background: #3a7cc5; }
+  .tl-event[data-type="source_reviewed"]::before { background: #9c7cdb; }
+  .tl-event[data-type="staleness_checked"]::before { background: #d4a020; }
+  .tl-event[data-type="verdict_issued"]::before { background: #52b788; }
+  .tl-event[data-type="evidence_appended"]::before { background: #4db6ac; }
+  .tl-event[data-type="debate_mediated"]::before { background: #e57c3a; }
+  .tl-event[data-type="convergence_checked"]::before { background: #e05555; }
+  .tl-event[data-type="citation_backfill"]::before { background: #b07ccf; }
+  .tl-event[data-type="token_usage"]::before { background: #10b981; }
+
+  .tl-event .tl-top {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+  }
+  .tl-event .tl-type {
+    font-weight: 600; color: #bbb;
+  }
+  .tl-event .tl-agent {
+    font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: #2a2d3a; color: #888;
+  }
+  .tl-event .tl-iter {
+    font-size: 10px; color: #555;
+  }
+  .tl-event .tl-time {
+    font-size: 10px; color: #555; margin-left: auto;
+  }
+  .tl-event .tl-detail {
+    display: none;
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: #151720;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #999;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .tl-event.expanded .tl-detail { display: block; }
+
+  /* Iteration separator */
+  .tl-iter-sep {
+    text-align: center;
+    padding: 6px 0;
+    font-size: 10px;
+    color: #444;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ── Utility ────────────────────────────────────────────────────────── */
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>First Principles Decomposition</h1>
+  <p class="subtitle">How 88 claims build on each other — from thesis down to foundational truths</p>
+
+  <div class="view-tabs">
+    <div class="view-tab active" data-view="dependency">Dependency View</div>
+    <div class="view-tab" data-view="claim">Claim View</div>
+  </div>
+
+  <div class="dep-header" id="depHeader">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-swatch" style="background:#40916c;border:1px solid #52b788;"></div> Validated</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#264f78;border:1px solid #3a7cc5;"></div> Research</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#5c5c6e;border:1px solid #7a7a8e;"></div> Assumption</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#a67c1a;border:1px solid #d4a020;"></div> Assumption–Measure</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#3d2b80;border:1px solid #6a50b0;"></div> Measure</div>
+    </div>
+    <div class="stats">
+      <div><strong id="sv">0</strong> Validated</div>
+      <div><strong id="sr">0</strong> Research</div>
+      <div><strong id="sa">0</strong> Assumption</div>
+      <div><strong id="sm">0</strong> Measure</div>
+      <div><strong id="st">0</strong> Total</div>
+    </div>
+  </div>
+</div>
+
+<!-- Dependency View -->
+<div class="canvas-wrap" id="depView">
+  <svg class="graph" id="graph"></svg>
+</div>
+
+<div class="tooltip" id="tooltip">
+  <div class="tt-id"></div>
+  <div class="tt-title"></div>
+  <div class="tt-status"></div>
+  <div class="tt-deps"></div>
+  <div class="tt-open-btn" id="ttOpenBtn">Open in Claim View</div>
+</div>
+
+<!-- Claim View -->
+<div class="claim-view" id="claimView">
+  <div class="claim-sidebar">
+    <div class="sidebar-search">
+      <input type="text" id="sidebarSearch" placeholder="Search claims...">
+    </div>
+    <div class="sidebar-list" id="sidebarList"></div>
+  </div>
+  <div class="claim-main">
+    <div class="evidence-panel" id="evidencePanel">
+      <div class="ev-empty">Select a claim from the sidebar to view its evidence and research log.</div>
+    </div>
+    <div class="log-panel">
+      <div class="log-header">
+        Research Log <span class="log-count" id="logCount" style="display:none">0</span>
+      </div>
+      <div class="log-body" id="logBody">
+        <div class="log-empty">Select a claim to view its research timeline.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── API Configuration ────────────────────────────────────────────────
+var API_BASE = "http://localhost:8091";
+
+// ── Data (loaded from API) ────────────────────────────────────────────
+var claims = [];
+var edges = [];
+
+fetch(API_BASE + "/api/claims-graph").then(function(r) { return r.json(); }).then(function(data) {
+  claims = data.claims.map(function(c) {
+    // Map full status to dashboard's short format
+    var s = c.status;
+    if (s.indexOf("RESEARCH - ") === 0) s = "RESEARCH";
+    else if (s === "ASSUMPTION - RESEARCH") s = "ASSUMPTION-RESEARCH";
+    else if (s === "ASSUMPTION - MEASURE") s = "ASSUMPTION-MEASURE";
+    else if (s === "NEW CLAIM") s = "NEW-CLAIM";
+    else s = s.replace(/ - .+/, "");  // strip sub-types for DEFER, MEASURE, etc.
+    return { id: c.id, L: c.layer, t: c.title, s: s, f: c.evidence_file };
+  });
+  edges = data.edges;
+  initDashboard();
+}).catch(function(err) {
+  console.error("Failed to load claims graph from API, using fallback", err);
+  // Fallback: inline data for offline use
+  claims = [
+  { id:"1.1",  L:1, t:"Opus 4.6 API costs $5/M input, $25/M output tokens", s:"VALIDATED", f:"evidence/layer-1-economics/01-01-opus-token-pricing.md" },
+  { id:"1.2",  L:1, t:"Extended thinking tokens bill as output tokens at $25/M", s:"VALIDATED", f:"evidence/layer-1-economics/01-02-thinking-tokens-billing.md" },
+  { id:"1.3",  L:1, t:"With max thinking, output tokens dominate cost (50-100K+ per response)", s:"RESEARCH", f:"evidence/layer-1-economics/01-03-output-tokens-dominate.md" },
+  { id:"1.4",  L:1, t:"Sustained 24/7 Opus 4.6 via API costs $17K-$73K/month", s:"VALIDATED", f:"evidence/layer-1-economics/01-04-sustained-api-cost.md" },
+  { id:"1.5",  L:1, t:"Max plan wall is rate limits and throttling, not price", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-1-economics/01-05-max-plan-rate-limits.md" },
+  { id:"1.6",  L:1, t:"AI-native power users run 10-30 concurrent agents, not 1-2", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-1-economics/01-06-concurrent-agents.md" },
+  { id:"1.7",  L:1, t:"$600/month across multiple Max plans insufficient for swarm usage", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-1-economics/01-07-multi-plan-insufficient.md" },
+  { id:"1.8",  L:1, t:"Swarm-level API costs burn ~$100/hr ($72K/month sustained)", s:"RESEARCH", f:"evidence/layer-1-economics/01-08-swarm-burn-rate.md" },
+  { id:"1.9",  L:1, t:"No sustained inference = competitive disadvantage in AI-native work", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-1-economics/01-09-competitive-disadvantage.md" },
+  { id:"1.10", L:1, t:"Hardware crossover: owning beats API at some utilization threshold", s:"RESEARCH", f:"evidence/layer-1-economics/01-10-hardware-crossover.md" },
+
+  { id:"2.1", L:2, t:"Frontier closed models underwent meaningful phase change recently", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-2-model-convergence/02-01-frontier-phase-change.md" },
+  { id:"2.2", L:2, t:"Open-weight models improving at accelerating rate", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-2-model-convergence/02-02-open-weight-acceleration.md" },
+  { id:"2.3", L:2, t:"Open-weight will reach Opus-equivalent quality within ~1 year", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-2-model-convergence/02-03-open-weight-convergence.md" },
+  { id:"2.4", L:2, t:"No rigorous benchmarks for specific enterprise workflows", s:"RESEARCH", f:"evidence/layer-2-model-convergence/02-04-enterprise-benchmarks-gap.md" },
+
+  { id:"3.1", L:3, t:"Token = atomic unit of LLM output (~3/4 English word)", s:"VALIDATED", f:"evidence/layer-3-token-physics/03-01-token-definition.md" },
+  { id:"3.2", L:3, t:"One decode token = one full weight read from VRAM", s:"RESEARCH", f:"evidence/layer-3-token-physics/03-02-decode-weight-read.md" },
+  { id:"3.3", L:3, t:"Time/token = model_weight_bytes / memory_bandwidth", s:"MEASURE", f:"evidence/layer-3-token-physics/03-03-time-per-token.md" },
+  { id:"3.4", L:3, t:"Memory bandwidth is the bottleneck for single-user decode", s:"MEASURE", f:"evidence/layer-3-token-physics/03-04-bandwidth-bottleneck.md" },
+  { id:"3.5", L:3, t:"Prefill and decode have different resource profiles", s:"RESEARCH", f:"evidence/layer-3-token-physics/03-05-prefill-vs-decode.md" },
+
+  { id:"4.1", L:4, t:"AI-native tasks route across four tiers", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-4-workload-profile/04-01-four-tier-routing.md" },
+  { id:"4.2", L:4, t:"Interactive tasks well-served by 8-14B models locally", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-4-workload-profile/04-02-interactive-small-models.md" },
+  { id:"4.3", L:4, t:"Autonomous tasks split between local 70B and frontier API", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-4-workload-profile/04-03-autonomous-task-split.md" },
+  { id:"4.4", L:4, t:"Human bottleneck interactive; GPU autonomous; wallet API", s:"RESEARCH", f:"evidence/layer-4-workload-profile/04-04-bottleneck-per-mode.md" },
+  { id:"4.5", L:4, t:"One worker's AI-native day = atomic scaling unit", s:"ASSUMPTION-MEASURE", f:"evidence/layer-4-workload-profile/04-05-atomic-worker-unit.md" },
+  { id:"4.6", L:4, t:"Enterprises gravitate toward centralized compute", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-4-workload-profile/04-06-enterprise-centralization.md" },
+  { id:"4.7", L:4, t:"Max token volume per worker calculable from hardware throughput", s:"RESEARCH", f:"evidence/layer-4-workload-profile/04-07-max-token-volume.md" },
+
+  { id:"5.1", L:5, t:"VRAM per token = KV cache entry size", s:"VALIDATED", f:"evidence/layer-5-batching-concurrency/05-01-kv-cache-per-token.md" },
+  { id:"5.2", L:5, t:"Batching: read weights once, apply to multiple sessions", s:"RESEARCH", f:"evidence/layer-5-batching-concurrency/05-02-batching-weight-reuse.md" },
+  { id:"5.3", L:5, t:"Total throughput increases with batch size", s:"RESEARCH", f:"evidence/layer-5-batching-concurrency/05-03-throughput-vs-batch-size.md" },
+  { id:"5.4", L:5, t:"Per-user latency increases with batch size", s:"RESEARCH", f:"evidence/layer-5-batching-concurrency/05-04-latency-vs-batch-size.md" },
+  { id:"5.5", L:5, t:"KV cache scales linearly with concurrent sessions", s:"RESEARCH", f:"evidence/layer-5-batching-concurrency/05-05-kv-cache-linear-scaling.md" },
+  { id:"5.6", L:5, t:"Batch size crossover: memory-bound to compute-bound", s:"VALIDATED", f:"evidence/layer-5-batching-concurrency/05-06-memory-compute-crossover.md" },
+  { id:"5.7", L:5, t:"Continuous vs static batching: different throughput/latency", s:"RESEARCH", f:"evidence/layer-5-batching-concurrency/05-07-continuous-vs-static-batching.md" },
+  { id:"5.8", L:5, t:"CUDA context = fixed VRAM overhead per GPU", s:"VALIDATED", f:"evidence/layer-5-batching-concurrency/05-08-cuda-context-overhead.md" },
+
+  { id:"6.1", L:6, t:"70B FP16 = ~140GB VRAM for weights", s:"VALIDATED", f:"evidence/layer-6-deep-inference/06-01-70b-fp16-vram.md" },
+  { id:"6.2", L:6, t:"70B quantized = ~35GB VRAM for weights", s:"VALIDATED", f:"evidence/layer-6-deep-inference/06-02-70b-quantized-vram.md" },
+  { id:"6.3", L:6, t:"FP16\u2192INT4 quantization degrades reasoning quality", s:"MEASURE", f:"evidence/layer-6-deep-inference/06-03-quantization-quality-loss.md" },
+  { id:"6.4", L:6, t:"Extended thinking: 10-100x more output than final response", s:"MEASURE", f:"evidence/layer-6-deep-inference/06-04-thinking-token-ratio.md" },
+  { id:"6.5", L:6, t:"Single 70B deep session can consume machine for minutes", s:"MEASURE", f:"evidence/layer-6-deep-inference/06-05-machine-occupation-time.md" },
+  { id:"6.6", L:6, t:"Deep inference for: code architecture, science, legal, strategy", s:"MEASURE", f:"evidence/layer-6-deep-inference/06-06-high-inference-use-cases.md" },
+  { id:"6.7", L:6, t:"256GB unified memory = massive KV cache headroom", s:"MEASURE", f:"evidence/layer-6-deep-inference/06-07-kv-cache-headroom.md" },
+  { id:"6.8", L:6, t:"M5 Ultra 70B FP16: ~7.8 tok/s batch 1", s:"MEASURE", f:"evidence/layer-6-deep-inference/06-08-m5-ultra-throughput.md" },
+
+  { id:"7.1", L:7, t:"8-14B: 10-30+ concurrent sessions on single GPU", s:"VALIDATED", f:"evidence/layer-7-swarm-build/07-01-concurrent-sessions-per-gpu.md" },
+  { id:"7.2", L:7, t:"Swarm tasks well-served by 8-14B models", s:"VALIDATED", f:"evidence/layer-7-swarm-build/07-02-small-model-agentic-quality.md" },
+  { id:"7.3", L:7, t:"Throughput matters for swarms, not per-agent latency", s:"MEASURE", f:"evidence/layer-7-swarm-build/07-03-throughput-over-latency.md" },
+  { id:"7.4", L:7, t:"Hybrid routing: big plans, small executes", s:"MEASURE", f:"evidence/layer-7-swarm-build/07-04-hybrid-routing.md" },
+  { id:"7.5", L:7, t:"Swarm coordination overhead = significant cost multiplier", s:"VALIDATED", f:"evidence/layer-7-swarm-build/07-05-swarm-coordination-overhead.md" },
+  { id:"7.6", L:7, t:"Concurrent agent ceiling bounded by VRAM, not compute", s:"VALIDATED", f:"evidence/layer-7-swarm-build/07-06-vram-concurrency-ceiling.md" },
+  { id:"7.7", L:7, t:"Speculative decoding boosts throughput without quality loss", s:"VALIDATED", f:"evidence/layer-7-swarm-build/07-07-speculative-decoding.md" },
+  { id:"7.8", L:7, t:"Swarm throughput derivable from $100/hr burn rate", s:"VALIDATED", f:"evidence/layer-7-swarm-build/07-08-swarm-throughput-derivation.md" },
+
+  { id:"8.1",  L:8, t:"Every agent token is an auditable event", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-01-token-audit-tooling.md" },
+  { id:"8.2",  L:8, t:"Deep reasoning audit = inspect thinking chain", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-02-thinking-chain-audit.md" },
+  { id:"8.3",  L:8, t:"Swarm audit = trace across agents, attribute outcomes", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-03-swarm-tracing.md" },
+  { id:"8.4a", L:8, t:"Quality-concurrency tradeoff affects audit risk", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-04a-quality-concurrency-tradeoff.md" },
+  { id:"8.4b", L:8, t:"Empirical error rates at different concurrency levels", s:"MEASURE", f:"evidence/layer-8-auditing-evaluation/08-04b-empirical-error-rates.md" },
+  { id:"8.5",  L:8, t:"OpenTelemetry + SigNoz instruments local inference", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-05-otel-signoz-instrumentation.md" },
+  { id:"8.6",  L:8, t:"Eval harnesses measure quality degradation on local models", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-06-eval-harnesses.md" },
+  { id:"8.7a", L:8, t:"Audit has token cost: LLM-as-judge consumes capacity", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-07a-audit-token-cost.md" },
+  { id:"8.7b", L:8, t:"Actual audit token cost at different levels", s:"MEASURE", f:"evidence/layer-8-auditing-evaluation/08-07b-empirical-audit-cost.md" },
+  { id:"8.8",  L:8, t:"Regulated enterprises need specific AI audit requirements", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-08-regulatory-requirements.md" },
+  { id:"8.9a", L:8, t:"Machine benchmarks audit cost at quality/concurrency levels", s:"VALIDATED", f:"evidence/layer-8-auditing-evaluation/08-09a-audit-benchmarking-role.md" },
+  { id:"8.9b", L:8, t:"Empirical cost-of-auditing curve", s:"MEASURE", f:"evidence/layer-8-auditing-evaluation/08-09b-empirical-audit-curve.md" },
+
+  { id:"9.1", L:9, t:"Two machines > one compromising on both profiles", s:"VALIDATED", f:"evidence/layer-9-hardware-decision/09-01-two-machine-architecture.md" },
+  { id:"9.2", L:9, t:"GPU supply risk favors buying now", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-9-hardware-decision/09-02-gpu-supply-risk.md" },
+  { id:"9.3", L:9, t:"NVIDIA bridges deep inference until Mac Studio arrives", s:"VALIDATED", f:"evidence/layer-9-hardware-decision/09-03-nvidia-bridge-inference.md" },
+  { id:"9.4", L:9, t:"Mac Studio M5 Ultra: ~256GB, ~1100 GB/s", s:"RESEARCH", f:"evidence/layer-9-hardware-decision/09-04-mac-studio-specs.md" },
+  { id:"9.5", L:9, t:"NVIDIA: expandable chassis, single GPU start", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-9-hardware-decision/09-05-nvidia-expandable-chassis.md" },
+  { id:"9.6", L:9, t:"Total budget: $10K-$20K", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-9-hardware-decision/09-06-total-budget.md" },
+
+  { id:"10.1", L:10, t:"Post-deployment AI eval = underserved market gap", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-10-ai-eval-market/10-01-post-deployment-eval-gap.md" },
+  { id:"10.2", L:10, t:"Eval defensibility scales with AI adoption", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-10-ai-eval-market/10-02-eval-defensibility.md" },
+  { id:"10.3", L:10, t:"Minimal US post-deployment eval regs, but coming", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-10-ai-eval-market/10-03-regulatory-vacuum.md" },
+  { id:"10.4", L:10, t:"EU AI Act / NIST RMF = leading indicators", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-10-ai-eval-market/10-04-international-regulatory-indicators.md" },
+  { id:"10.5", L:10, t:"Opportunity in servicing, not building software", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-10-ai-eval-market/10-05-services-not-software.md" },
+  { id:"10.6", L:10, t:"Regulated industries first to need independent eval", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-10-ai-eval-market/10-06-regulated-industries-first.md" },
+
+  { id:"11.1", L:11, t:"Regional hospital systems = target customer", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-11-healthcare-customer/11-01-target-customer.md" },
+  { id:"11.2", L:11, t:"HIPAA blocks sending patient data to cloud AI", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-11-healthcare-customer/11-02-hipaa-data-constraint.md" },
+  { id:"11.3", L:11, t:"HIPAA forces self-hosted open-weight models", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-11-healthcare-customer/11-03-self-hosted-model-constraint.md" },
+  { id:"11.4", L:11, t:"Hospitals lack internal AI eval capability", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-11-healthcare-customer/11-04-internal-eval-capability-gap.md" },
+  { id:"11.5", L:11, t:"Third-party evaluator has trust advantage", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-11-healthcare-customer/11-05-third-party-trust-advantage.md" },
+  { id:"11.6", L:11, t:"Hospital sales = relationship-based, local", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-11-healthcare-customer/11-06-regional-sales-motion.md" },
+
+  { id:"12.1", L:12, t:"Synthetic healthcare data builds domain expertise", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-12-rd-platform-economics/12-01-synthetic-data-expertise.md" },
+  { id:"12.2", L:12, t:"Air-gapped Mac Studio mirrors hospital deployment", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-12-rd-platform-economics/12-02-air-gapped-mirror.md" },
+  { id:"12.3", L:12, t:"NVIDIA = fine-tuning; Mac Studio = eval platform", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-12-rd-platform-economics/12-03-two-machine-roles.md" },
+  { id:"12.4", L:12, t:"Hardware ROI: $20K one-time vs ~$20K/month cloud", s:"RESEARCH", f:"evidence/layer-12-rd-platform-economics/12-04-hardware-vs-cloud-cost.md" },
+  { id:"12.5", L:12, t:"50% utilization: hardware offset in ~60 days", s:"RESEARCH", f:"evidence/layer-12-rd-platform-economics/12-05-hardware-breakeven.md" },
+  { id:"12.6", L:12, t:"Clinical evals need different metrics than coding benchmarks", s:"ASSUMPTION-RESEARCH", f:"evidence/layer-12-rd-platform-economics/12-06-domain-specific-evals.md" },
+  { id:"12.7", L:12, t:"Pre-revenue R&D: revenue from eval service", s:"VALIDATED", f:"evidence/layer-12-rd-platform-economics/12-07-pre-revenue-rd.md" },
+  { id:"12.8", L:12, t:"Loan funded by LinkedIn Learning royalties", s:"VALIDATED", f:"evidence/layer-12-rd-platform-economics/12-08-royalty-funded-repayment.md" },
+];
+
+// ── Dependency edges (claim -> depends on) ─────────────────────────────
+var edges = [
+  ["1.3",  "1.1"], ["1.3",  "1.2"],
+  ["1.4",  "1.1"], ["1.4",  "1.3"],
+  ["1.7",  "1.5"], ["1.7",  "1.6"],
+  ["1.8",  "1.4"], ["1.8",  "1.6"],
+  ["1.9",  "1.8"], ["1.9",  "1.5"],
+  ["1.10", "1.4"], ["1.10", "1.8"],
+
+  ["2.3", "2.1"], ["2.3", "2.2"],
+  ["2.4", "2.1"],
+
+  ["3.2", "3.1"],
+  ["3.3", "3.2"],
+  ["3.4", "3.2"], ["3.4", "3.3"],
+  ["3.5", "3.1"], ["3.5", "3.2"],
+
+  ["4.1", "1.9"], ["4.1", "2.3"],
+  ["4.2", "2.2"], ["4.2", "4.1"],
+  ["4.3", "2.3"], ["4.3", "4.1"],
+  ["4.4", "4.1"], ["4.4", "1.4"],
+  ["4.5", "4.1"], ["4.5", "4.4"],
+  ["4.6", "4.5"], ["4.6", "1.6"],
+  ["4.7", "3.3"], ["4.7", "4.5"],
+
+  ["5.1", "3.1"],
+  ["5.2", "3.2"],
+  ["5.3", "5.2"],
+  ["5.4", "5.2"], ["5.4", "5.3"],
+  ["5.5", "5.1"],
+  ["5.6", "3.4"], ["5.6", "5.3"],
+  ["5.7", "5.3"], ["5.7", "5.4"],
+  ["5.8", "3.2"],
+
+  ["6.1", "3.1"],
+  ["6.2", "6.1"],
+  ["6.3", "6.2"],
+  ["6.4", "1.3"],
+  ["6.5", "6.1"], ["6.5", "3.3"],
+  ["6.6", "4.3"],
+  ["6.7", "5.1"], ["6.7", "5.5"],
+  ["6.8", "3.3"], ["6.8", "6.1"],
+
+  ["7.1", "5.8"], ["7.1", "5.5"], ["7.1", "4.2"],
+  ["7.2", "4.2"], ["7.2", "2.2"],
+  ["7.3", "5.3"], ["7.3", "4.4"],
+  ["7.4", "4.3"], ["7.4", "7.2"],
+  ["7.5", "7.1"], ["7.5", "1.6"],
+  ["7.6", "5.5"], ["7.6", "5.8"],
+  ["7.7", "3.2"],
+  ["7.8", "1.8"], ["7.8", "7.1"],
+
+  ["8.1", "3.1"],
+  ["8.2", "6.4"],
+  ["8.3", "7.1"], ["8.3", "7.5"],
+  ["8.4a","7.1"], ["8.4a","8.3"],
+  ["8.4b","8.4a"],
+  ["8.5", "8.1"],
+  ["8.6", "2.4"], ["8.6", "8.1"],
+  ["8.7a","8.1"],
+  ["8.7b","8.7a"],
+  ["8.8", "8.1"],
+  ["8.9a","8.7a"], ["8.9a","8.4a"],
+  ["8.9b","8.9a"],
+
+  ["9.1", "6.1"], ["9.1", "7.1"],
+  ["9.2", "9.1"],
+  ["9.3", "6.2"], ["9.3", "9.1"],
+  ["9.4", "6.8"],
+  ["9.5", "7.1"],
+  ["9.6", "9.4"], ["9.6", "9.5"],
+
+  ["10.1", "8.8"],
+  ["10.2", "10.1"],
+  ["10.3", "10.1"],
+  ["10.4", "10.3"],
+  ["10.5", "10.1"], ["10.5", "8.6"],
+  ["10.6", "8.8"], ["10.6", "10.3"],
+
+  ["11.1", "10.6"],
+  ["11.2", "11.1"],
+  ["11.3", "11.2"], ["11.3", "2.3"],
+  ["11.4", "11.1"], ["11.4", "8.6"],
+  ["11.5", "11.4"], ["11.5", "10.5"],
+  ["11.6", "11.1"],
+
+  ["12.1", "11.2"], ["12.1", "2.2"],
+  ["12.2", "9.4"], ["12.2", "11.3"],
+  ["12.3", "9.1"],
+  ["12.4", "9.6"], ["12.4", "1.4"],
+  ["12.5", "12.4"],
+  ["12.6", "8.6"], ["12.6", "11.4"],
+  ["12.7", "10.1"], ["12.7", "11.1"],
+  ["12.8", "12.7"],
+];
+  initDashboard();
+});
+
+function initDashboard() {
+// ── Helpers ───────────────────────────────────────────────────────────
+var claimMap = {};
+claims.forEach(function(c) { claimMap[c.id] = c; });
+
+var layerNames = {
+  1:"Economics", 2:"Model Convergence", 3:"Token Physics",
+  4:"Workload Profile", 5:"Batching & Concurrency", 6:"Deep Inference",
+  7:"Swarm Build", 8:"Auditing & Evaluation", 9:"Hardware Decision",
+  10:"AI Eval Market", 11:"Healthcare Customer", 12:"R&D Platform Economics"
+};
+
+function statusFill(s) {
+  if (s === "VALIDATED") return "#2d6a4f";
+  if (s === "RESEARCH") return "#1d3557";
+  if (s === "ASSUMPTION-RESEARCH") return "#4a4a5a";
+  if (s === "ASSUMPTION-MEASURE") return "#7c5e10";
+  if (s === "MEASURE") return "#2a1a5e";
+  return "#4a4a5a";
+}
+function statusStroke(s) {
+  if (s === "VALIDATED") return "#52b788";
+  if (s === "RESEARCH") return "#3a7cc5";
+  if (s === "ASSUMPTION-RESEARCH") return "#7a7a8e";
+  if (s === "ASSUMPTION-MEASURE") return "#d4a020";
+  if (s === "MEASURE") return "#6a50b0";
+  return "#7a7a8e";
+}
+function statusLabel(s) {
+  var m = {
+    "VALIDATED":"Validated", "RESEARCH":"Research",
+    "ASSUMPTION-RESEARCH":"Assumption \u2013 Research",
+    "ASSUMPTION-MEASURE":"Assumption \u2013 Measure",
+    "MEASURE":"Measure"
+  };
+  return m[s]||s;
+}
+function statusColor(s) {
+  var m = {
+    "VALIDATED":"#40916c","RESEARCH":"#3a7cc5",
+    "ASSUMPTION-RESEARCH":"#7a7a8e","ASSUMPTION-MEASURE":"#d4a020","MEASURE":"#6a50b0"
+  };
+  return m[s]||"#7a7a8e";
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ── Layout: hierarchical by layer tiers ───────────────────────────────
+var tiers = [
+  { layers: [12],    label: "Business Thesis" },
+  { layers: [11],    label: "Customer" },
+  { layers: [10],    label: "Market" },
+  { layers: [9],     label: "Hardware Decision" },
+  { layers: [8],     label: "Auditing & Eval" },
+  { layers: [7],     label: "Swarm Build" },
+  { layers: [6],     label: "Deep Inference" },
+  { layers: [5],     label: "Concurrency" },
+  { layers: [4],     label: "Workload" },
+  { layers: [3],     label: "Token Physics" },
+  { layers: [2],     label: "Model Convergence" },
+  { layers: [1],     label: "Economics" },
+];
+
+var NODE_W = 52, NODE_H = 28, NODE_RX = 6;
+var H_GAP = 8, V_GAP = 70;
+var TIER_LABEL_W = 160;
+var LEFT_PAD = TIER_LABEL_W + 30;
+var TOP_PAD = 40;
+
+var nodePos = {};
+var tierMeta = [];
+
+var currentY = TOP_PAD;
+tiers.forEach(function(tier) {
+  var tierClaims = [];
+  tier.layers.forEach(function(L) {
+    claims.forEach(function(c) { if (c.L === L) tierClaims.push(c); });
+  });
+
+  var rowWidth = tierClaims.length * (NODE_W + H_GAP) - H_GAP;
+  var startX = LEFT_PAD + (900 - rowWidth) / 2;
+
+  tierClaims.forEach(function(c, i) {
+    nodePos[c.id] = {
+      x: startX + i * (NODE_W + H_GAP) + NODE_W / 2,
+      y: currentY + NODE_H / 2
+    };
+  });
+
+  tierMeta.push({ y: currentY, label: tier.label, claims: tierClaims, rowWidth: rowWidth });
+  currentY += NODE_H + V_GAP;
+});
+
+var SVG_W = LEFT_PAD + 900 + 40;
+var SVG_H = currentY + 20;
+
+// ── Build SVG ─────────────────────────────────────────────────────────
+var svg = document.getElementById("graph");
+svg.setAttribute("width", SVG_W);
+svg.setAttribute("height", SVG_H);
+svg.setAttribute("viewBox", "0 0 " + SVG_W + " " + SVG_H);
+
+var NS = "http://www.w3.org/2000/svg";
+
+function svgEl(tag, attrs) {
+  var el = document.createElementNS(NS, tag);
+  for (var k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+var defs = svgEl("defs", {});
+var marker = svgEl("marker", {
+  id: "arrow", viewBox: "0 0 10 6", refX: "10", refY: "3",
+  markerWidth: "8", markerHeight: "6", orient: "auto-start-reverse"
+});
+marker.appendChild(svgEl("path", { d: "M0,0 L10,3 L0,6 Z", fill: "#333" }));
+defs.appendChild(marker);
+
+var glowFilter = svgEl("filter", { id: "glow", x: "-50%", y: "-50%", width: "200%", height: "200%" });
+var feGlow = svgEl("feDropShadow", { dx: "0", dy: "0", stdDeviation: "4", "flood-color": "#52b788", "flood-opacity": "0.5" });
+glowFilter.appendChild(feGlow);
+defs.appendChild(glowFilter);
+
+var workingFilter = svgEl("filter", { id: "working-glow", x: "-50%", y: "-50%", width: "200%", height: "200%" });
+var feWorking = svgEl("feDropShadow", { dx: "0", dy: "0", stdDeviation: "5", "flood-color": "#3498db", "flood-opacity": "0.7" });
+workingFilter.appendChild(feWorking);
+defs.appendChild(workingFilter);
+
+svg.appendChild(defs);
+
+var edgeGroup = svgEl("g", { class: "edges" });
+svg.appendChild(edgeGroup);
+
+tierMeta.forEach(function(tm) {
+  var txt = svgEl("text", {
+    x: TIER_LABEL_W, y: tm.y + NODE_H / 2 + 1,
+    fill: "#555", "font-size": "12", "font-weight": "600",
+    "text-anchor": "end", "dominant-baseline": "middle",
+    "font-family": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+  });
+  txt.textContent = tm.label;
+  svg.appendChild(txt);
+});
+
+edges.forEach(function(e) {
+  var from = nodePos[e[0]];
+  var to = nodePos[e[1]];
+  if (!from || !to) return;
+
+  var x1 = to.x, y1 = to.y + NODE_H / 2;
+  var x2 = from.x, y2 = from.y - NODE_H / 2;
+  var midY = (y1 + y2) / 2;
+
+  var path = svgEl("path", {
+    d: "M" + x1 + "," + y1 + " C" + x1 + "," + midY + " " + x2 + "," + midY + " " + x2 + "," + y2,
+    stroke: "#252830", "stroke-width": "1.2", fill: "none",
+    "marker-end": "url(#arrow)", "data-from": e[1], "data-to": e[0]
+  });
+  edgeGroup.appendChild(path);
+});
+
+var nodeGroup = svgEl("g", { class: "nodes" });
+svg.appendChild(nodeGroup);
+
+var tooltip = document.getElementById("tooltip");
+var ttId = tooltip.querySelector(".tt-id");
+var ttTitle = tooltip.querySelector(".tt-title");
+var ttStatus = tooltip.querySelector(".tt-status");
+var ttDeps = tooltip.querySelector(".tt-deps");
+var ttOpenBtn = document.getElementById("ttOpenBtn");
+
+var depsOf = {};
+var feedsTo = {};
+edges.forEach(function(e) {
+  if (!depsOf[e[0]]) depsOf[e[0]] = [];
+  depsOf[e[0]].push(e[1]);
+  if (!feedsTo[e[1]]) feedsTo[e[1]] = [];
+  feedsTo[e[1]].push(e[0]);
+});
+
+function getAllAncestors(id, visited) {
+  if (!visited) visited = {};
+  if (visited[id]) return visited;
+  visited[id] = true;
+  (depsOf[id] || []).forEach(function(parent) { getAllAncestors(parent, visited); });
+  return visited;
+}
+function getAllDescendants(id, visited) {
+  if (!visited) visited = {};
+  if (visited[id]) return visited;
+  visited[id] = true;
+  (feedsTo[id] || []).forEach(function(child) { getAllDescendants(child, visited); });
+  return visited;
+}
+
+function getChainEdges(chainNodes) {
+  var edgeSet = {};
+  edges.forEach(function(e) {
+    if (chainNodes[e[0]] && chainNodes[e[1]]) {
+      edgeSet[e[0] + "|" + e[1]] = true;
+    }
+  });
+  return edgeSet;
+}
+
+var lockedClaim = null;
+
+function highlightChain(claim) {
+  var ancestors = getAllAncestors(claim.id, {});
+  var descendants = getAllDescendants(claim.id, {});
+  var chainNodes = {};
+  for (var k in ancestors) chainNodes[k] = true;
+  for (var k2 in descendants) chainNodes[k2] = true;
+
+  var chainEdges = getChainEdges(chainNodes);
+
+  var allEdges = edgeGroup.querySelectorAll("path");
+  for (var i = 0; i < allEdges.length; i++) {
+    var ef = allEdges[i].getAttribute("data-from");
+    var et = allEdges[i].getAttribute("data-to");
+    var edgeKey = et + "|" + ef;
+    if (chainEdges[edgeKey]) {
+      var childClaim = claimMap[et];
+      allEdges[i].setAttribute("stroke", childClaim ? statusStroke(childClaim.s) : statusStroke(claim.s));
+      allEdges[i].setAttribute("stroke-width", "2.5");
+      allEdges[i].setAttribute("stroke-opacity", "1");
+    } else {
+      allEdges[i].setAttribute("stroke-opacity", "0.08");
+    }
+  }
+
+  var allNodes = nodeGroup.querySelectorAll("g.node");
+  for (var j = 0; j < allNodes.length; j++) {
+    var nid = allNodes[j].getAttribute("data-id");
+    allNodes[j].setAttribute("opacity", chainNodes[nid] ? "1" : "0.12");
+  }
+
+  ttId.textContent = claim.id;
+  ttTitle.textContent = claim.t;
+  ttStatus.textContent = statusLabel(claim.s);
+  ttStatus.style.background = statusColor(claim.s);
+
+  var ancestorList = Object.keys(ancestors).filter(function(x) { return x !== claim.id; });
+  var descendantList = Object.keys(descendants).filter(function(x) { return x !== claim.id; });
+  var depText = "";
+  if (ancestorList.length > 0) depText += "Full foundation (" + ancestorList.length + "): " + ancestorList.join(", ");
+  if (descendantList.length > 0) depText += (depText ? "\n" : "") + "Enables (" + descendantList.length + "): " + descendantList.join(", ");
+  if (!depText) depText = "Foundational axiom (no dependencies)";
+  ttDeps.textContent = depText;
+}
+
+function resetHighlight() {
+  var allEdges = edgeGroup.querySelectorAll("path");
+  for (var i = 0; i < allEdges.length; i++) {
+    allEdges[i].setAttribute("stroke", "#252830");
+    allEdges[i].setAttribute("stroke-width", "1.2");
+    allEdges[i].setAttribute("stroke-opacity", "1");
+  }
+  var allNodes = nodeGroup.querySelectorAll("g.node");
+  for (var j = 0; j < allNodes.length; j++) {
+    allNodes[j].setAttribute("opacity", "1");
+  }
+}
+
+// ── Build node elements ───────────────────────────────────────────────
+claims.forEach(function(c) {
+  var pos = nodePos[c.id];
+  var g = svgEl("g", { class: "node", "data-id": c.id, cursor: "pointer" });
+
+  var rect = svgEl("rect", {
+    x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2,
+    width: NODE_W, height: NODE_H, rx: NODE_RX,
+    fill: statusFill(c.s), stroke: statusStroke(c.s), "stroke-width": "1.5"
+  });
+  if (c.s === "VALIDATED") rect.setAttribute("filter", "url(#glow)");
+  g.appendChild(rect);
+
+  var txt = svgEl("text", {
+    x: pos.x, y: pos.y + 1,
+    fill: "rgba(255,255,255,0.9)", "font-size": "10", "font-weight": "600",
+    "text-anchor": "middle", "dominant-baseline": "middle",
+    "font-family": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+  });
+  txt.textContent = c.id;
+  g.appendChild(txt);
+
+  g.addEventListener("click", (function(claim) {
+    return function(ev) {
+      ev.stopPropagation();
+      if (lockedClaim === claim.id) {
+        lockedClaim = null;
+        resetHighlight();
+        tooltip.style.display = "none";
+      } else {
+        lockedClaim = claim.id;
+        highlightChain(claim);
+        tooltip.style.display = "block";
+        positionTooltip(ev);
+      }
+    };
+  })(c));
+
+  g.addEventListener("dblclick", (function(claim) {
+    return function(ev) {
+      ev.stopPropagation();
+      lockedClaim = null;
+      resetHighlight();
+      tooltip.style.display = "none";
+      switchView("claim");
+      selectClaim(claim.id);
+    };
+  })(c));
+
+  g.addEventListener("mouseenter", (function(claim) {
+    return function(ev) {
+      if (lockedClaim) return;
+      highlightChain(claim);
+      tooltip.style.display = "block";
+      positionTooltip(ev);
+    };
+  })(c));
+
+  g.addEventListener("mousemove", function(ev) {
+    if (lockedClaim) return;
+    positionTooltip(ev);
+  });
+
+  g.addEventListener("mouseleave", function() {
+    if (lockedClaim) return;
+    tooltip.style.display = "none";
+    resetHighlight();
+  });
+
+  nodeGroup.appendChild(g);
+});
+
+ttOpenBtn.addEventListener("click", function(ev) {
+  ev.stopPropagation();
+  if (lockedClaim) {
+    var cid = lockedClaim;
+    lockedClaim = null;
+    resetHighlight();
+    tooltip.style.display = "none";
+    switchView("claim");
+    selectClaim(cid);
+  }
+});
+
+function unlock() {
+  lockedClaim = null;
+  resetHighlight();
+  tooltip.style.display = "none";
+}
+
+svg.addEventListener("click", function(ev) {
+  if (ev.target === svg || ev.target.tagName === "svg") unlock();
+});
+document.body.addEventListener("click", function(ev) {
+  if (!svg.contains(ev.target) && !tooltip.contains(ev.target)) unlock();
+});
+
+function positionTooltip(e) {
+  var pad = 16;
+  var x = e.clientX + pad;
+  var y = e.clientY + pad;
+  tooltip.style.left = x + "px";
+  tooltip.style.top = y + "px";
+  var rect = tooltip.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth - pad) {
+    tooltip.style.left = (e.clientX - rect.width - pad) + "px";
+  }
+  if (y + rect.height > window.innerHeight - pad) {
+    tooltip.style.top = (e.clientY - rect.height - pad) + "px";
+  }
+}
+
+// Stats
+var cts = { v: 0, r: 0, a: 0, m: 0 };
+claims.forEach(function(c) {
+  if (c.s === "VALIDATED") cts.v++;
+  else if (c.s.indexOf("RESEARCH") === 0) cts.r++;
+  else if (c.s.indexOf("ASSUMPTION") === 0) cts.a++;
+  else if (c.s === "MEASURE") cts.m++;
+});
+document.getElementById("sv").textContent = cts.v;
+document.getElementById("sr").textContent = cts.r;
+document.getElementById("sa").textContent = cts.a;
+document.getElementById("sm").textContent = cts.m;
+document.getElementById("st").textContent = claims.length;
+
+// ══════════════════════════════════════════════════════════════════════
+// ── VIEW SWITCHING ───────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+
+var depView = document.getElementById("depView");
+var depHeader = document.getElementById("depHeader");
+var claimView = document.getElementById("claimView");
+var viewTabs = document.querySelectorAll(".view-tab");
+
+function switchView(name) {
+  viewTabs.forEach(function(tab) {
+    tab.classList.toggle("active", tab.getAttribute("data-view") === name);
+  });
+  if (name === "dependency") {
+    depView.style.display = "";
+    depHeader.style.display = "";
+    claimView.classList.remove("active");
+    tooltip.style.display = "none";
+  } else {
+    depView.style.display = "none";
+    depHeader.style.display = "none";
+    claimView.classList.add("active");
+    tooltip.style.display = "none";
+    lockedClaim = null;
+    resetHighlight();
+  }
+}
+
+viewTabs.forEach(function(tab) {
+  tab.addEventListener("click", function() {
+    switchView(tab.getAttribute("data-view"));
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// ── CLAIM VIEW: SIDEBAR ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+
+var sidebarList = document.getElementById("sidebarList");
+var sidebarSearch = document.getElementById("sidebarSearch");
+var activeSidebarClaim = null;
+
+var layerGroups = {};
+claims.forEach(function(c) {
+  if (!layerGroups[c.L]) layerGroups[c.L] = [];
+  layerGroups[c.L].push(c);
+});
+
+var sidebarEls = {};
+[1,2,3,4,5,6,7,8,9,10,11,12].forEach(function(L) {
+  if (!layerGroups[L]) return;
+  var lbl = document.createElement("div");
+  lbl.className = "sidebar-layer-label";
+  lbl.setAttribute("data-layer", L);
+  lbl.textContent = "Layer " + L + " \u2014 " + (layerNames[L] || "");
+  sidebarList.appendChild(lbl);
+
+  layerGroups[L].forEach(function(c) {
+    var el = document.createElement("div");
+    el.className = "sidebar-claim";
+    el.setAttribute("data-id", c.id);
+
+    var dot = document.createElement("div");
+    dot.className = "sc-dot";
+    dot.style.background = statusColor(c.s);
+    el.appendChild(dot);
+
+    var idSpan = document.createElement("span");
+    idSpan.className = "sc-id";
+    idSpan.textContent = c.id;
+    el.appendChild(idSpan);
+
+    var titleSpan = document.createElement("span");
+    titleSpan.className = "sc-title";
+    titleSpan.textContent = c.t;
+    el.appendChild(titleSpan);
+
+    el.addEventListener("click", function() { selectClaim(c.id); });
+    sidebarList.appendChild(el);
+    sidebarEls[c.id] = el;
+  });
+});
+
+sidebarSearch.addEventListener("input", function() {
+  var q = sidebarSearch.value.toLowerCase();
+  var visibleLayers = {};
+
+  claims.forEach(function(c) {
+    var match = !q || c.id.toLowerCase().indexOf(q) !== -1 || c.t.toLowerCase().indexOf(q) !== -1;
+    sidebarEls[c.id].style.display = match ? "" : "none";
+    if (match) visibleLayers[c.L] = true;
+  });
+
+  var labels = sidebarList.querySelectorAll(".sidebar-layer-label");
+  for (var i = 0; i < labels.length; i++) {
+    var layerNum = parseInt(labels[i].getAttribute("data-layer"));
+    labels[i].style.display = visibleLayers[layerNum] ? "" : "none";
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// ── CLAIM VIEW: SELECT & LOAD ───────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+
+var evidencePanel = document.getElementById("evidencePanel");
+var logBody = document.getElementById("logBody");
+var logCount = document.getElementById("logCount");
+
+function selectClaim(id) {
+  activeSidebarClaim = id;
+
+  Object.keys(sidebarEls).forEach(function(k) {
+    sidebarEls[k].classList.toggle("active", k === id);
+  });
+
+  if (sidebarEls[id]) {
+    sidebarEls[id].scrollIntoView({ block: "nearest" });
+  }
+
+  var claim = claimMap[id];
+  if (!claim) return;
+
+  loadEvidence(claim);
+  loadResearchLog(claim);
+
+  // Fetch events once for both research log rendering and citations
+  fetch(API_BASE + "/api/events/" + claim.id).then(function(r) {
+    if (!r.ok) return null;
+    return r.json();
+  }).then(function(data) {
+    if (data) renderCitations(data.events || [], claim);
+  }).catch(function() {});
+}
+
+// ── Markdown renderer ────────────────────────────────────────────────
+function renderMarkdown(md) {
+  var lines = md.split("\n");
+  var html = "";
+  var inCodeBlock = false;
+  var inList = false;
+  var listType = "";
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    if (line.match(/^```/)) {
+      if (inCodeBlock) {
+        html += "</pre>";
+        inCodeBlock = false;
+      } else {
+        if (inList) { html += "</" + listType + ">"; inList = false; }
+        html += "<pre>";
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    if (inCodeBlock) {
+      html += escapeHtml(line) + "\n";
+      continue;
+    }
+
+    if (inList && !line.match(/^\s*[-*]\s/) && !line.match(/^\s*\d+\.\s/) && line.trim() !== "") {
+      html += "</" + listType + ">";
+      inList = false;
+    }
+
+    if (line.trim() === "") {
+      if (inList) { html += "</" + listType + ">"; inList = false; }
+      continue;
+    }
+
+    var hMatch = line.match(/^(#{1,3})\s+(.+)/);
+    if (hMatch) {
+      var level = hMatch[1].length;
+      html += "<h" + level + ">" + inlineFormat(hMatch[2]) + "</h" + level + ">";
+      continue;
+    }
+
+    if (line.match(/^---+$/)) {
+      html += "<hr>";
+      continue;
+    }
+
+    var ulMatch = line.match(/^\s*[-*]\s+(.+)/);
+    if (ulMatch) {
+      if (!inList || listType !== "ul") {
+        if (inList) html += "</" + listType + ">";
+        html += "<ul>";
+        inList = true;
+        listType = "ul";
+      }
+      html += "<li>" + inlineFormat(ulMatch[1]) + "</li>";
+      continue;
+    }
+
+    var olMatch = line.match(/^\s*\d+\.\s+(.+)/);
+    if (olMatch) {
+      if (!inList || listType !== "ol") {
+        if (inList) html += "</" + listType + ">";
+        html += "<ol>";
+        inList = true;
+        listType = "ol";
+      }
+      html += "<li>" + inlineFormat(olMatch[1]) + "</li>";
+      continue;
+    }
+
+    var bqMatch = line.match(/^>\s?(.*)/);
+    if (bqMatch) {
+      html += "<blockquote>" + inlineFormat(bqMatch[1]) + "</blockquote>";
+      continue;
+    }
+
+    html += "<p>" + inlineFormat(line) + "</p>";
+  }
+
+  if (inList) html += "</" + listType + ">";
+  if (inCodeBlock) html += "</pre>";
+  return html;
+}
+
+function inlineFormat(text) {
+  // Escape first, then apply formatting
+  text = escapeHtml(text);
+  text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  text = text.replace(/`(.+?)`/g, "<code>$1</code>");
+  return text;
+}
+
+// ── Load evidence file ───────────────────────────────────────────────
+function loadEvidence(claim) {
+  evidencePanel.textContent = "";
+  var loading = document.createElement("div");
+  loading.className = "ev-loading";
+  loading.textContent = "Loading evidence\u2026";
+  evidencePanel.appendChild(loading);
+
+  var url = API_BASE + "/api/evidence/" + claim.f.replace("evidence/", "");
+
+  fetch(url).then(function(r) {
+    if (!r.ok) throw new Error("Not found");
+    return r.text();
+  }).then(function(md) {
+    var issueMatch = md.match(/\*\*GitHub Issue:\*\*\s*#(\d+)/);
+    var issueNum = issueMatch ? issueMatch[1] : null;
+
+    // Strip structured header fields from body to avoid duplication
+    var bodyMd = md;
+    bodyMd = bodyMd.replace(/^#\s+.+\n*/m, "");
+    bodyMd = bodyMd.replace(/\*\*Claim:\*\*\s*.+\n*/m, "");
+    bodyMd = bodyMd.replace(/\*\*Status:\*\*\s*.+\n*/m, "");
+    bodyMd = bodyMd.replace(/\*\*GitHub Issue:\*\*\s*.+\n*/m, "");
+
+    evidencePanel.textContent = "";
+
+    // Build header
+    var header = document.createElement("div");
+    header.className = "ev-header";
+
+    var idDiv = document.createElement("div");
+    idDiv.className = "ev-id";
+    idDiv.textContent = "Claim " + claim.id + " \u00b7 Layer " + claim.L + " \u2014 " + (layerNames[claim.L] || "");
+    header.appendChild(idDiv);
+
+    var titleDiv = document.createElement("div");
+    titleDiv.className = "ev-title";
+    titleDiv.textContent = claim.t;
+    header.appendChild(titleDiv);
+
+    var meta = document.createElement("div");
+    meta.className = "ev-meta";
+
+    // Activity badge (before status badge)
+    var actState = activeClaims[claim.id] ? "active" : (
+      // Check if claim is in queue at all
+      (function() {
+        try { var q = document.querySelector("[data-queue-" + claim.id.replace(".", "-") + "]"); return q ? "queued" : "inactive"; }
+        catch(e) { return "inactive"; }
+      })()
+    );
+    // Simpler: fetch from API inline or use cached queue data
+    var actBadge = document.createElement("span");
+    actBadge.className = "ev-activity-badge " + (activeClaims[claim.id] ? "active" : "inactive");
+    actBadge.id = "activity-badge-" + claim.id;
+    var actDot = document.createElement("span");
+    actDot.className = "badge-dot";
+    actBadge.appendChild(actDot);
+    actBadge.appendChild(document.createTextNode(activeClaims[claim.id] ? "Active" : "Inactive"));
+    meta.appendChild(actBadge);
+
+    // Check queue for "queued" state (not active but in queue)
+    fetch(API_BASE + "/api/queue/" + claim.id).then(function(r) {
+      if (!r.ok) return;
+      return r.json();
+    }).then(function(entry) {
+      if (!entry) return;
+      var el = document.getElementById("activity-badge-" + claim.id);
+      if (!el) return;
+      if (activeClaims[claim.id]) {
+        el.className = "ev-activity-badge active";
+        el.lastChild.textContent = "Active";
+      } else {
+        el.className = "ev-activity-badge queued";
+        el.lastChild.textContent = "Queued";
+      }
+    }).catch(function() {});
+
+    var badge = document.createElement("span");
+    badge.className = "ev-status-badge";
+    badge.style.background = statusColor(claim.s);
+    badge.textContent = statusLabel(claim.s);
+    meta.appendChild(badge);
+
+    if (issueNum) {
+      var link = document.createElement("a");
+      link.className = "ev-issue-link";
+      link.href = "https://github.com/onthemarkdata/ai-factory-research/issues/" + issueNum;
+      link.target = "_blank";
+      link.textContent = "GitHub Issue #" + issueNum;
+      meta.appendChild(link);
+    }
+
+    // Cost badge
+    fetch(API_BASE + "/api/tokens/" + claim.id).then(function(r) {
+      if (!r.ok) return null;
+      return r.json();
+    }).then(function(tokenData) {
+      if (!tokenData || !tokenData.totals) return;
+      var costBadge = document.createElement("span");
+      costBadge.className = "ev-cost-badge";
+      costBadge.textContent = "$" + tokenData.totals.total_cost_usd.toFixed(4);
+      meta.appendChild(costBadge);
+      renderCostSection(tokenData, claim);
+    }).catch(function() {});
+
+    header.appendChild(meta);
+    evidencePanel.appendChild(header);
+
+    // Build body using rendered markdown
+    var body = document.createElement("div");
+    body.className = "ev-body";
+    // Note: content comes from local project files we control, not user-submitted web content.
+    // All text is escaped via escapeHtml before being placed in HTML context.
+    body.innerHTML = renderMarkdown(bodyMd.trim());
+    evidencePanel.appendChild(body);
+  }).catch(function() {
+    evidencePanel.textContent = "";
+    var empty = document.createElement("div");
+    empty.className = "ev-empty";
+    empty.textContent = "Could not load evidence file for claim " + claim.id + ".";
+    evidencePanel.appendChild(empty);
+  });
+}
+
+// ── Render citations section ─────────────────────────────────────────
+var hierarchyLabels = {
+  1: "Direct Measurement",
+  2: "Official Docs",
+  3: "Derived Calc",
+  4: "Expert Consensus",
+  5: "Single Expert",
+  6: "Community Report"
+};
+
+function renderCitations(events, claim) {
+  var sources = events.filter(function(ev) { return ev.type === "source_reviewed" || ev.type === "citation_backfill"; });
+
+  // No events at all — claim hasn't been through the feedback loop
+  if (events.length === 0) return;
+
+  // Remove any existing citations section (in case of re-render)
+  var existingOld = evidencePanel.querySelector(".ev-citations");
+  if (existingOld) existingOld.remove();
+
+  // Events exist but no source_reviewed — show empty state
+  if (sources.length === 0) {
+    var section = document.createElement("div");
+    section.className = "ev-citations";
+    var heading = document.createElement("h2");
+    heading.textContent = "Citations";
+    section.appendChild(heading);
+    var empty = document.createElement("div");
+    empty.className = "ev-empty";
+    empty.style.padding = "20px 0";
+    empty.textContent = "No structured citations logged. Sources in the evidence text above have not been recorded as source_reviewed events and carry Level 6 (uncited) credibility.";
+    section.appendChild(empty);
+    evidencePanel.appendChild(section);
+    return;
+  }
+
+  // Deduplicate by URL, keep latest
+  var seen = {};
+  sources.forEach(function(ev) {
+    var url = (ev.data && ev.data.url) || "";
+    if (url) seen[url] = ev;
+  });
+  var unique = Object.keys(seen).map(function(url) { return seen[url]; });
+
+  // Sort: strongest hierarchy first (1 > 6), then newest first
+  unique.sort(function(a, b) {
+    var la = (a.data.hierarchy_level || 6);
+    var lb = (b.data.hierarchy_level || 6);
+    if (la !== lb) return la - lb;
+    return (b.data.publication_date || "").localeCompare(a.data.publication_date || "");
+  });
+
+  var section = document.createElement("div");
+  section.className = "ev-citations";
+
+  var heading = document.createElement("h2");
+  heading.textContent = "Citations (" + unique.length + ")";
+  section.appendChild(heading);
+
+  unique.forEach(function(ev) {
+    var d = ev.data;
+    var card = document.createElement("div");
+    card.className = "citation-card";
+
+    // Title row: link + level badge
+    var titleRow = document.createElement("div");
+    titleRow.className = "citation-title-row";
+
+    var link = document.createElement("a");
+    link.className = "citation-link";
+    link.href = d.url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = d.title || d.url;
+    titleRow.appendChild(link);
+
+    if (d.hierarchy_level) {
+      var lvl = document.createElement("span");
+      lvl.className = "citation-level citation-level-" + d.hierarchy_level;
+      lvl.textContent = "L" + d.hierarchy_level + " " + (hierarchyLabels[d.hierarchy_level] || "");
+      titleRow.appendChild(lvl);
+    }
+
+    card.appendChild(titleRow);
+
+    // Meta row: date, supports/contradicts, confidence
+    var meta = document.createElement("div");
+    meta.className = "citation-meta";
+
+    if (d.publication_date) {
+      var dateSpan = document.createElement("span");
+      dateSpan.textContent = d.publication_date;
+      meta.appendChild(dateSpan);
+    }
+
+    if (d.supports_or_contradicts) {
+      var scSpan = document.createElement("span");
+      scSpan.className = d.supports_or_contradicts === "supports" ? "citation-supports" : "citation-contradicts";
+      scSpan.textContent = d.supports_or_contradicts.toUpperCase();
+      meta.appendChild(scSpan);
+    }
+
+    if (d.confidence) {
+      var confSpan = document.createElement("span");
+      confSpan.textContent = "Confidence: " + d.confidence;
+      meta.appendChild(confSpan);
+    }
+
+    card.appendChild(meta);
+
+    // Finding (collapsible)
+    if (d.finding) {
+      var finding = document.createElement("div");
+      finding.className = "citation-finding";
+      finding.textContent = d.finding;
+      finding.addEventListener("click", function() { finding.classList.toggle("expanded"); });
+      card.appendChild(finding);
+    }
+
+    section.appendChild(card);
+  });
+
+  evidencePanel.appendChild(section);
+}
+
+// ── Render cost section ─────────────────────────────────────────────
+function renderCostSection(tokenData, claim) {
+  var existing = evidencePanel.querySelector(".ev-cost-section");
+  if (existing) existing.remove();
+  if (!tokenData || !tokenData.totals) return;
+  var t = tokenData.totals;
+  if (t.total_cost_usd === 0 && t.input_tokens === 0 && t.output_tokens === 0) return;
+
+  var section = document.createElement("div");
+  section.className = "ev-cost-section";
+
+  var heading = document.createElement("h2");
+  heading.textContent = "Token Usage & Cost";
+  section.appendChild(heading);
+
+  var grid = document.createElement("div");
+  grid.className = "cost-summary-grid";
+
+  var stats = [
+    { value: "$" + t.total_cost_usd.toFixed(4), label: "Total Cost" },
+    { value: formatTokenCount(t.input_tokens), label: "Input Tokens" },
+    { value: formatTokenCount(t.output_tokens), label: "Output Tokens" },
+    { value: formatTokenCount(t.cache_read_tokens), label: "Cache Reads" },
+    { value: formatTokenCount(t.cache_write_tokens), label: "Cache Writes" },
+  ];
+  stats.forEach(function(s) {
+    var card = document.createElement("div");
+    card.className = "cost-stat";
+    var val = document.createElement("div");
+    val.className = "cost-stat-value";
+    val.textContent = s.value;
+    card.appendChild(val);
+    var lbl = document.createElement("div");
+    lbl.className = "cost-stat-label";
+    lbl.textContent = s.label;
+    card.appendChild(lbl);
+    grid.appendChild(card);
+  });
+  section.appendChild(grid);
+
+  var phases = tokenData.by_phase;
+  if (phases && Object.keys(phases).length > 0) {
+    var table = document.createElement("table");
+    table.className = "cost-phase-table";
+    var thead = document.createElement("thead");
+    var headerRow = document.createElement("tr");
+    ["Phase", "Input", "Output", "Cache Read", "Cache Write", "Cost"].forEach(function(h) {
+      var th = document.createElement("th");
+      th.textContent = h;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    Object.keys(phases).forEach(function(phase) {
+      var p = phases[phase];
+      var tr = document.createElement("tr");
+      var cells = [
+        escapeHtml(phase),
+        formatTokenCount(p.input_tokens),
+        formatTokenCount(p.output_tokens),
+        formatTokenCount(p.cache_read_tokens),
+        formatTokenCount(p.cache_write_tokens),
+        "$" + p.total_cost_usd.toFixed(4)
+      ];
+      cells.forEach(function(text, i) {
+        var td = document.createElement("td");
+        if (i > 0) td.className = "cost-value";
+        td.textContent = text;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    section.appendChild(table);
+  }
+
+  evidencePanel.appendChild(section);
+}
+
+function formatTokenCount(n) {
+  if (!n) return "0";
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+  return n.toString();
+}
+
+// ── Load research log ────────────────────────────────────────────────
+function loadResearchLog(claim) {
+  logBody.textContent = "";
+  var loading = document.createElement("div");
+  loading.className = "log-empty";
+  loading.textContent = "Loading\u2026";
+  logBody.appendChild(loading);
+  logCount.style.display = "none";
+
+  var url = API_BASE + "/api/events/" + claim.id;
+
+  fetch(url).then(function(r) {
+    if (!r.ok) throw new Error("Not found");
+    return r.json();
+  }).then(function(data) {
+    renderResearchLog(data, claim);
+  }).catch(function() {
+    logBody.textContent = "";
+    var empty = document.createElement("div");
+    empty.className = "log-empty";
+    empty.textContent = "No research log yet for claim " + claim.id + ".\n\nThis claim has not been processed by the feedback loop.";
+    logBody.appendChild(empty);
+    logCount.style.display = "none";
+  });
+}
+
+function renderResearchLog(data, claim) {
+  var events = data.events || [];
+  logCount.textContent = events.length;
+  logCount.style.display = "";
+  logBody.textContent = "";
+
+  if (events.length === 0) {
+    var empty = document.createElement("div");
+    empty.className = "log-empty";
+    empty.textContent = "Research log exists but has no events.";
+    logBody.appendChild(empty);
+    return;
+  }
+
+  // Extract latest verdicts for summary table
+  var latestVerdicts = {};
+  events.forEach(function(ev) {
+    if (ev.type === "verdict_issued") {
+      latestVerdicts[ev.agent] = ev;
+    }
+  });
+
+  if (Object.keys(latestVerdicts).length > 0) {
+    var summary = document.createElement("div");
+    summary.className = "verdict-summary";
+
+    var summaryTitle = document.createElement("div");
+    summaryTitle.className = "verdict-summary-title";
+    summaryTitle.textContent = "Latest Verdicts";
+    summary.appendChild(summaryTitle);
+
+    var agentOrder = ["researcher","staleness_checker","dependencies","skeptic","proponent","staff_engineer","simplifier","worth_pursuing","critical_assumption"];
+    agentOrder.forEach(function(agent) {
+      var v = latestVerdicts[agent];
+      if (!v) return;
+      var verdict = v.data.verdict;
+      var cls = isPassVerdict(agent, verdict) ? "verdict-pass" : (isBlockVerdict(agent, verdict) ? "verdict-block" : "verdict-info");
+
+      var row = document.createElement("div");
+      row.className = "verdict-row";
+
+      var agentSpan = document.createElement("span");
+      agentSpan.className = "verdict-agent";
+      agentSpan.textContent = formatAgent(agent);
+      row.appendChild(agentSpan);
+
+      var badgeSpan = document.createElement("span");
+      badgeSpan.className = "verdict-badge " + cls;
+      badgeSpan.textContent = verdict;
+      row.appendChild(badgeSpan);
+
+      summary.appendChild(row);
+    });
+
+    logBody.appendChild(summary);
+  }
+
+  // Render events in reverse chronological order
+  var lastIter = -1;
+  var reversed = events.slice().reverse();
+
+  reversed.forEach(function(ev) {
+    if (ev.iteration !== lastIter) {
+      var sep = document.createElement("div");
+      sep.className = "tl-iter-sep";
+      sep.textContent = "Iteration " + (ev.iteration + 1);
+      logBody.appendChild(sep);
+      lastIter = ev.iteration;
+    }
+
+    var card = document.createElement("div");
+    card.className = "tl-event";
+    card.setAttribute("data-type", ev.type);
+    card.addEventListener("click", function() { card.classList.toggle("expanded"); });
+
+    var top = document.createElement("div");
+    top.className = "tl-top";
+
+    var typeSpan = document.createElement("span");
+    typeSpan.className = "tl-type";
+    typeSpan.textContent = formatEventType(ev.type);
+    top.appendChild(typeSpan);
+
+    var agentBadge = document.createElement("span");
+    agentBadge.className = "tl-agent";
+    agentBadge.textContent = formatAgent(ev.agent);
+    top.appendChild(agentBadge);
+
+    var iterSpan = document.createElement("span");
+    iterSpan.className = "tl-iter";
+    iterSpan.textContent = "iter " + (ev.iteration + 1);
+    top.appendChild(iterSpan);
+
+    var timeSpan = document.createElement("span");
+    timeSpan.className = "tl-time";
+    timeSpan.textContent = relativeTime(ev.timestamp);
+    top.appendChild(timeSpan);
+
+    card.appendChild(top);
+
+    var detail = document.createElement("div");
+    detail.className = "tl-detail";
+    var detailContent = formatEventDetail(ev);
+    if (detailContent && detailContent.html) {
+      // Content is pre-escaped via escapeHtml() in formatEventDetail — only contains safe <a> tags we constructed
+      detail.innerHTML = detailContent.content;
+    } else {
+      detail.textContent = typeof detailContent === "string" ? detailContent : (detailContent.content || "");
+    }
+    card.appendChild(detail);
+
+    logBody.appendChild(card);
+  });
+}
+
+var passVerdicts = {
+  researcher: ["SUFFICIENT_FOR_PROMOTION"],
+  staleness_checker: ["EVIDENCE_CURRENT", "STALE_BUT_CONCLUSION_LIKELY_HOLDS"],
+  dependencies: ["DEPENDENCIES_CLEAN"],
+  skeptic: ["CLAIM_WITHSTANDS_CRITIQUE"],
+  proponent: ["STRONG_CASE_FOR_CLAIM", "DEFENSIBLE_WITH_CAVEATS"],
+  staff_engineer: ["ENGINEERING_GRADE", "DIRECTIONALLY_CORRECT_BUT_SOFT"],
+  simplifier: ["APPROPRIATELY_SCOPED", "COULD_BE_SIMPLER"],
+  worth_pursuing: ["HIGH_VALUE_PURSUE", "MODERATE_VALUE_CONTINUE"],
+  critical_assumption: ["CRITICAL_PATH", "SUPPORTING_BUT_NOT_BLOCKING", "ISOLATED_LOW_IMPACT"]
+};
+
+var blockVerdicts = {
+  researcher: ["NEEDS_MORE_EVIDENCE", "CANNOT_VALIDATE_VIA_RESEARCH"],
+  staleness_checker: ["MATERIALLY_STALE_NEEDS_UPDATE"],
+  dependencies: ["UNVALIDATED_DEPS_FOUND", "CIRCULAR_REASONING_FOUND"],
+  skeptic: ["MATERIAL_COUNTERARGUMENT_UNADDRESSED", "CLAIM_LIKELY_FALSE"],
+  proponent: ["WEAK_CASE_CANNOT_DEFEND"],
+  staff_engineer: ["WOULD_NOT_BUILD_ON_THIS"],
+  simplifier: ["OVERCOMPLICATED_NEEDS_RESTRUCTURE"],
+  worth_pursuing: ["LOW_VALUE_CONSIDER_DEFERRING"]
+};
+
+function isPassVerdict(agent, verdict) {
+  return (passVerdicts[agent] || []).indexOf(verdict) !== -1;
+}
+function isBlockVerdict(agent, verdict) {
+  return (blockVerdicts[agent] || []).indexOf(verdict) !== -1;
+}
+
+function formatAgent(agent) {
+  return (agent || "").replace(/_/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+}
+
+function formatEventType(type) {
+  var m = {
+    search_executed: "Search",
+    source_reviewed: "Source",
+    staleness_checked: "Staleness",
+    verdict_issued: "Verdict",
+    evidence_appended: "Evidence",
+    debate_mediated: "Debate",
+    convergence_checked: "Convergence",
+    citation_backfill: "Citation (Backfill)",
+    token_usage: "Token Usage"
+  };
+  return m[type] || type;
+}
+
+function formatEventDetail(ev) {
+  var d = ev.data;
+  if (!d) return "No data";
+
+  switch (ev.type) {
+    case "search_executed":
+      return "Query: " + (d.query || "") + "\nSources found: " + (d.sources_found || 0);
+    case "source_reviewed":
+    case "citation_backfill":
+      var parts = [];
+      if (ev.type === "citation_backfill") parts.push("[BACKFILL]");
+      if (d.title) parts.push("Title: " + escapeHtml(d.title));
+      if (d.url) parts.push('URL: <a href="' + escapeHtml(d.url) + '" target="_blank" rel="noopener" style="color:#7cacf0">' + escapeHtml(d.url) + '</a>');
+      if (d.publication_date) parts.push("Date: " + escapeHtml(d.publication_date));
+      if (d.hierarchy_level) parts.push("Source Level: " + d.hierarchy_level);
+      if (d.supports_or_contradicts) parts.push(escapeHtml(d.supports_or_contradicts.toUpperCase()));
+      if (d.confidence) parts.push("Confidence: " + escapeHtml(d.confidence));
+      if (d.finding) parts.push("\n" + escapeHtml(d.finding));
+      return {html: true, content: parts.join("\n")};
+    case "staleness_checked":
+      return "Source: " + (d.source_url || "N/A") + "\nDate: " + (d.original_date || "unknown") + "\nVerdict: " + (d.verdict || "") + "\n\n" + (d.notes || "");
+    case "verdict_issued":
+      return "Verdict: " + (d.verdict || "") + "\n\n" + (d.summary || "");
+    case "evidence_appended":
+      return d.summary || "Evidence appended";
+    case "debate_mediated":
+      return "From: " + formatAgent(d.from_agent) + " \u2192 To: " + formatAgent(d.to_agent) + "\n\n" + (d.exchange_summary || "");
+    case "convergence_checked":
+      var parts2 = ["Converged: " + (d.converged ? "YES" : "NO")];
+      if (d.weakest_link) parts2.push("Weakest link: " + d.weakest_link);
+      if (d.focused_directive) parts2.push("Directive: " + d.focused_directive);
+      if (d.blocking_verdicts) parts2.push("\nBlocking: " + JSON.stringify(d.blocking_verdicts, null, 2));
+      return parts2.join("\n");
+    case "token_usage":
+      var parts3 = [];
+      if (d.phase) parts3.push("Phase: " + d.phase);
+      if (d.model) parts3.push("Model: " + d.model);
+      if (d.total_cost_usd !== undefined) parts3.push("Cost: $" + d.total_cost_usd.toFixed(4));
+      if (d.input_tokens) parts3.push("Input: " + d.input_tokens);
+      if (d.output_tokens) parts3.push("Output: " + d.output_tokens);
+      if (d.cache_read_tokens) parts3.push("Cache reads: " + d.cache_read_tokens);
+      if (d.cache_write_tokens) parts3.push("Cache writes: " + d.cache_write_tokens);
+      if (d.summary_only) parts3.push("[Summary only]");
+      return parts3.join("\n");
+    default:
+      return JSON.stringify(d, null, 2);
+  }
+}
+
+function relativeTime(ts) {
+  try {
+    var d = new Date(ts);
+    var now = new Date();
+    var diff = Math.floor((now - d) / 1000);
+    if (diff < 60) return "just now";
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+    if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+    return Math.floor(diff / 86400) + "d ago";
+  } catch(e) {
+    return ts || "";
+  }
+}
+
+// ── Active claim indicators ─────────────────────────────────────────
+
+var ACTIVE_STATES = ["phase1-in-progress", "phase2-in-progress", "mediating"];
+var activeClaims = {};
+
+function applyActiveIndicators(queueData) {
+  var claims_map = queueData.claims || {};
+  var newActive = {};
+  for (var cid in claims_map) {
+    if (ACTIVE_STATES.indexOf(claims_map[cid].queue_state) !== -1) {
+      newActive[cid] = claims_map[cid].queue_state;
+    }
+  }
+  activeClaims = newActive;
+  refreshActiveVisuals();
+}
+
+function refreshActiveVisuals() {
+  // Dependency view: SVG nodes
+  var allNodes = nodeGroup.querySelectorAll("g.node");
+  allNodes.forEach(function(g) {
+    var id = g.getAttribute("data-id");
+    var rect = g.querySelector("rect");
+    if (!rect) return;
+    if (activeClaims[id]) {
+      rect.setAttribute("filter", "url(#working-glow)");
+      rect.style.animation = "pulse-node 1.5s ease-in-out infinite";
+    } else {
+      // Restore original filter
+      var claim = claims.find(function(c) { return c.id === id; });
+      if (claim && claim.s === "VALIDATED") {
+        rect.setAttribute("filter", "url(#glow)");
+      } else {
+        rect.removeAttribute("filter");
+      }
+      rect.style.animation = "";
+    }
+  });
+
+  // Claim view: sidebar items
+  for (var cid in sidebarEls) {
+    if (activeClaims[cid]) {
+      sidebarEls[cid].classList.add("working");
+    } else {
+      sidebarEls[cid].classList.remove("working");
+    }
+  }
+}
+
+// Fetch queue state on load
+fetch(API_BASE + "/api/queue").then(function(r) {
+  return r.json();
+}).then(function(data) {
+  applyActiveIndicators(data);
+}).catch(function() {});
+
+// ── SSE live updates ────────────────────────────────────────────────
+(function connectSSE() {
+  var es = new EventSource(API_BASE + "/api/stream");
+  var indicator = document.createElement("div");
+  indicator.style.cssText = "position:fixed;bottom:8px;right:8px;padding:4px 10px;border-radius:4px;font-size:11px;z-index:999;background:#2d6a4f;color:#fff;opacity:0.8;";
+  indicator.textContent = "LIVE";
+  indicator.style.display = "none";
+  document.body.appendChild(indicator);
+
+  es.addEventListener("connected", function() {
+    indicator.style.display = "block";
+  });
+
+  es.addEventListener("event_inserted", function(e) {
+    var data = JSON.parse(e.data);
+    // If we're viewing this claim, refresh the research log
+    if (selectedClaim && data.claim_id === selectedClaim.id) {
+      loadResearchLog(selectedClaim);
+    }
+    // Flash the indicator
+    indicator.style.background = "#1d3557";
+    indicator.textContent = "LIVE \u2022 " + data.claim_id;
+    setTimeout(function() { indicator.style.background = "#2d6a4f"; indicator.textContent = "LIVE"; }, 1500);
+  });
+
+  es.addEventListener("queue_updated", function(e) {
+    var data = JSON.parse(e.data);
+    // Update active claim tracking
+    if (ACTIVE_STATES.indexOf(data.queue_state) !== -1) {
+      activeClaims[data.claim_id] = data.queue_state;
+    } else {
+      delete activeClaims[data.claim_id];
+    }
+    refreshActiveVisuals();
+    indicator.style.background = "#6c757d";
+    indicator.textContent = "LIVE \u2022 " + data.claim_id + ":" + data.queue_state;
+    setTimeout(function() { indicator.style.background = "#2d6a4f"; indicator.textContent = "LIVE"; }, 1500);
+  });
+
+  es.onerror = function() {
+    indicator.style.background = "#c0392b";
+    indicator.textContent = "DISCONNECTED";
+    setTimeout(function() {
+      es.close();
+      connectSSE();
+    }, 5000);
+  };
+})();
+
+} // end initDashboard
+</script>
+</body>
+</html>

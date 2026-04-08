@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import logging
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 
@@ -63,6 +63,18 @@ class EventType(str, Enum):
     propagation_triggered = "propagation_triggered"
     decomposition_created = "decomposition_created"
     decomposition_audit = "decomposition_audit"
+    # Agent lifecycle events fired incrementally during `petri seed`
+    seed_started = "seed_started"
+    clarifying_questions_requested = "clarifying_questions_requested"
+    clarifying_questions_received = "clarifying_questions_received"
+    clarifying_questions_failed = "clarifying_questions_failed"
+    clarification_recorded = "clarification_recorded"
+    clarification_skipped = "clarification_skipped"
+    decomposition_started = "decomposition_started"
+    decomposition_completed = "decomposition_completed"
+    decomposition_failed = "decomposition_failed"
+    node_created = "node_created"
+    colony_approved = "colony_approved"
 
 
 class HierarchyLevel(int, Enum):
@@ -159,6 +171,20 @@ class DecompositionAuditData(BaseModel):
     should_restructure: bool = False
 
 
+class AgentStepData(BaseModel):
+    """Permissive payload for agent lifecycle events emitted during seed.
+
+    Used by every agent-step event the seed CLI logs incrementally
+    (seed_started, clarifying_questions_requested/received/failed,
+    clarification_recorded/skipped, decomposition_started/completed/failed,
+    node_created, colony_approved). Fields are not constrained — these
+    events log whatever context the caller has at the moment, and the
+    audit log treats them as opaque records.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
 # ── Event Data Dispatch ──────────────────────────────────────────────────
 
 
@@ -174,6 +200,20 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "propagation_triggered": PropagationTriggeredData,
     "decomposition_created": DecompositionCreatedData,
     "decomposition_audit": DecompositionAuditData,
+    # Agent lifecycle events fired incrementally by `petri seed` so the
+    # on-disk event log reflects what each agent has done at the moment
+    # the work happens (instead of being batched at the end).
+    "seed_started": AgentStepData,
+    "clarifying_questions_requested": AgentStepData,
+    "clarifying_questions_received": AgentStepData,
+    "clarifying_questions_failed": AgentStepData,
+    "clarification_recorded": AgentStepData,
+    "clarification_skipped": AgentStepData,
+    "decomposition_started": AgentStepData,
+    "decomposition_completed": AgentStepData,
+    "decomposition_failed": AgentStepData,
+    "node_created": AgentStepData,
+    "colony_approved": AgentStepData,
 }
 
 
@@ -564,9 +604,18 @@ def validate_slug(slug: str) -> bool:
 
 @runtime_checkable
 class InferenceProvider(Protocol):
-    """Abstract interface for LLM inference. Injected by the harness or CLI."""
+    """Abstract interface for LLM inference. Injected by the harness or CLI.
 
-    def assess_claim_substance(self, claim: str) -> dict:
+    Methods that issue LLM calls accept an optional ``on_progress`` callback;
+    when supplied, providers stream the model's text to it as it is
+    generated so the caller can display live progress.
+    """
+
+    def assess_claim_substance(
+        self,
+        claim: str,
+        on_progress: "Optional[Callable[[str], None]]" = None,
+    ) -> dict:
         """Decide whether a claim is substantive enough to warrant decomposition.
 
         Returns a dict with keys: is_substantive (bool), reason (str),
@@ -576,7 +625,10 @@ class InferenceProvider(Protocol):
         ...
 
     def generate_clarifying_questions(
-        self, claim: str, max_questions: int = 5
+        self,
+        claim: str,
+        max_questions: int = 5,
+        on_progress: "Optional[Callable[[str], None]]" = None,
     ) -> list[ClarifyingQuestion]:
         """Generate claim-specific clarifying questions."""
         ...
@@ -586,12 +638,34 @@ class InferenceProvider(Protocol):
         claim: str,
         clarifications: list[ClarifyingQuestion],
         guidance: str = "",
+        max_premises: int = 5,
+        on_progress: "Optional[Callable[[str], None]]" = None,
     ) -> DecompositionResult:
         """Decompose a claim into nodes and edges.
 
         ``guidance`` is optional free-text feedback from a re-roll request;
         when non-empty it should be threaded into the model context so the
         next decomposition reflects the user's refinement.
+
+        ``max_premises`` is the per-layer cap. The provider should ask the
+        model to brainstorm broadly and then return only the top N most
+        important premises so it doesn't bias toward whatever's salient.
+        """
+        ...
+
+    def decompose_why(
+        self,
+        premise: str,
+        parent_level: int,
+        parent_seq: int,
+        max_premises: int = 5,
+        on_progress: "Optional[Callable[[str], None]]" = None,
+    ) -> list[dict]:
+        """Five Whys: ask 'why is this true?' for a single premise.
+
+        ``max_premises`` caps how many sub-premises the model should
+        return. As with ``decompose_claim`` the provider should ask the
+        model to brainstorm and prioritise before selecting the top N.
         """
         ...
 

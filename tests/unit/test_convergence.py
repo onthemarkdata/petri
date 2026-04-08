@@ -32,9 +32,11 @@ def agent_roles():
 
 class TestLoadAgentRoles:
     def test_loads_default_agents(self, agent_roles):
-        assert len(agent_roles) == 13
+        # 13 original agents + socratic_questioner (exploratory phase 0)
+        assert len(agent_roles) == 14
         assert "investigator" in agent_roles
         assert "node_lead" in agent_roles
+        assert "socratic_questioner" in agent_roles
 
     def test_leads_are_non_blocking(self, agent_roles):
         for name in ("decomposition_lead", "node_lead", "red_team_lead"):
@@ -53,7 +55,8 @@ class TestLoadAgentRoles:
 
     def test_fallback_to_defaults_on_missing_path(self):
         roles = load_agent_roles(Path("/nonexistent/agents.yaml"))
-        assert len(roles) == 13
+        # 13 original agents + socratic_questioner (exploratory phase 0)
+        assert len(roles) == 14
 
 
 # ── check_convergence ────────────────────────────────────────────────────
