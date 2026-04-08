@@ -296,13 +296,23 @@ class TestValidateSlug:
 class TestInferenceProviderProtocol:
     def test_conforming_class_satisfies_protocol(self):
         class GoodProvider:
+            def assess_claim_substance(self, claim: str) -> dict:
+                return {
+                    "is_substantive": True,
+                    "reason": "",
+                    "suggested_rewrite": "",
+                }
+
             def generate_clarifying_questions(
                 self, claim: str, max_questions: int = 5
             ) -> list[dict]:
                 return []
 
             def decompose_claim(
-                self, claim: str, clarifications: list[dict]
+                self,
+                claim: str,
+                clarifications: list[dict],
+                guidance: str = "",
             ) -> dict:
                 return {"nodes": [], "edges": []}
 

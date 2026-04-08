@@ -64,64 +64,20 @@ class TestInit:
         assert "already" in second.output.lower()
 
 
-# ── seed ─────────────────────────────────────────────────────────────────
-
-
-class TestSeed:
-    def test_seed_without_init(self, clean_dir):
-        result = runner.invoke(app, ["seed", "thesis", "--no-questions"])
-        assert result.exit_code == 3, result.output
-        assert "no petri dish found" in result.output.lower()
-
-    def test_seed_creates_colony(self, clean_dir):
-        init_result = runner.invoke(app, ["init"])
-        assert init_result.exit_code == 0, init_result.output
-
-        result = runner.invoke(
-            app, ["seed", "AI is viable", "--no-questions"]
-        )
-        assert result.exit_code == 0, result.output
-
-        # Colony directory exists under petri-dishes/
-        dishes_dir = clean_dir / ".petri" / "petri-dishes"
-        colony_dirs = [d for d in dishes_dir.iterdir() if d.is_dir()]
-        assert len(colony_dirs) >= 1, "No colony directory created"
-
-        colony_dir = colony_dirs[0]
-
-        # Node directories exist with required files (nested under level dirs)
-        metadata_files = list(colony_dir.rglob("metadata.json"))
-        assert len(metadata_files) > 0, "No node directories created"
-
-        for mf in metadata_files:
-            node_dir = mf.parent
-            assert (
-                node_dir / "events.jsonl"
-            ).is_file(), f"Missing events.jsonl in {node_dir.name}"
-            assert (
-                node_dir / "evidence.md"
-            ).is_file(), f"Missing evidence.md in {node_dir.name}"
-
-        # Composite IDs visible in output
-        # The default decomposition creates IDs like {dish}-{colony}-000-000
-        assert "-" in result.output  # composite IDs contain hyphens
+# ── seed coverage lives in tests/integration/test_seed_wizard.py ─────────
 
 
 # ── check ────────────────────────────────────────────────────────────────
+#
+# These tests use the canonical ``seeded_petri_dir`` fixture from
+# tests/conftest.py — a real .petri/ directory laid out on disk with the
+# canonical 5-node diamond colony pre-serialized. They never call
+# ``petri seed`` (which now requires the real Claude Code CLI) and never
+# monkeypatch the inference provider.
 
 
 class TestCheck:
-    def _init_and_seed(self, clean_dir):
-        """Helper: run init + seed and return seed output."""
-        r = runner.invoke(app, ["init"])
-        assert r.exit_code == 0, r.output
-        r = runner.invoke(app, ["seed", "AI is viable", "--no-questions"])
-        assert r.exit_code == 0, r.output
-        return r.output
-
-    def test_check_shows_nodes(self, clean_dir):
-        self._init_and_seed(clean_dir)
-
+    def test_check_shows_nodes(self, seeded_petri_dir):
         result = runner.invoke(app, ["check"])
         assert result.exit_code == 0, result.output
 
@@ -131,84 +87,59 @@ class TestCheck:
         assert "Level 2" in out
         assert "NEW" in out
 
-    def test_check_json_output(self, clean_dir):
-        self._init_and_seed(clean_dir)
-
+    def test_check_json_output(self, seeded_petri_dir):
         result = runner.invoke(app, ["check", "--json"])
         assert result.exit_code == 0, result.output
 
         data = json.loads(result.output)
         assert isinstance(data, list)
-        assert len(data) > 0
+        # Canonical diamond has 5 nodes
+        assert len(data) == 5
 
 
 # ── analyze ──────────────────────────────────────────────────────────────
 
 
 class TestAnalyze:
-    def _init_and_seed(self, clean_dir):
-        """Helper: run init + seed and return seed output."""
-        r = runner.invoke(app, ["init"])
-        assert r.exit_code == 0, r.output
-        r = runner.invoke(app, ["seed", "AI is viable", "--no-questions"])
-        assert r.exit_code == 0, r.output
-        return r.output
-
-    def test_analyze_graph(self, clean_dir):
-        self._init_and_seed(clean_dir)
-
+    def test_analyze_graph(self, seeded_petri_dir):
         result = runner.invoke(app, ["analyze", "--graph"])
         assert result.exit_code == 0, result.output
 
         out = result.output
-        # Should show node IDs (composite keys with dashes)
+        # Composite IDs contain hyphens
         assert "-" in out
-        # Should show claim text
-        assert "AI is viable" in out
-        # Should show levels
+        # The canonical colony's center claim
+        assert "Central thesis" in out
+        # Level markers
         assert "L0" in out or "L1" in out or "L2" in out
 
-    def test_analyze_graph_dot_format(self, clean_dir):
-        self._init_and_seed(clean_dir)
-
+    def test_analyze_graph_dot_format(self, seeded_petri_dir):
         result = runner.invoke(
             app, ["analyze", "--graph", "--format", "dot"]
         )
         assert result.exit_code == 0, result.output
-
-        out = result.output
-        assert "digraph" in out
+        assert "digraph" in result.output
 
 
 # ── full flow ────────────────────────────────────────────────────────────
 
 
 class TestFullFlow:
-    def test_full_flow(self, clean_dir):
-        # 1. init
-        r = runner.invoke(app, ["init"])
-        assert r.exit_code == 0, r.output
-
-        # 2. seed
-        r = runner.invoke(app, ["seed", "AI is viable", "--no-questions"])
-        assert r.exit_code == 0, r.output
-        seed_output = r.output
-
-        # 3. check
+    def test_full_flow(self, seeded_petri_dir):
+        # check
         r = runner.invoke(app, ["check", "--json"])
         assert r.exit_code == 0, r.output
         check_data = json.loads(r.output)
         check_count = len(check_data)
-        assert check_count > 0
+        assert check_count == 5  # canonical diamond
 
-        # 4. analyze --graph
+        # analyze --graph
         r = runner.invoke(app, ["analyze", "--graph"])
         assert r.exit_code == 0, r.output
 
-        # Node count consistency: the default decomposition creates 6 nodes
-        # (1 center + 3 level-1 + 2 level-2). Verify check reported
-        # the same number we see in the colony directory.
-        dishes_dir = clean_dir / ".petri" / "petri-dishes"
+        # Node count consistency: check should report the same number
+        # of nodes as live in the colony directory.
+        dishes_dir = seeded_petri_dir["petri_dir"] / "petri-dishes"
         colony_dirs = [d for d in dishes_dir.iterdir() if d.is_dir()]
         assert len(colony_dirs) == 1
 
@@ -216,80 +147,39 @@ class TestFullFlow:
         assert len(metadata_files) == check_count
 
 
-# ── concurrency (SC-002) ────────────────────────────────────────────────
+# ── on-disk integrity (SC-002) ──────────────────────────────────────────
 
 
-class TestConcurrency:
-    """Verify concurrent processing doesn't cause data loss or corruption."""
+class TestColonyOnDiskIntegrity:
+    """Verify the canonical seeded layout is structurally sound.
 
-    def test_concurrent_grow_preserves_events(self, clean_dir):
-        """Seed a colony, grow --all with concurrency, verify event integrity.
+    This is what survived from the old TestConcurrency: the parts that
+    don't require running ``petri grow`` (which now needs the real Claude
+    Code CLI in preflight). The state-machine + file-locking concurrency
+    behaviour is exercised by tests under ``tests/unit/test_queue.py`` and
+    ``tests/integration/test_processor*.py`` against the engine directly,
+    not via the CLI.
+    """
 
-        Covers SC-002: concurrent processing must not lose or corrupt data.
-        """
-        # 1. init
-        r = runner.invoke(app, ["init"])
-        assert r.exit_code == 0, r.output
-
-        # 2. seed — default decomposition creates ~6 nodes across 3 levels
-        r = runner.invoke(
-            app, ["seed", "Multi-node thesis for concurrency", "--no-questions"]
-        )
-        assert r.exit_code == 0, r.output
-
-        # Count nodes created
-        dishes_dir = clean_dir / ".petri" / "petri-dishes"
-        colony_dirs = [d for d in dishes_dir.iterdir() if d.is_dir()]
-        assert len(colony_dirs) == 1
-        colony_dir = colony_dirs[0]
+    def test_seeded_dir_structure_is_valid(self, seeded_petri_dir):
+        petri_dir = seeded_petri_dir["petri_dir"]
+        colony_dir = seeded_petri_dir["colony_path"]
 
         metadata_files = sorted(colony_dir.rglob("metadata.json"))
         node_dirs = [mf.parent for mf in metadata_files]
-        total_nodes = len(node_dirs)
-        assert total_nodes >= 3, f"Expected >=3 nodes, got {total_nodes}"
+        # Canonical diamond has 5 nodes
+        assert len(node_dirs) == 5
 
-        # 3. grow --all (no LLM provider → uses no-op fallback, exercises
-        #    the state machine and file locking under concurrency)
-        r = runner.invoke(app, ["grow", "--all"])
-        # May exit 0 (success) or 1 (some stalled) — both are valid
-        assert r.exit_code in (0, 1), f"Unexpected exit {r.exit_code}: {r.output}"
-
-        # 4. Verify data integrity: every node directory still has
-        #    valid metadata.json and events.jsonl
         for node_dir in node_dirs:
             meta_path = node_dir / "metadata.json"
-            events_path = node_dir / "events.jsonl"
-
             assert meta_path.is_file(), f"Missing metadata: {node_dir.name}"
-            assert events_path.is_file(), f"Missing events: {node_dir.name}"
 
-            # metadata.json must be valid JSON
             meta = json.loads(meta_path.read_text())
             assert "id" in meta, f"metadata missing 'id' in {node_dir.name}"
 
-            # events.jsonl: every non-empty line must be valid JSON
-            events_text = events_path.read_text()
-            event_count = 0
-            for i, line in enumerate(events_text.splitlines()):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    evt = json.loads(line)
-                    assert "node_id" in evt, f"Event missing node_id: {node_dir.name} line {i}"
-                    event_count += 1
-                except json.JSONDecodeError:
-                    pytest.fail(
-                        f"Corrupt JSONL in {node_dir.name} line {i}: {line!r}"
-                    )
-
-            # Each node should have at least the initial decomposition event
-            assert event_count >= 1, (
-                f"Node {node_dir.name} has {event_count} events (expected >=1)"
-            )
-
-        # 5. Verify queue.json is valid
-        queue_path = clean_dir / ".petri" / "queue.json"
+        # queue.json must be present, valid JSON, and have an entry per node
+        queue_path = petri_dir / "queue.json"
         queue = json.loads(queue_path.read_text())
-        assert "entries" in queue, "queue.json missing 'entries'"
-        assert "version" in queue, "queue.json missing 'version'"
+        assert "entries" in queue
+        assert "version" in queue
+        assert len(queue["entries"]) == 5

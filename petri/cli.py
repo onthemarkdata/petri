@@ -28,6 +28,57 @@ DEFAULTS_DIR = Path(__file__).parent / "defaults"
 # ── Helper Functions ─────────────────────────────────────────────────────
 
 
+def _run_substance_check(claim: str, provider, questionary):
+    """Agentic substance check before the clarifying-question wizard.
+
+    Returns (claim, skip_wizard, aborted). If the model classifies the claim
+    as non-substantive, the user is offered Continue / Edit / Abort. Editing
+    re-runs the check on the new text. ``skip_wizard`` is True when the user
+    chooses Continue (so the wizard is bypassed).
+    """
+    while True:
+        try:
+            assessment = provider.assess_claim_substance(claim)
+        except Exception as exc:
+            typer.echo(
+                f"Warning: substance check failed ({exc}); continuing anyway.",
+                err=True,
+            )
+            return claim, False, False
+
+        if assessment.get("is_substantive", True):
+            return claim, False, False
+
+        reason = assessment.get("reason", "")
+        suggested = assessment.get("suggested_rewrite", "")
+
+        typer.echo("This does not look like a substantive research claim.")
+        if reason:
+            typer.echo(f"  Reason: {reason}")
+        if suggested:
+            typer.echo(f"  Suggested rewrite: {suggested}")
+
+        action = questionary.select(
+            "How do you want to proceed?",
+            choices=["Edit claim", "Continue anyway", "Abort"],
+            default="Edit claim",
+        ).ask()
+
+        if action is None or action == "Abort":
+            return claim, False, True
+
+        if action == "Continue anyway":
+            return claim, True, False
+
+        # Edit claim — re-prompt and loop
+        new_claim = questionary.text(
+            "Edit the claim:", default=suggested or claim
+        ).ask()
+        if new_claim is None:
+            return claim, False, True
+        claim = new_claim.strip() or claim
+
+
 def _resolve_provider(petri_dir: Path):
     """Resolve an InferenceProvider from petri.yaml config.
 
@@ -291,10 +342,10 @@ def seed(
         None, help="Colony name (default: auto-generated)"
     ),
     no_questions: bool = typer.Option(
-        False, "--no-questions", help="Skip clarifying questions"
+        False, "--no-questions", help="Skip clarifying questions and auto-accept"
     ),
 ) -> None:
-    """Seed a new colony from a claim, URL, or file."""
+    """Seed a new colony from a claim, URL, or file. Requires Claude Code CLI."""
     petri_dir = _find_petri_dir()
     dish_id = _get_dish_id(petri_dir)
 
@@ -306,7 +357,23 @@ def seed(
     )
     from petri.reasoning.ingest import ingest
 
-    # Ingest the source to extract content
+    # ── Resolve provider up front; hard-fail if unavailable ──
+    try:
+        provider = _resolve_provider(petri_dir)
+    except FileNotFoundError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        typer.echo("Run 'petri inspect' to verify prerequisites.", err=True)
+        raise typer.Exit(code=2)
+
+    if provider is None:
+        typer.echo(
+            "Error: petri seed requires an LLM provider. "
+            "Configure 'model' in .petri/defaults/petri.yaml.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    # ── Ingest the source to extract content ──
     ingested = ingest(source)
     source_type = ingested.source_type
 
@@ -320,92 +387,119 @@ def seed(
     content = ingested.content
     title = ingested.title
 
-    # Build the claim from ingested content
     if source_type == "text":
         claim = content
+    elif title:
+        claim = f"{title}\n\nSource content:\n{content}"
     else:
-        if title:
-            claim = f"{title}\n\nSource content:\n{content}"
-        else:
-            claim = content
+        claim = content
 
-    # Gather clarifications
-    clarifications: list[dict] = []
+    # ── Detect interactive TTY for the wizard ──
+    import sys
 
-    if not no_questions:
+    interactive = sys.stdin.isatty() and not no_questions
+    questionary = None
+    if interactive:
         try:
-            import questionary
-            import sys
+            import questionary as _questionary  # type: ignore
 
-            if not sys.stdin.isatty():
-                no_questions = True
+            questionary = _questionary
         except ImportError:
             typer.echo(
-                "Warning: questionary not installed. Skipping clarifying questions.",
+                "Warning: questionary not installed. Running non-interactively.",
                 err=True,
             )
-            no_questions = True
+            interactive = False
 
-        if not no_questions:
-            questions = generate_clarifying_questions(claim)
-            for q in questions:
-                question_text = q.question
-                options = q.options
+    # ── Agentic substance check ──
+    skip_wizard = no_questions
+    if interactive and not skip_wizard:
+        claim, skip_wizard, aborted = _run_substance_check(
+            claim, provider, questionary
+        )
+        if aborted:
+            typer.echo("Aborted.")
+            raise typer.Exit(code=1)
 
-                if options:
-                    answer = questionary.select(
-                        question_text, choices=options
-                    ).ask()
-                else:
-                    answer = questionary.text(question_text).ask()
+    # ── Clarifying questions wizard (per-question skip) ──
+    clarifications: list[dict] = []
+    if interactive and not skip_wizard:
+        try:
+            questions = generate_clarifying_questions(claim, provider=provider)
+        except Exception as exc:
+            typer.echo(f"Failed to generate clarifying questions: {exc}", err=True)
+            raise typer.Exit(code=2)
 
-                if answer is None:
-                    # User cancelled (Ctrl+C)
-                    typer.echo("Cancelled.")
-                    raise typer.Exit(code=1)
+        for question in questions:
+            question_text = question.question
+            options = question.options
 
-                clarifications.append(
-                    {"question": question_text, "answer": answer}
-                )
+            if options:
+                choices = [*options, "Skip"]
+                answer = questionary.select(
+                    question_text, choices=choices
+                ).ask()
+            else:
+                answer = questionary.text(
+                    f"{question_text} (leave blank to skip)"
+                ).ask()
+
+            if answer is None:
+                typer.echo("Cancelled.")
+                raise typer.Exit(code=1)
+
+            if answer == "Skip" or not answer.strip():
+                continue
+
+            clarifications.append(
+                {"question": question_text, "answer": answer}
+            )
 
     # Generate colony name if not provided
     colony_name = colony or generate_colony_name(claim)
 
-    # Decompose the claim
-    try:
-        result = decompose_claim(
-            claim=claim,
-            clarifications=clarifications,
-            dish_id=dish_id,
-            colony_name=colony_name,
-        )
-    except Exception as exc:
-        typer.echo(f"Decomposition failed: {exc}", err=True)
-        raise typer.Exit(code=2)
+    # ── Decompose → Accept / Regenerate / Abort loop ──
+    guidance = ""
+    while True:
+        try:
+            result = decompose_claim(
+                claim=claim,
+                clarifications=clarifications,
+                dish_id=dish_id,
+                colony_name=colony_name,
+                provider=provider,
+                guidance=guidance,
+            )
+        except Exception as exc:
+            typer.echo(f"Decomposition failed: {exc}", err=True)
+            raise typer.Exit(code=2)
 
-    # Display the colony
-    display = format_colony_display(result)
-    typer.echo(display)
+        typer.echo(format_colony_display(result))
 
-    # Prompt for approval
-    try:
-        import questionary
-        import sys
+        if not interactive:
+            break  # non-interactive: auto-accept (used by --no-questions)
 
-        if sys.stdin.isatty():
-            approved = questionary.confirm(
-                "Approve this decomposition?", default=True
-            ).ask()
-        else:
-            # Non-interactive terminal: auto-approve
-            approved = True
-    except (ImportError, OSError):
-        # Non-interactive fallback: auto-approve
-        approved = True
+        action = questionary.select(
+            "What would you like to do?",
+            choices=["Accept", "Regenerate with guidance", "Abort"],
+            default="Accept",
+        ).ask()
 
-    if approved is None or not approved:
-        typer.echo("Decomposition rejected.")
-        raise typer.Exit(code=1)
+        if action is None or action == "Abort":
+            typer.echo("Decomposition rejected.")
+            raise typer.Exit(code=1)
+
+        if action == "Accept":
+            break
+
+        # Regenerate path — Claude-Code-style free-text feedback
+        guidance = questionary.text(
+            "What should change? (free text, press Enter to re-roll as-is)"
+        ).ask()
+        if guidance is None:
+            typer.echo("Cancelled.")
+            raise typer.Exit(code=1)
+        # Loop iterates with the new guidance threaded into decompose_claim
 
     # Serialize colony to filesystem
     from petri.graph.colony import ColonyGraph, serialize_colony

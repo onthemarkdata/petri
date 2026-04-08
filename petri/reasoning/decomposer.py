@@ -1,9 +1,10 @@
 """Claim decomposition module for Petri.
 
-Takes a claim, optionally asks clarifying questions, and decomposes it into
-a colony DAG of logical premises. Delegates actual reasoning to a
-InferenceProvider when available; provides a simple structural fallback
-for standalone CLI use without an LLM.
+Takes a claim, asks clarifying questions, and decomposes it into a colony
+DAG of logical premises. All reasoning is delegated to an
+``InferenceProvider`` — there is no offline fallback. Callers that cannot
+supply a provider must surface that to the user instead of generating a
+template-stamped tree.
 """
 
 from __future__ import annotations
@@ -26,25 +27,29 @@ from petri.models import (
 
 def generate_clarifying_questions(
     claim: str,
-    provider: InferenceProvider | None = None,
+    provider: InferenceProvider | None,
     max_questions: int = 5,
 ) -> list[ClarifyingQuestion]:
-    """Generate clarifying questions for a claim.
+    """Generate claim-specific clarifying questions via the provider.
 
-    If provider is None, returns a default set of generic questions.
+    Raises ValueError if no provider is supplied — the wizard is fully
+    agentic and has no hardcoded question set.
     """
-    if provider is not None:
-        raw = provider.generate_clarifying_questions(claim, max_questions)
-        return [
-            ClarifyingQuestion(
-                question=question["question"],
-                options=question.get("options", []),
-                answer=question.get("answer"),
-            )
-            for question in raw[:max_questions]
-        ]
+    if provider is None:
+        raise ValueError(
+            "generate_clarifying_questions requires an InferenceProvider; "
+            "the wizard is fully agentic and has no hardcoded fallback."
+        )
 
-    return _default_questions()[:max_questions]
+    raw = provider.generate_clarifying_questions(claim, max_questions)
+    return [
+        ClarifyingQuestion(
+            question=question["question"],
+            options=question.get("options", []),
+            answer=question.get("answer"),
+        )
+        for question in raw[:max_questions]
+    ]
 
 
 def decompose_claim(
@@ -52,19 +57,24 @@ def decompose_claim(
     clarifications: list[ClarifyingQuestion],
     dish_id: str,
     colony_name: str,
-    provider: InferenceProvider | None = None,
+    provider: InferenceProvider | None,
+    guidance: str = "",
 ) -> DecompositionResult:
     """Decompose a claim into a colony of nodes and edges.
 
-    If provider is None, creates a simple default decomposition
-    with 3 premises at level 1 and 2 sub-premises at level 2.
+    Raises ValueError if no provider is supplied. ``guidance`` is optional
+    free-text feedback from a regenerate-with-guidance loop and is threaded
+    into the model context.
     """
-    if provider is not None:
-        return _provider_decompose(
-            claim, clarifications, dish_id, colony_name, provider
+    if provider is None:
+        raise ValueError(
+            "decompose_claim requires an InferenceProvider; "
+            "there is no offline decomposition fallback."
         )
 
-    return _default_decompose(claim, dish_id, colony_name)
+    return _provider_decompose(
+        claim, clarifications, dish_id, colony_name, provider, guidance
+    )
 
 
 def format_colony_display(result: DecompositionResult) -> str:
@@ -165,142 +175,13 @@ def generate_colony_name(claim: str) -> str:
 # ── Private Helpers ──────────────────────────────────────────────────────
 
 
-def _default_questions() -> list[ClarifyingQuestion]:
-    """Return the standard set of generic clarifying questions."""
-    return [
-        ClarifyingQuestion(
-            question="What is the primary domain or industry?",
-        ),
-        ClarifyingQuestion(
-            question="What geographic scope applies?",
-        ),
-        ClarifyingQuestion(
-            question="What time horizon are you considering?",
-            options=["1 year", "3 years", "5 years", "10+ years"],
-        ),
-        ClarifyingQuestion(
-            question="What aspect matters most?",
-            options=[
-                "Technical feasibility",
-                "Economic viability",
-                "Regulatory compliance",
-                "Market demand",
-            ],
-        ),
-        ClarifyingQuestion(
-            question="Are there specific constraints to consider?",
-        ),
-    ]
-
-
-def _default_decompose(
-    claim: str,
-    dish_id: str,
-    colony_name: str,
-) -> DecompositionResult:
-    """Create a first-principles decomposition without an LLM.
-
-    Structure (first principles approach):
-      Level 0: center (the original claim)
-      Level 1: core assumptions — the key definitions, causal mechanisms,
-               and logical premises that must hold for the claim to be true
-      Level 2: fundamental facts — independently verifiable bedrock truths
-    """
-    colony_id = f"{dish_id}-{colony_name}"
-
-    # Level 0 -- center
-    center_key = build_node_key(dish_id, colony_name, 0, 0)
-    center = Node(
-        id=center_key,
-        colony_id=colony_id,
-        claim_text=claim,
-        level=0,
-    )
-
-    # Level 1 -- core assumptions (first principles)
-    definition_key = build_node_key(dish_id, colony_name, 1, 1)
-    mechanism_key = build_node_key(dish_id, colony_name, 1, 2)
-    boundary_key = build_node_key(dish_id, colony_name, 1, 3)
-
-    definition_node = Node(
-        id=definition_key,
-        colony_id=colony_id,
-        claim_text=f"The key terms and definitions in this claim are well-defined and agreed upon: {claim}",
-        level=1,
-    )
-    mechanism_node = Node(
-        id=mechanism_key,
-        colony_id=colony_id,
-        claim_text=f"The causal mechanism or logical reasoning underlying this claim is sound: {claim}",
-        level=1,
-    )
-    boundary_node = Node(
-        id=boundary_key,
-        colony_id=colony_id,
-        claim_text=f"The scope, boundary conditions, and constraints of this claim are valid: {claim}",
-        level=1,
-    )
-
-    # Level 2 -- fundamental facts under mechanism
-    empirical_key = build_node_key(dish_id, colony_name, 2, 1)
-    consistency_key = build_node_key(dish_id, colony_name, 2, 2)
-
-    empirical_node = Node(
-        id=empirical_key,
-        colony_id=colony_id,
-        claim_text=f"Empirical observations or measurements support the mechanism: {claim}",
-        level=2,
-    )
-    consistency_node = Node(
-        id=consistency_key,
-        colony_id=colony_id,
-        claim_text=f"The claim is logically consistent with established knowledge and does not contradict known facts: {claim}",
-        level=2,
-    )
-
-    # Wire up dependencies: parent depends on children (bottom-up validation)
-    center.dependencies = [definition_key, mechanism_key, boundary_key]
-    mechanism_node.dependencies = [empirical_key, consistency_key]
-
-    # Wire up dependents (reverse of dependencies)
-    definition_node.dependents = [center_key]
-    mechanism_node.dependents = [center_key]
-    boundary_node.dependents = [center_key]
-    empirical_node.dependents = [mechanism_key]
-    consistency_node.dependents = [mechanism_key]
-
-    # Edges -- from_node depends on to_node (parent depends on child)
-    edges = [
-        Edge(from_node=center_key, to_node=definition_key),
-        Edge(from_node=center_key, to_node=mechanism_key),
-        Edge(from_node=center_key, to_node=boundary_key),
-        Edge(from_node=mechanism_key, to_node=empirical_key),
-        Edge(from_node=mechanism_key, to_node=consistency_key),
-    ]
-
-    nodes = [
-        center,
-        definition_node,
-        mechanism_node,
-        boundary_node,
-        empirical_node,
-        consistency_node,
-    ]
-
-    return DecompositionResult(
-        nodes=nodes,
-        edges=edges,
-        colony_name=colony_name,
-        center_claim=claim,
-    )
-
-
 def _provider_decompose(
     claim: str,
     clarifications: list[ClarifyingQuestion],
     dish_id: str,
     colony_name: str,
     provider: InferenceProvider,
+    guidance: str = "",
 ) -> DecompositionResult:
     """Decompose using iterative Five Whys via an LLM provider.
 
@@ -326,7 +207,7 @@ def _provider_decompose(
         }
         for clarification in clarifications
     ]
-    raw = provider.decompose_claim(claim, clarification_dicts)
+    raw = provider.decompose_claim(claim, clarification_dicts, guidance=guidance)
 
     # Build Level 0 center node
     center_key = build_node_key(dish_id, colony_name, 0, 0)
@@ -363,9 +244,13 @@ def _provider_decompose(
         all_edges.append(Edge(from_node=center_key, to_node=node_key))
         seq_counter += 1
 
-    # If no Level 1 nodes were produced, fall back to default
+    # If no Level 1 nodes were produced, fail loudly — there is no
+    # hardcoded fallback in the agentic flow.
     if not level_one_nodes:
-        return _default_decompose(claim, dish_id, colony_name)
+        raise RuntimeError(
+            "LLM returned no level-1 premises for this claim; "
+            "try regenerating with guidance or refining the claim."
+        )
 
     # Wire center dependencies
     center.dependencies = [node.id for node in level_one_nodes]

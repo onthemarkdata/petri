@@ -566,16 +566,33 @@ def validate_slug(slug: str) -> bool:
 class InferenceProvider(Protocol):
     """Abstract interface for LLM inference. Injected by the harness or CLI."""
 
+    def assess_claim_substance(self, claim: str) -> dict:
+        """Decide whether a claim is substantive enough to warrant decomposition.
+
+        Returns a dict with keys: is_substantive (bool), reason (str),
+        suggested_rewrite (str). Used by the seed wizard to short-circuit
+        clarifying questions for placeholder/test input.
+        """
+        ...
+
     def generate_clarifying_questions(
         self, claim: str, max_questions: int = 5
     ) -> list[ClarifyingQuestion]:
-        """Generate clarifying questions for a claim."""
+        """Generate claim-specific clarifying questions."""
         ...
 
     def decompose_claim(
-        self, claim: str, clarifications: list[ClarifyingQuestion]
+        self,
+        claim: str,
+        clarifications: list[ClarifyingQuestion],
+        guidance: str = "",
     ) -> DecompositionResult:
-        """Decompose a claim into nodes and edges."""
+        """Decompose a claim into nodes and edges.
+
+        ``guidance`` is optional free-text feedback from a re-roll request;
+        when non-empty it should be threaded into the model context so the
+        next decomposition reflects the user's refinement.
+        """
         ...
 
     def assess_node(

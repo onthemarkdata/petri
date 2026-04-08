@@ -115,13 +115,55 @@ class ClaudeCodeProvider:
                 )
         return result.stdout.strip()
 
+    def assess_claim_substance(self, claim: str) -> dict:
+        """Decide whether a claim is substantive enough to warrant a wizard.
+
+        The model flags placeholder/test/empty input ("this is a test claim",
+        "asdf", "hello world") as non-substantive so the CLI can short-circuit
+        the clarifying-question wizard.
+
+        Returns a dict with keys:
+            is_substantive (bool)
+            reason (str)               -- one-sentence explanation
+            suggested_rewrite (str)    -- optional; "" if none
+        """
+        prompt = (
+            "Assess whether the following text is a SUBSTANTIVE research claim "
+            "that warrants decomposition, or whether it is placeholder/test "
+            "input (e.g. 'this is a test claim', 'asdf', 'hello world', empty).\n\n"
+            f"Text: \"{claim}\"\n\n"
+            "Return ONLY a JSON object:\n"
+            "{\n"
+            '  "is_substantive": true|false,\n'
+            '  "reason": "one-sentence explanation",\n'
+            '  "suggested_rewrite": "tighter rephrasing, or empty string"\n'
+            "}\n"
+        )
+        raw = self._ask(prompt)
+        parsed = _extract_json(raw)
+        if not isinstance(parsed, dict):
+            # Treat parse failure as substantive — fall through to the wizard
+            # rather than block the user on a model glitch.
+            return {"is_substantive": True, "reason": "", "suggested_rewrite": ""}
+        return {
+            "is_substantive": bool(parsed.get("is_substantive", True)),
+            "reason": _coerce_str(parsed.get("reason", "")),
+            "suggested_rewrite": _coerce_str(parsed.get("suggested_rewrite", "")),
+        }
+
     def generate_clarifying_questions(
         self, claim: str, max_questions: int = 5
     ) -> list[dict]:
         prompt = (
-            f"Generate {max_questions} clarifying questions for this research claim:\n"
-            f"\"{claim}\"\n\n"
-            f"Return ONLY a JSON array: [{{\"question\": \"...\", \"options\": [...]}}]"
+            f"Generate {max_questions} CLAIM-SPECIFIC clarifying questions for this research claim. "
+            "The questions must be tailored to the actual content of the claim — do not use generic "
+            "questions like 'what is the domain?' or 'what is the time horizon?'. Each question should "
+            "surface a specific assumption, scope boundary, or definitional ambiguity in THIS claim.\n\n"
+            f"Claim: \"{claim}\"\n\n"
+            "For each question, optionally provide 2-5 multiple-choice options when the answer space is "
+            "naturally bounded; otherwise leave options empty for free-text input.\n\n"
+            "Return ONLY a JSON array: "
+            '[{"question": "...", "options": ["...", "..."]}, ...]'
         )
         raw = self._ask(prompt)
         try:
@@ -130,20 +172,33 @@ class ClaudeCodeProvider:
                 return parsed[:max_questions]
         except (json.JSONDecodeError, TypeError):
             pass
+        # Try the more lenient extractor for fenced/wrapped output
+        wrapped = _extract_json(raw)
+        if isinstance(wrapped, list):
+            return wrapped[:max_questions]
         return []
 
-    def decompose_claim(self, claim: str, clarifications: list[dict]) -> dict:
+    def decompose_claim(
+        self, claim: str, clarifications: list[dict], guidance: str = ""
+    ) -> dict:
         clarification_text = ""
         if clarifications:
             lines = [f"Q: {c['question']} A: {c.get('answer', 'N/A')}" for c in clarifications]
             clarification_text = "\nClarifications:\n" + "\n".join(lines)
+
+        guidance_text = ""
+        if guidance.strip():
+            guidance_text = (
+                "\nRefinement guidance from user (must shape this re-roll):\n"
+                f"{guidance.strip()}\n"
+            )
 
         prompt = (
             "Decompose this claim using FIRST PRINCIPLES thinking.\n"
             "Break it down to fundamental, irreducible truths that can be independently verified.\n\n"
             "DO NOT just rephrase the claim. Ask 'WHY?' repeatedly until you reach bedrock facts.\n"
             "Identify key DEFINITIONS, ASSUMPTIONS, and EVIDENCE needed.\n\n"
-            f"Claim: \"{claim}\"{clarification_text}\n\n"
+            f"Claim: \"{claim}\"{clarification_text}{guidance_text}\n\n"
             "Return JSON with 'nodes' and 'edges' arrays.\n"
             "Each node: {level, seq, claim_text, dependencies: [{level, seq}]}\n"
             "Each edge: {from: {level, seq}, to: {level, seq}}\n"
