@@ -636,7 +636,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
 
     @app.get("/api/cell/{cell_id}")
     def get_cell_detail(cell_id: str):
-        """Full detail for one cell: metadata + events."""
+        """Full detail for one cell: metadata + events + evidence markdown."""
         from petri.graph.colony import deserialize_colony
 
         dishes_dir = petri_dir / "petri-dishes"
@@ -678,6 +678,21 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                     for r in rows
                 ]
 
+                # Read evidence.md from the cell directory. The colony stores
+                # the per-cell relative path in cell_paths; fall back to the
+                # default {level}-{seq} slug used by serialize_colony.
+                evidence_md = ""
+                cell_rel_path = colony.cell_paths.get(
+                    cell.id,
+                    f"{cell.id.split('-')[-2]}-{cell.id.split('-')[-1]}",
+                )
+                evidence_file = colony_dir / cell_rel_path / "evidence.md"
+                if evidence_file.is_file():
+                    try:
+                        evidence_md = evidence_file.read_text()
+                    except OSError:
+                        evidence_md = ""
+
                 return {
                     "cell_id": cell.id,
                     "colony_id": cell.colony_id,
@@ -686,6 +701,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                     "status": cell.status.value,
                     "dependencies": cell.dependencies,
                     "dependents": cell.dependents,
+                    "evidence_md": evidence_md,
                     "events": events,
                 }
 

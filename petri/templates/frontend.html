@@ -9,6 +9,12 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<!-- marked.js: evidence.md and other markdown content is rendered with
+     this so cell detail pages display readable formatted text.
+     DOMPurify sanitizes the parsed HTML before it's injected into the
+     DOM, so a malicious URL/title in a citation can't smuggle script. -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <style>
 /* ── Reset & Base ──────────────────────────────────────────────────── */
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -102,10 +108,7 @@ body {
 }
 
 /* ── Computer / CRT Terminal (also hosts onboarding) ─────────────── */
-#screen-computer {
-  background: #000;
-  flex-direction: column;
-}
+#screen-computer { flex-direction: column; }
 #screen-computer .crt-frame {
   flex: 1;
   margin: 14px auto 18px;
@@ -116,37 +119,36 @@ body {
   position: relative;
   width: min(900px, 90vw);
   height: min(600px, 80vh);
-  background: #0a0a0a;
-  border-radius: 18px;
-  border: 3px solid #222;
-  box-shadow: 0 0 60px rgba(0,255,136,0.08), inset 0 0 80px rgba(0,0,0,0.8);
+  background: #000800;
+  border-radius: 6px;
+  border: 1px solid #00ccff;
   overflow: hidden;
 }
 .crt-screen {
   position: absolute;
-  inset: 12px;
+  inset: 10px;
   background: #000800;
-  border-radius: 10px;
+  border-radius: 4px;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px 28px;
+  padding: 22px 26px;
   font-size: 14px;
   line-height: 1.7;
   color: var(--green);
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
 }
 /* When the command input row is present the screen shrinks to leave room. */
-.crt-frame.has-input .crt-screen { bottom: 54px; }
-.crt-frame.has-input .crt-xterm  { bottom: 54px; }
+.crt-frame.has-input .crt-screen { bottom: 52px; }
+.crt-frame.has-input .crt-xterm  { bottom: 52px; }
 
 /* xterm.js mount — fills the screen area when command mode is active.
    Positioned absolute inside .crt-frame just like .crt-screen so the
-   scanlines + glow overlays still float on top. */
+   scanlines overlay still floats on top. */
 .crt-xterm {
   position: absolute;
-  top: 12px; left: 12px; right: 12px; bottom: 12px;
+  top: 10px; left: 10px; right: 10px; bottom: 10px;
   background: #000800;
-  border-radius: 10px;
+  border-radius: 4px;
   padding: 8px 10px;
   z-index: 1;
   overflow: hidden;
@@ -155,42 +157,38 @@ body {
 .crt-xterm .xterm .xterm-viewport { background: transparent !important; }
 .crt-xterm .xterm .xterm-screen { background: transparent !important; }
 .crt-xterm .xterm-viewport::-webkit-scrollbar { width: 4px; }
-.crt-xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--green-dark); border-radius: 2px; }
+.crt-xterm .xterm-viewport::-webkit-scrollbar-thumb { background: #00384a; }
 .crt-screen::-webkit-scrollbar { width: 4px; }
 .crt-screen::-webkit-scrollbar-track { background: transparent; }
-.crt-screen::-webkit-scrollbar-thumb { background: var(--green-dark); border-radius: 2px; }
+.crt-screen::-webkit-scrollbar-thumb { background: #00384a; }
 .crt-scanlines {
   position: absolute;
-  inset: 12px;
-  border-radius: 10px;
+  inset: 10px;
+  border-radius: 4px;
   pointer-events: none;
   background: repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px);
   z-index: 2;
 }
-.crt-glow {
-  position: absolute;
-  inset: 12px;
-  border-radius: 10px;
-  pointer-events: none;
-  box-shadow: inset 0 0 60px rgba(0,255,136,0.04);
-  z-index: 3;
-}
 .crt-input-row {
   position: absolute;
-  left: 12px; right: 12px; bottom: 12px;
-  height: 38px;
+  left: 10px; right: 10px; bottom: 10px;
+  height: 40px;
   display: flex;
   align-items: center;
   padding: 0 16px;
   gap: 10px;
-  background: rgba(0, 8, 0, 0.9);
-  border: 1px solid #116644;
-  border-radius: 8px;
+  background: #001018;
+  border: 1px solid #00ccff;
+  clip-path: polygon(
+    0 0, 100% 0,
+    100% calc(100% - 6px), calc(100% - 6px) 100%,
+    6px 100%, 0 calc(100% - 6px)
+  );
   z-index: 4;
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
 }
 .crt-input-row .crt-prompt {
-  color: var(--green);
+  color: #00ff88;
   font-weight: bold;
   font-size: 13px;
   letter-spacing: 1px;
@@ -201,28 +199,32 @@ body {
   background: transparent;
   border: none;
   outline: none;
-  color: var(--green);
+  color: #e0f0ff;
   font-family: inherit;
   font-size: 13px;
-  caret-color: var(--green);
+  caret-color: #00ff88;
 }
-.crt-input-row .crt-cmd::placeholder { color: #116644; font-style: italic; }
+.crt-input-row .crt-cmd::placeholder { color: #5fa8b8; font-style: italic; }
 .crt-input-row button {
-  background: transparent;
-  border: 1px solid #116644;
-  color: #33bb88;
+  background: #001018;
+  border: 1px solid #00ccff;
+  color: #00ccff;
   font-family: inherit;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: bold;
   letter-spacing: 1px;
-  padding: 4px 10px;
-  border-radius: 4px;
+  padding: 5px 12px;
   cursor: pointer;
   text-transform: uppercase;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
 }
-.crt-input-row button:hover:not(:disabled) { color: var(--green); border-color: var(--green); }
-.crt-input-row button.active { background: rgba(0,255,136,0.15); color: #66ffbb; border-color: #66ffbb; }
-.crt-input-row button.stop { border-color: #663333; color: #ff6b6b; }
-.crt-input-row button.stop:hover:not(:disabled) { border-color: #ff6b6b; background: rgba(255,70,70,0.1); }
+.crt-input-row button:hover:not(:disabled) { background: #002838; color: #ffcc00; }
+.crt-input-row button.active { background: #00384a; color: #ffcc00; border-color: #ffcc00; }
+.crt-input-row button.stop { border-color: #ff6b6b; color: #ff6b6b; }
+.crt-input-row button.stop:hover:not(:disabled) { background: #3a1a1a; }
 .crt-input-row button:disabled { opacity: 0.35; cursor: not-allowed; }
 .term-line { margin-bottom: 2px; white-space: pre-wrap; word-break: break-word; }
 .term-line.dim     { color: #116644; }
@@ -331,61 +333,252 @@ body {
   50% { opacity: 0.4; box-shadow: none; }
 }
 
+/* ── Shared HUD chrome primitives ─────────────────────────────────
+ *
+ * Single source of truth for the retro HUD look: reusable panels,
+ * labels, values, corner brackets, and buttons that every screen
+ * consumes. Any future tweak to the aesthetic lives here and ripples
+ * across the whole dashboard — resist the urge to override colors or
+ * corner shapes in per-screen rules.
+ * --------------------------------------------------------------- */
+
+.hud-screen {
+  background: #000000;
+  background-image:
+    linear-gradient(to right,  #2a0d1f 1px, transparent 1px),
+    linear-gradient(to bottom, #2a0d1f 1px, transparent 1px);
+  background-size: 24px 24px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+.hud-panel {
+  position: relative;
+  background: #001018;
+  border: 1px solid #00ccff;
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0, 100% 8px,
+    100% calc(100% - 8px), calc(100% - 8px) 100%,
+    8px 100%, 0 calc(100% - 8px),
+    0 8px
+  );
+  padding: 12px 16px;
+}
+.hud-panel.top-bar {
+  clip-path: polygon(
+    8px 0, calc(100% - 8px) 0, 100% 8px,
+    100% 100%, 0 100%, 0 8px
+  );
+}
+.hud-panel.bottom-bar {
+  clip-path: polygon(
+    0 0, 100% 0,
+    100% calc(100% - 8px), calc(100% - 8px) 100%,
+    8px 100%, 0 calc(100% - 8px)
+  );
+}
+.hud-panel.compact { padding: 8px 12px; }
+.hud-panel.dense { padding: 6px 10px; }
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.hud-label {
+  color: #5fa8b8;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.hud-value {
+  color: #ffcc00;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+.hud-value.big { font-size: 24px; letter-spacing: 2px; }
+.hud-value.success { color: #00ff88; }
+.hud-value.danger  { color: #ff6b6b; }
+
+.hud-title-text {
+  color: #ffcc00;
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  font-weight: bold;
+}
+
+.hud-corners { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.hud-corners::before,
+.hud-corners::after,
+.hud-corners .hud-corner-b,
+.hud-corners .hud-corner-c {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+}
+.hud-corners::before {
+  top: 8px; left: 8px;
+  border-top: 2px solid #ff3399;
+  border-left: 2px solid #ff3399;
+}
+.hud-corners::after {
+  top: 8px; right: 8px;
+  border-top: 2px solid #ff3399;
+  border-right: 2px solid #ff3399;
+}
+.hud-corners .hud-corner-b {
+  bottom: 8px; left: 8px;
+  border-bottom: 2px solid #ff3399;
+  border-left: 2px solid #ff3399;
+}
+.hud-corners .hud-corner-c {
+  bottom: 8px; right: 8px;
+  border-bottom: 2px solid #ff3399;
+  border-right: 2px solid #ff3399;
+}
+
+.hud-btn {
+  background: #001018;
+  color: #00ccff;
+  border: 1px solid #00ccff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  cursor: pointer;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+.hud-btn:hover:not(:disabled) { background: #002838; color: #ffcc00; }
+.hud-btn.danger { border-color: #ff6b6b; color: #ff6b6b; }
+.hud-btn.danger:hover:not(:disabled) { background: #3a1a1a; }
+.hud-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.hud-divider {
+  height: 1px;
+  background: #00384a;
+  margin: 12px 0;
+}
+
+.hud-text       { color: #e0f0ff; font-size: 12px; line-height: 1.5; }
+.hud-text.dim   { color: #5fa8b8; }
+.hud-text.cmd   { color: #ffcc00; }
+.hud-text.error { color: #ff6b6b; }
+.hud-text.ok    { color: #00ff88; }
+.hud-link       { color: #00ff88; cursor: pointer; text-decoration: none; }
+.hud-link:hover { color: #ffcc00; text-decoration: underline; }
+
 /* ── Lab Overview ────────────────────────────────────────────────── */
-#screen-lab { background: var(--bg); }
-.lab-content { flex: 1; overflow-y: auto; padding: 20px; }
+.lab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 24px 40px;
+  position: relative;
+}
 .lab-content::-webkit-scrollbar { width: 6px; }
 .lab-content::-webkit-scrollbar-track { background: transparent; }
-.lab-content::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+.lab-content::-webkit-scrollbar-thumb { background: #00384a; }
 
-.stats-ribbon { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
-.stat-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 20px;
-  min-width: 140px;
+.lab-section-label {
+  color: #5fa8b8;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin: 0 0 12px 2px;
 }
-.stat-value { font-size: 28px; font-weight: 700; color: var(--green); }
-.stat-label { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
 
-.section-title {
-  font-size: 12px; font-weight: 700; color: var(--text-dim);
-  letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;
+.stats-ribbon {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
 }
+.stats-ribbon .hud-panel { text-align: left; }
+.stats-ribbon .hud-value.big { display: block; margin-top: 6px; }
+
 .colony-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px; margin-bottom: 28px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
 }
-.colony-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px;
+.colony-grid .hud-panel {
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color 0.15s, background 0.15s;
 }
-.colony-card:hover { border-color: var(--green-dim); transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,255,136,0.06); }
-.colony-name { font-size: 15px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.colony-name .active-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse-dot 1.5s ease-in-out infinite; }
-.colony-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
-.status-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #1a1a2e; }
-.status-bar-seg { transition: width 0.3s; }
+.colony-grid .hud-panel:hover {
+  border-color: #ffcc00;
+  background: #002028;
+}
+.colony-grid .hud-panel:hover .colony-name-text { color: #ffcc00; }
+.colony-name-text {
+  color: #00ff88;
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.15s;
+}
+.colony-name-text .active-dot {
+  width: 8px; height: 8px;
+  background: #00ff88;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+.colony-meta-row {
+  font-size: 11px;
+  color: #5fa8b8;
+  margin-bottom: 12px;
+  letter-spacing: 0.5px;
+}
+.colony-status-bar {
+  display: flex;
+  height: 10px;
+  background: #000800;
+  border: 1px solid #00384a;
+  overflow: hidden;
+}
+.colony-status-seg { transition: width 0.3s; }
 
-.queue-panel { margin-top: 8px; }
-.queue-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 12px; background: var(--bg-card);
-  border: 1px solid var(--border); border-radius: 6px;
-  margin-bottom: 6px; font-size: 12px;
+.queue-panel { margin-bottom: 20px; }
+.queue-list { display: flex; flex-direction: column; gap: 8px; }
+.queue-list .hud-panel.dense {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
 }
-.queue-cell { color: var(--green); cursor: pointer; font-weight: 600; }
-.queue-cell:hover { text-decoration: underline; }
-.queue-state-badge {
-  padding: 2px 8px; border-radius: 3px; font-size: 10px;
-  font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
-  background: rgba(0,255,136,0.1); color: var(--green);
+.queue-cell-link {
+  color: #00ff88;
+  cursor: pointer;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.queue-cell-link:hover { color: #ffcc00; text-decoration: underline; }
+.queue-state {
+  color: #ffcc00;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.queue-agent {
+  color: #5fa8b8;
+  font-size: 11px;
 }
 
 /* ── Colony DAG View — retro HUD map-screen chrome ──────────────── */
@@ -438,7 +631,7 @@ body {
 }
 .dag-hud-top .hud-label {
   color: #5fa8b8;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -481,7 +674,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 1px;
   color: #5fa8b8;
   text-transform: uppercase;
@@ -551,7 +744,7 @@ body {
 }
 .cell-id {
   color: #00ccff;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: bold;
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -562,8 +755,8 @@ body {
 }
 .cell-claim {
   color: #e0f0ff;
-  font-size: 10px;
-  line-height: 1.3;
+  font-size: 11px;
+  line-height: 1.35;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -573,8 +766,8 @@ body {
 .dag-cell.is-seed .cell-id { color: #00ff88; }
 .dag-cell.is-seed .cell-body { padding-left: 22px; }  /* leave room for the H glyph */
 .dag-cell.is-ghost .cell-body { opacity: 0.65; }
-.dag-cell.is-ghost .cell-claim { -webkit-line-clamp: 2; font-size: 9px; }
-.dag-cell.is-ghost .cell-id { font-size: 7px; }
+.dag-cell.is-ghost .cell-claim { -webkit-line-clamp: 2; font-size: 10px; }
+.dag-cell.is-ghost .cell-id { font-size: 9px; }
 
 /* Tooltip — cut-corner cyan panel matching HUD chrome */
 .dag-tooltip {
@@ -609,83 +802,462 @@ body {
 .cell-active { animation: pulse-glow 1.5s ease-in-out infinite; }
 
 /* ── Research Logs ───────────────────────────────────────────────── */
-#screen-logs { background: var(--bg); }
 .logs-toolbar {
-  display: flex; gap: 10px; padding: 10px 20px;
-  border-bottom: 1px solid var(--border); flex-shrink: 0;
-  flex-wrap: wrap; align-items: center;
+  display: flex;
+  gap: 12px;
+  padding: 14px 22px 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: transparent;
 }
 .logs-filter {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 4px; padding: 5px 10px; color: var(--text);
-  font-family: inherit; font-size: 12px; outline: none;
+  background: #001018;
+  border: 1px solid #00ccff;
+  color: #e0f0ff;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 7px 14px;
+  outline: none;
+  letter-spacing: 0.5px;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
 }
-.logs-filter:focus { border-color: var(--green-dim); }
-.logs-feed { flex: 1; overflow-y: auto; padding: 8px 20px; font-size: 12px; }
+.logs-filter::placeholder { color: #5fa8b8; font-style: italic; }
+.logs-filter:focus { border-color: #ffcc00; }
+
+.logs-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 22px 20px;
+  font-size: 12px;
+  font-family: inherit;
+  position: relative;
+}
 .logs-feed::-webkit-scrollbar { width: 6px; }
 .logs-feed::-webkit-scrollbar-track { background: transparent; }
-.logs-feed::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+.logs-feed::-webkit-scrollbar-thumb { background: #00384a; }
 .log-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 5px 0; border-bottom: 1px solid rgba(26,29,46,0.5);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  margin-bottom: 4px;
+  background: rgba(0, 16, 24, 0.6);
+  border-left: 2px solid #00ccff;
+  transition: background 0.15s, border-color 0.15s;
 }
-.log-time { color: var(--text-dim); flex-shrink: 0; width: 70px; }
+.log-row:hover {
+  background: #001830;
+  border-left-color: #ffcc00;
+}
+.log-time {
+  color: #ffcc00;
+  flex-shrink: 0;
+  width: 72px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
 .log-type-badge {
-  padding: 1px 8px; border-radius: 3px; font-size: 10px; font-weight: 700;
-  flex-shrink: 0; min-width: 100px; text-align: center;
-  text-transform: uppercase; letter-spacing: 0.3px;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: bold;
+  flex-shrink: 0;
+  min-width: 120px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid currentColor;
 }
-.log-agent { color: var(--text-mid); flex-shrink: 0; min-width: 120px; }
-.log-cell { color: var(--green); cursor: pointer; font-weight: 600; flex-shrink: 0; }
-.log-cell:hover { text-decoration: underline; }
-.log-iter { color: var(--text-dim); flex-shrink: 0; }
-.logs-empty { color: var(--text-dim); text-align: center; padding: 60px 20px; font-size: 14px; }
+.log-agent {
+  color: #66ccff;
+  flex-shrink: 0;
+  min-width: 130px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.log-cell {
+  color: #00ff88;
+  cursor: pointer;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+.log-cell:hover { color: #ffcc00; text-decoration: underline; }
+.log-iter {
+  color: #5fa8b8;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.logs-empty {
+  color: #5fa8b8;
+  text-align: center;
+  padding: 64px 20px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
 
 /* ── Cell Detail ─────────────────────────────────────────────────── */
-#screen-cell { background: var(--bg); }
-.cell-content { flex: 1; overflow-y: auto; padding: 20px; }
+.cell-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 40px;
+  position: relative;
+  font-family: inherit;
+}
 .cell-content::-webkit-scrollbar { width: 6px; }
 .cell-content::-webkit-scrollbar-track { background: transparent; }
-.cell-content::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
-.cell-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
-.cell-claim { font-size: 18px; font-weight: 600; flex: 1; min-width: 200px; }
+.cell-content::-webkit-scrollbar-thumb { background: #00384a; }
+
+.cell-back { margin-bottom: 20px; }
+
+.cell-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+.cell-claim-text {
+  font-size: 20px;
+  font-weight: bold;
+  color: #e0f0ff;
+  flex: 1;
+  min-width: 260px;
+  line-height: 1.4;
+  letter-spacing: 0.5px;
+}
 .cell-status-badge {
-  padding: 4px 12px; border-radius: 4px; font-size: 11px;
-  font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; flex-shrink: 0;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
 }
+
 .cell-meta-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px; margin-bottom: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
 }
-.meta-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; }
-.meta-label { font-size: 10px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
-.meta-value { font-size: 13px; }
-.meta-link { color: var(--green); cursor: pointer; }
-.meta-link:hover { text-decoration: underline; }
-
-.verdict-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 12px; }
-.verdict-table th { text-align: left; padding: 8px 12px; color: var(--text-dim); border-bottom: 1px solid var(--border); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
-.verdict-table td { padding: 8px 12px; border-bottom: 1px solid rgba(26,29,46,0.5); }
-.verdict-pass { color: #22c55e; font-weight: 600; }
-.verdict-block { color: #ef4444; font-weight: 600; }
-
-.timeline-group { margin-bottom: 20px; }
-.timeline-iter-label { font-size: 11px; font-weight: 700; color: var(--text-dim); letter-spacing: 1px; padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
-.timeline-event { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(26,29,46,0.3); font-size: 12px; }
-.timeline-detail { flex: 1; color: var(--text-mid); line-height: 1.5; }
-.timeline-detail strong { color: var(--text); }
-.timeline-time { color: var(--text-dim); flex-shrink: 0; font-size: 11px; }
-.expand-toggle { cursor: pointer; color: var(--text-dim); font-size: 10px; }
-.expand-toggle:hover { color: var(--text-mid); }
-.expand-content { display: none; margin-top: 6px; padding: 8px; background: var(--bg-panel); border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
-
-.cell-back { margin-bottom: 16px; }
-.cell-back button {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 6px; padding: 6px 14px; color: var(--text-mid);
-  cursor: pointer; font-size: 12px; font-family: inherit;
+.meta-item-label {
+  color: #5fa8b8;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
 }
-.cell-back button:hover { color: var(--text); border-color: var(--border-bright); }
+.meta-item-value {
+  color: #ffcc00;
+  font-size: 13px;
+  font-weight: bold;
+  word-break: break-word;
+  letter-spacing: 0.5px;
+}
+.meta-item-value.link { color: #00ff88; cursor: pointer; }
+.meta-item-value.link:hover { color: #ffcc00; text-decoration: underline; }
+
+.verdict-section { margin-bottom: 32px; }
+.verdict-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: inherit;
+}
+.verdict-table th {
+  text-align: left;
+  padding: 10px 14px;
+  color: #5fa8b8;
+  border-bottom: 1px solid #00ccff;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  background: #001018;
+}
+.verdict-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #003040;
+  color: #e0f0ff;
+}
+.verdict-pass { color: #00ff88; font-weight: bold; }
+.verdict-block { color: #ff6b6b; font-weight: bold; }
+
+.timeline-section { margin-bottom: 32px; }
+.timeline-group { margin-bottom: 24px; }
+.timeline-iter-label {
+  font-size: 11px;
+  font-weight: bold;
+  color: #ffcc00;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 10px 0;
+  border-bottom: 1px solid #00ccff;
+  margin-bottom: 12px;
+}
+.timeline-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #001830;
+  font-size: 12px;
+}
+.timeline-detail {
+  flex: 1;
+  color: #e0f0ff;
+  line-height: 1.6;
+}
+.timeline-detail strong { color: #ffcc00; font-weight: bold; }
+.timeline-time {
+  color: #5fa8b8;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.expand-toggle {
+  cursor: pointer;
+  color: #5fa8b8;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.expand-toggle:hover { color: #ffcc00; }
+.expand-content {
+  display: none;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: #000800;
+  border: 1px solid #003040;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #66ffbb;
+  line-height: 1.5;
+}
+
+/* ── Cell detail: Research Tag ───────────────────────────────────── */
+.research-tag {
+  display: inline-block;
+  padding: 4px 14px;
+  margin-bottom: 18px;
+  background: #1a0a14;
+  border: 1px solid #ff3399;
+  color: #ff3399;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+
+/* ── Cell detail: Evidence markdown renderer ─────────────────────── */
+.evidence-section { margin-bottom: 32px; }
+.evidence-markdown {
+  padding: 20px 24px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #e0f0ff;
+}
+.evidence-markdown h1,
+.evidence-markdown h2,
+.evidence-markdown h3,
+.evidence-markdown h4 {
+  color: #ffcc00;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin: 18px 0 10px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #00384a;
+}
+.evidence-markdown h1 { font-size: 15px; color: #00ff88; }
+.evidence-markdown h2 { font-size: 13px; }
+.evidence-markdown h3 { font-size: 12px; color: #66ccff; }
+.evidence-markdown h4 { font-size: 11px; color: #5fa8b8; border-bottom: none; }
+.evidence-markdown p { margin: 8px 0; }
+.evidence-markdown strong { color: #ffcc00; font-weight: bold; }
+.evidence-markdown em { color: #66ffbb; font-style: italic; }
+.evidence-markdown code {
+  background: #001830;
+  color: #66ffbb;
+  padding: 1px 6px;
+  font-size: 12px;
+  border: 1px solid #003040;
+}
+.evidence-markdown pre {
+  background: #000800;
+  border: 1px solid #003040;
+  padding: 10px 14px;
+  overflow-x: auto;
+  margin: 10px 0;
+}
+.evidence-markdown pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: #66ffbb;
+}
+.evidence-markdown ul,
+.evidence-markdown ol {
+  margin: 8px 0 8px 20px;
+  padding-left: 14px;
+}
+.evidence-markdown li { margin: 4px 0; }
+.evidence-markdown blockquote {
+  border-left: 3px solid #ff3399;
+  padding: 4px 14px;
+  margin: 10px 0;
+  color: #66ccff;
+  background: rgba(255, 51, 153, 0.05);
+}
+.evidence-markdown a {
+  color: #00ff88;
+  text-decoration: none;
+  border-bottom: 1px dashed #00ff88;
+}
+.evidence-markdown a:hover { color: #ffcc00; border-bottom-color: #ffcc00; }
+.evidence-markdown hr {
+  border: none;
+  border-top: 1px solid #00384a;
+  margin: 16px 0;
+}
+.evidence-empty {
+  color: #5fa8b8;
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.5px;
+  padding: 12px 16px;
+}
+
+/* ── Cell detail: Citations list ─────────────────────────────────── */
+.citations-section { margin-bottom: 32px; }
+.citations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.citation-card {
+  position: relative;
+}
+.citation-card .citation-title {
+  display: block;
+  color: #00ff88;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  text-decoration: none;
+  word-break: break-word;
+}
+.citation-card .citation-title:hover { color: #ffcc00; text-decoration: underline; }
+.citation-card .citation-url {
+  display: block;
+  color: #5fa8b8;
+  font-size: 11px;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.citation-card .citation-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+.citation-card .citation-direction {
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  text-transform: uppercase;
+  font-weight: bold;
+}
+.citation-card .citation-direction.supports { color: #00ff88; }
+.citation-card .citation-direction.contradicts { color: #ff6b6b; }
+.citation-card .citation-direction.neutral { color: #5fa8b8; }
+.citation-card .citation-hierarchy { color: #66ccff; }
+.citation-card .citation-agent { color: #5fa8b8; font-style: italic; }
+.citation-card .citation-finding {
+  color: #e0f0ff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.citations-empty {
+  color: #5fa8b8;
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.5px;
+  padding: 12px 16px;
+}
+
+/* ── Cell detail: Rendered event log rows (no raw JSON) ─────────── */
+.cell-logs-section { margin-bottom: 32px; }
+.cell-log-row {
+  display: grid;
+  grid-template-columns: 70px 160px 1fr;
+  gap: 14px;
+  padding: 9px 14px;
+  margin-bottom: 4px;
+  background: rgba(0, 16, 24, 0.6);
+  border-left: 2px solid #00ccff;
+  font-size: 12px;
+  line-height: 1.5;
+  align-items: start;
+}
+.cell-log-row:hover {
+  background: #001830;
+  border-left-color: #ffcc00;
+}
+.cell-log-row .cell-log-time {
+  color: #ffcc00;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.cell-log-row .cell-log-type {
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid currentColor;
+  text-align: center;
+  align-self: start;
+}
+.cell-log-row .cell-log-body {
+  color: #e0f0ff;
+  word-break: break-word;
+}
+.cell-log-row .cell-log-body strong { color: #ffcc00; font-weight: bold; }
+.cell-log-row .cell-log-body a { color: #00ff88; text-decoration: none; border-bottom: 1px dashed #00ff88; }
+.cell-log-row .cell-log-body a:hover { color: #ffcc00; border-bottom-color: #ffcc00; }
+.cell-log-row .cell-log-agent {
+  display: block;
+  color: #66ccff;
+  font-size: 11px;
+  margin-top: 2px;
+}
+.cell-log-row .cell-log-verdict-pass { color: #00ff88; font-weight: bold; }
+.cell-log-row .cell-log-verdict-fail { color: #ff6b6b; font-weight: bold; }
+.cell-logs-empty {
+  color: #5fa8b8;
+  font-size: 12px;
+  font-style: italic;
+  padding: 12px 16px;
+}
 
 /* ── Loading / Empty States ──────────────────────────────────────── */
 .loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); font-size: 14px; }
@@ -710,7 +1282,7 @@ body {
 </div>
 
 <!-- Computer / CRT terminal (also hosts onboarding when .petri is missing) -->
-<div id="screen-computer" class="screen">
+<div id="screen-computer" class="screen hud-screen">
   <div class="header-bar">
     <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
     <div class="header-nav">
@@ -721,6 +1293,7 @@ body {
     <div class="header-spacer"></div>
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
   </div>
+  <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
   <div class="crt-frame" id="crt-frame">
     <div class="crt-screen" id="crt-output"></div>
     <div class="crt-xterm" id="crt-xterm" style="display:none"></div>
@@ -733,12 +1306,11 @@ body {
       <button id="term-stop-btn" class="stop" disabled>STOP</button>
     </div>
     <div class="crt-scanlines"></div>
-    <div class="crt-glow"></div>
   </div>
 </div>
 
 <!-- Lab Overview -->
-<div id="screen-lab" class="screen">
+<div id="screen-lab" class="screen hud-screen">
   <div class="header-bar">
     <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
     <div class="header-nav">
@@ -749,6 +1321,7 @@ body {
     <div class="header-spacer"></div>
     <div class="live-badge" id="live-badge"><div class="live-dot"></div>LIVE</div>
   </div>
+  <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
   <div class="lab-content" id="lab-content">
     <div class="loading"><span class="spinner"></span>Loading...</div>
   </div>
@@ -788,7 +1361,7 @@ body {
 </div>
 
 <!-- Research Logs -->
-<div id="screen-logs" class="screen">
+<div id="screen-logs" class="screen hud-screen">
   <div class="header-bar">
     <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
     <div class="header-nav">
@@ -799,6 +1372,7 @@ body {
     <div class="header-spacer"></div>
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
   </div>
+  <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
   <div class="logs-toolbar">
     <input class="logs-filter" id="filter-cell" placeholder="Filter cell..." />
     <input class="logs-filter" id="filter-agent" placeholder="Filter agent..." />
@@ -823,7 +1397,7 @@ body {
 </div>
 
 <!-- Cell Detail -->
-<div id="screen-cell" class="screen">
+<div id="screen-cell" class="screen hud-screen">
   <div class="header-bar">
     <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
     <div class="header-nav">
@@ -834,6 +1408,7 @@ body {
     <div class="header-spacer"></div>
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
   </div>
+  <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
   <div class="cell-content" id="cell-content">
     <div class="loading"><span class="spinner"></span>Loading cell...</div>
   </div>
@@ -1112,7 +1687,8 @@ function renderLab() {
     return QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1;
   });
 
-  // Stats ribbon
+  // Stats ribbon — each stat is a cut-corner cyan HUD panel with a
+  // big yellow value and a dim cyan label underneath.
   var ribbon = buildEl('div', { className: 'stats-ribbon' });
   [
     [stats.total_events || 0, 'Events'],
@@ -1120,17 +1696,17 @@ function renderLab() {
     [stats.queue_size || 0, 'In Queue'],
     [activeQueue.length, 'Active'],
   ].forEach(function(pair) {
-    var card = buildEl('div', { className: 'stat-card' });
-    card.appendChild(buildEl('div', { className: 'stat-value' }, String(pair[0])));
-    card.appendChild(buildEl('div', { className: 'stat-label' }, pair[1]));
+    var card = buildEl('div', { className: 'hud-panel compact' });
+    card.appendChild(buildEl('div', { className: 'hud-label' }, pair[1]));
+    card.appendChild(buildEl('div', { className: 'hud-value big' }, String(pair[0])));
     ribbon.appendChild(card);
   });
   container.appendChild(ribbon);
 
-  // Colony cards
+  // Colony cards — each colony is a clickable HUD panel.
   var colonyKeys = Object.keys(colonies);
   if (colonyKeys.length > 0) {
-    container.appendChild(buildEl('div', { className: 'section-title' }, 'Colonies'));
+    container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Colonies'));
     var grid = buildEl('div', { className: 'colony-grid' });
 
     colonyKeys.forEach(function(colonyId) {
@@ -1148,21 +1724,21 @@ function renderLab() {
 
       var displayName = colonyId.split('-').slice(1).join('-') || colonyId;
 
-      var card = buildEl('div', { className: 'colony-card', onclick: function() { navigate('colony', colonyId); } });
+      var card = buildEl('div', { className: 'hud-panel', onclick: function() { navigate('colony', colonyId); } });
 
-      var nameEl = buildEl('div', { className: 'colony-name' });
+      var nameEl = buildEl('div', { className: 'colony-name-text' });
       if (hasActive) nameEl.appendChild(buildEl('span', { className: 'active-dot' }));
       nameEl.appendChild(document.createTextNode(displayName));
       card.appendChild(nameEl);
 
-      card.appendChild(buildEl('div', { className: 'colony-meta' }, colonyCells.length + ' cells'));
+      card.appendChild(buildEl('div', { className: 'colony-meta-row' }, colonyCells.length + ' cells'));
 
-      var bar = buildEl('div', { className: 'status-bar' });
+      var bar = buildEl('div', { className: 'colony-status-bar' });
       var total = colonyCells.length;
       Object.keys(statusCounts).forEach(function(status) {
         var pct = (statusCounts[status] / total * 100).toFixed(1);
         var color = STATUS_COLORS[status] || '#555';
-        bar.appendChild(buildEl('div', { className: 'status-bar-seg', title: status + ': ' + statusCounts[status], style: { width: pct + '%', background: color } }));
+        bar.appendChild(buildEl('div', { className: 'colony-status-seg', title: status + ': ' + statusCounts[status], style: { width: pct + '%', background: color } }));
       });
       card.appendChild(bar);
       grid.appendChild(card);
@@ -1173,16 +1749,16 @@ function renderLab() {
     container.appendChild(buildEl('div', { className: 'logs-empty' }, 'No colonies yet. Run petri seed to create one.'));
   }
 
-  // Active queue
+  // Active queue — dense HUD panels, yellow state badges.
   if (activeQueue.length > 0) {
-    container.appendChild(buildEl('div', { className: 'section-title' }, 'Active Processing'));
-    var panel = buildEl('div', { className: 'queue-panel' });
+    container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Active Processing'));
+    var panel = buildEl('div', { className: 'queue-list' });
     activeQueue.forEach(function(entry) {
-      var row = buildEl('div', { className: 'queue-row' });
-      var cellLink = buildEl('span', { className: 'queue-cell', onclick: function() { navigate('cell', entry.cell_id); } }, entry.cell_id);
+      var row = buildEl('div', { className: 'hud-panel dense' });
+      var cellLink = buildEl('span', { className: 'queue-cell-link', onclick: function() { navigate('cell', entry.cell_id); } }, entry.cell_id);
       row.appendChild(cellLink);
-      row.appendChild(buildEl('span', { className: 'queue-state-badge' }, entry.queue_state));
-      if (entry.iteration) row.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'iter ' + entry.iteration));
+      row.appendChild(buildEl('span', { className: 'queue-state' }, entry.queue_state));
+      if (entry.iteration) row.appendChild(buildEl('span', { className: 'queue-agent' }, 'iter ' + entry.iteration));
       panel.appendChild(row);
     });
     container.appendChild(panel);
@@ -1243,12 +1819,12 @@ function renderDAG(colonyCells, allCells, colonyId, activeSet) {
 
   // Fixed cell dimensions — large enough to show ID + a few wrapped lines
   // of claim context. Seed hub is bigger, cross-colony ghost stubs smaller.
-  var CELL_W = 190;
-  var CELL_H = 58;
-  var HUB_W  = 220;
-  var HUB_H  = 70;
-  var GHOST_W = 130;
-  var GHOST_H = 40;
+  var CELL_W = 200;
+  var CELL_H = 68;
+  var HUB_W  = 230;
+  var HUB_H  = 82;
+  var GHOST_W = 140;
+  var GHOST_H = 48;
 
   // Ring spacing needs to fit a CELL_W-wide cell on every ring without
   // siblings overlapping. 240 is empirically comfortable for 6+ siblings.
@@ -1685,25 +2261,33 @@ function renderCellDetail(cell) {
   var container = document.getElementById('cell-content');
   container.textContent = '';
   var statusColor = STATUS_COLORS[cell.status] || '#555';
+  var events = cell.events || [];
 
-  // Back
+  // ── Back link ──
   var backDiv = buildEl('div', { className: 'cell-back' });
-  backDiv.appendChild(buildEl('button', { onclick: function() { history.back(); } }, '\u2190 Back'));
+  backDiv.appendChild(buildEl('button', { className: 'hud-btn', onclick: function() { history.back(); } }, '\u2190 BACK'));
   container.appendChild(backDiv);
 
-  // Header
+  // ── 1. Research Tag ──
+  container.appendChild(buildEl('div', { className: 'research-tag' }, '\u25B8 Research Cell'));
+
+  // ── 2. Title + status badge ──
   var header = buildEl('div', { className: 'cell-header' });
-  header.appendChild(buildEl('div', { className: 'cell-claim' }, cell.claim_text || cell.cell_id));
-  header.appendChild(buildEl('span', { className: 'cell-status-badge', style: { background: statusColor } }, cell.status));
+  header.appendChild(buildEl('div', { className: 'cell-claim-text' }, cell.claim_text || cell.cell_id));
+  header.appendChild(buildEl('span', {
+    className: 'cell-status-badge',
+    style: { background: statusColor + '22', color: statusColor },
+  }, cell.status));
   container.appendChild(header);
 
-  // Meta grid
+  // ── 3. Info Cards (meta grid) ──
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Info'));
   var metaGrid = buildEl('div', { className: 'cell-meta-grid' });
 
   function addMetaItem(label, valueContent) {
-    var item = buildEl('div', { className: 'meta-item' });
-    item.appendChild(buildEl('div', { className: 'meta-label' }, label));
-    var valDiv = buildEl('div', { className: 'meta-value' });
+    var item = buildEl('div', { className: 'hud-panel compact' });
+    item.appendChild(buildEl('div', { className: 'meta-item-label' }, label));
+    var valDiv = buildEl('div', { className: 'meta-item-value' });
     if (typeof valueContent === 'string') valDiv.textContent = valueContent;
     else valDiv.appendChild(valueContent);
     item.appendChild(valDiv);
@@ -1716,28 +2300,28 @@ function renderCellDetail(cell) {
 
   var depsDiv = document.createDocumentFragment();
   (cell.dependencies || []).forEach(function(depId) {
-    var link = buildEl('span', { className: 'meta-link', onclick: function() { navigate('cell', depId); } }, depId);
+    var link = buildEl('span', { className: 'meta-item-value link', onclick: function() { navigate('cell', depId); } }, depId);
     depsDiv.appendChild(link);
     depsDiv.appendChild(document.createElement('br'));
   });
-  if ((cell.dependencies || []).length === 0) depsDiv.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'None (cell)'));
+  if ((cell.dependencies || []).length === 0) depsDiv.appendChild(buildEl('span', { style: { color: '#5fa8b8' } }, 'None'));
   addMetaItem('Dependencies (' + (cell.dependencies || []).length + ')', depsDiv);
 
   var depntsDiv = document.createDocumentFragment();
   (cell.dependents || []).forEach(function(depId) {
-    depntsDiv.appendChild(buildEl('span', { className: 'meta-link', onclick: function() { navigate('cell', depId); } }, depId));
+    depntsDiv.appendChild(buildEl('span', { className: 'meta-item-value link', onclick: function() { navigate('cell', depId); } }, depId));
     depntsDiv.appendChild(document.createElement('br'));
   });
-  if ((cell.dependents || []).length === 0) depntsDiv.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'None'));
+  if ((cell.dependents || []).length === 0) depntsDiv.appendChild(buildEl('span', { style: { color: '#5fa8b8' } }, 'None'));
   addMetaItem('Dependents (' + (cell.dependents || []).length + ')', depntsDiv);
 
   container.appendChild(metaGrid);
 
-  // Verdicts
-  var events = cell.events || [];
+  // ── 4. Verdicts ──
   var verdicts = events.filter(function(evt) { return evt.type === 'verdict_issued'; });
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Verdicts'));
+  var verdictSection = buildEl('div', { className: 'verdict-section' });
   if (verdicts.length > 0) {
-    container.appendChild(buildEl('div', { className: 'section-title' }, 'Verdicts'));
     var table = buildEl('table', { className: 'verdict-table' });
     var thead = buildEl('thead');
     var headRow = buildEl('tr');
@@ -1757,74 +2341,208 @@ function renderCellDetail(cell) {
       tbody.appendChild(row);
     });
     table.appendChild(tbody);
-    container.appendChild(table);
+    verdictSection.appendChild(table);
+  } else {
+    verdictSection.appendChild(buildEl('div', { className: 'citations-empty' }, 'No verdicts issued yet.'));
   }
+  container.appendChild(verdictSection);
 
-  // Timeline
-  if (events.length > 0) {
-    container.appendChild(buildEl('div', { className: 'section-title' }, 'Event Timeline (' + events.length + ' events)'));
+  // ── 5. Evidence (markdown rendered) ──
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Evidence'));
+  var evidenceSection = buildEl('div', { className: 'evidence-section' });
+  var evidenceMd = cell.evidence_md || '';
+  if (evidenceMd.trim().length > 0 && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+    var mdPanel = buildEl('div', { className: 'hud-panel' });
+    var mdBody = buildEl('div', { className: 'evidence-markdown' });
+    // Render markdown → HTML → sanitize via DOMPurify before touching
+    // the DOM. DOMPurify strips <script>, inline event handlers, and
+    // anything else that could execute; this is the only place we set
+    // innerHTML in the whole SPA.
+    try {
+      var rawHtml = marked.parse(evidenceMd, { breaks: true, gfm: true });
+      mdBody.innerHTML = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
+    } catch (err) {
+      mdBody.textContent = evidenceMd;
+    }
+    mdPanel.appendChild(mdBody);
+    evidenceSection.appendChild(mdPanel);
+  } else if (evidenceMd.trim().length > 0) {
+    // Fallback: renderer libs failed to load — display raw markdown as
+    // preformatted text so the user still sees the content.
+    var pre = buildEl('pre', { className: 'expand-content', style: { display: 'block' } }, evidenceMd);
+    evidenceSection.appendChild(pre);
+  } else {
+    evidenceSection.appendChild(buildEl('div', { className: 'evidence-empty' }, 'No evidence recorded for this cell yet.'));
+  }
+  container.appendChild(evidenceSection);
 
-    var byIteration = {};
-    events.forEach(function(evt) {
-      var iter = evt.iteration || 0;
-      if (!byIteration[iter]) byIteration[iter] = [];
-      byIteration[iter].push(evt);
+  // ── 6. Citations (source_reviewed events with URL + finding) ──
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Citations'));
+  var citationsSection = buildEl('div', { className: 'citations-section' });
+  var sourceEvents = events.filter(function(evt) { return evt.type === 'source_reviewed' && evt.data && evt.data.url; });
+  if (sourceEvents.length > 0) {
+    var citationsList = buildEl('div', { className: 'citations-list' });
+    sourceEvents.forEach(function(evt) {
+      var data = evt.data || {};
+      var card = buildEl('div', { className: 'hud-panel compact citation-card' });
+
+      var titleLink = buildEl('a', {
+        className: 'citation-title',
+        href: data.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+      }, data.title || data.url);
+      card.appendChild(titleLink);
+
+      var urlEl = buildEl('span', { className: 'citation-url' }, data.url);
+      card.appendChild(urlEl);
+
+      var metaRow = buildEl('div', { className: 'citation-meta' });
+      var direction = (data.supports_or_contradicts || '').toLowerCase();
+      if (direction) {
+        var dirClass = 'neutral';
+        if (direction.indexOf('support') !== -1) dirClass = 'supports';
+        else if (direction.indexOf('contradict') !== -1) dirClass = 'contradicts';
+        metaRow.appendChild(buildEl('span', { className: 'citation-direction ' + dirClass }, direction));
+      }
+      if (data.hierarchy_level) {
+        metaRow.appendChild(buildEl('span', { className: 'citation-hierarchy' }, 'Level ' + data.hierarchy_level));
+      }
+      metaRow.appendChild(buildEl('span', { className: 'citation-agent' }, 'via ' + (evt.agent || 'unknown')));
+      card.appendChild(metaRow);
+
+      if (data.finding) {
+        card.appendChild(buildEl('div', { className: 'citation-finding' }, data.finding));
+      }
+      citationsList.appendChild(card);
     });
+    citationsSection.appendChild(citationsList);
+  } else {
+    citationsSection.appendChild(buildEl('div', { className: 'citations-empty' }, 'No citations recorded for this cell yet.'));
+  }
+  container.appendChild(citationsSection);
 
-    Object.keys(byIteration).sort(function(a, b) { return Number(b) - Number(a); }).forEach(function(iter) {
-      var grp = buildEl('div', { className: 'timeline-group' });
-      grp.appendChild(buildEl('div', { className: 'timeline-iter-label' }, 'ITERATION ' + iter));
-
-      byIteration[iter].slice().reverse().forEach(function(evt) {
-        var typeColor = EVENT_COLORS[evt.type] || '#666';
-        var time = (evt.timestamp || '').substring(11, 19) || '';
-        var row = buildEl('div', { className: 'timeline-event' });
-        row.appendChild(buildEl('span', { className: 'log-type-badge', style: { background: typeColor + '22', color: typeColor } }, (evt.type || '').replace(/_/g, ' ')));
-
-        var detail = buildEl('div', { className: 'timeline-detail' });
-        detail.appendChild(buildEl('strong', {}, evt.agent || ''));
-
-        var data = evt.data || {};
-        var extraText = '';
-        if (evt.type === 'verdict_issued' && data.verdict) {
-          extraText = ' \u2014 ' + data.verdict;
-          if (data.summary) extraText += '\n' + data.summary.substring(0, 200);
-        } else if (evt.type === 'search_executed' && data.query) {
-          extraText = ' \u2014 "' + data.query + '"';
-          if (data.sources_found) extraText += ' (' + data.sources_found + ' sources)';
-        } else if (evt.type === 'source_reviewed' && data.url) {
-          extraText = ' \u2014 ' + data.url.substring(0, 60);
-          if (data.supports_or_contradicts) extraText += ' [' + data.supports_or_contradicts + ']';
-        } else if (evt.type === 'debate_mediated' && data.from_agent) {
-          extraText = ' \u2014 ' + data.from_agent + ' vs ' + (data.to_agent || '');
-        } else if (evt.type === 'convergence_checked') {
-          extraText = ' \u2014 ' + (data.converged ? 'CONVERGED' : 'NOT CONVERGED');
-          if (data.weakest_link) extraText += ' (weakest: ' + data.weakest_link + ')';
-        }
-        if (extraText) detail.appendChild(document.createTextNode(extraText));
-
-        // Expandable raw data
-        var toggleSpan = buildEl('span', { className: 'expand-toggle' }, ' [show data]');
-        var expandDiv = buildEl('div', { className: 'expand-content' }, JSON.stringify(data, null, 2));
-        toggleSpan.addEventListener('click', function() {
-          var showing = expandDiv.style.display === 'block';
-          expandDiv.style.display = showing ? 'none' : 'block';
-          toggleSpan.textContent = showing ? ' [show data]' : ' [hide data]';
-        });
-        detail.appendChild(document.createElement('br'));
-        detail.appendChild(toggleSpan);
-        detail.appendChild(expandDiv);
-
-        row.appendChild(detail);
-        row.appendChild(buildEl('span', { className: 'timeline-time' }, time));
-        grp.appendChild(row);
-      });
-
-      container.appendChild(grp);
+  // ── 7. Cell Logs (friendly-rendered, no raw JSON) ──
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Cell Logs (' + events.length + ' events)'));
+  var logsSection = buildEl('div', { className: 'cell-logs-section' });
+  if (events.length > 0) {
+    // Most-recent first, across all iterations.
+    var sortedEvents = events.slice().sort(function(a, b) {
+      return (b.timestamp || '').localeCompare(a.timestamp || '');
+    });
+    sortedEvents.forEach(function(evt) {
+      logsSection.appendChild(renderCellLogRow(evt));
     });
   } else {
-    container.appendChild(buildEl('div', { className: 'logs-empty' }, 'No events recorded for this cell yet.'));
+    logsSection.appendChild(buildEl('div', { className: 'cell-logs-empty' }, 'No events recorded for this cell yet.'));
   }
+  container.appendChild(logsSection);
+}
+
+// Render a single event log row with human-readable body instead of
+// raw JSON. Each event type gets its own formatting so the reader
+// sees "Reviewed <url> (SUPPORTS)" instead of a JSON blob.
+function renderCellLogRow(evt) {
+  var data = evt.data || {};
+  var typeColor = EVENT_COLORS[evt.type] || '#5fa8b8';
+  var time = (evt.timestamp || '').substring(11, 19) || '--:--:--';
+
+  var row = buildEl('div', { className: 'cell-log-row' });
+  row.appendChild(buildEl('span', { className: 'cell-log-time' }, time));
+
+  var typeBadge = buildEl('span', {
+    className: 'cell-log-type',
+    style: { background: typeColor + '22', color: typeColor, borderColor: typeColor },
+  }, (evt.type || '').replace(/_/g, ' '));
+  row.appendChild(typeBadge);
+
+  var body = buildEl('div', { className: 'cell-log-body' });
+
+  // Event-type-specific friendly formatting. All user-supplied strings
+  // go through textContent/createTextNode so there's no XSS path.
+  if (evt.type === 'verdict_issued') {
+    var verdict = data.verdict || '';
+    var isPass = PASS_VERDICTS.has(verdict);
+    body.appendChild(buildEl('strong', {}, verdict || '—'));
+    body.appendChild(document.createTextNode(' '));
+    body.appendChild(buildEl('span', {
+      className: isPass ? 'cell-log-verdict-pass' : 'cell-log-verdict-fail',
+    }, isPass ? 'PASS' : 'BLOCK'));
+    if (typeof data.confidence !== 'undefined' && data.confidence !== null) {
+      body.appendChild(document.createTextNode(' · confidence ' + data.confidence));
+    }
+    if (data.summary) {
+      body.appendChild(document.createElement('br'));
+      body.appendChild(document.createTextNode(String(data.summary).substring(0, 280)));
+    }
+  } else if (evt.type === 'search_executed') {
+    body.appendChild(document.createTextNode('Searched: '));
+    body.appendChild(buildEl('strong', {}, '"' + (data.query || '') + '"'));
+    if (data.sources_found) {
+      body.appendChild(document.createTextNode(' · ' + data.sources_found + ' sources'));
+    }
+  } else if (evt.type === 'source_reviewed') {
+    if (data.url) {
+      var srcLink = buildEl('a', {
+        href: data.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+      }, data.title || data.url);
+      body.appendChild(srcLink);
+    } else {
+      body.appendChild(buildEl('strong', {}, data.title || 'Unknown source'));
+    }
+    if (data.supports_or_contradicts) {
+      body.appendChild(document.createTextNode(' · '));
+      body.appendChild(buildEl('strong', {}, String(data.supports_or_contradicts).toUpperCase()));
+    }
+    if (data.finding) {
+      body.appendChild(document.createElement('br'));
+      body.appendChild(document.createTextNode(String(data.finding).substring(0, 200)));
+    }
+  } else if (evt.type === 'evidence_appended') {
+    body.appendChild(document.createTextNode(data.summary || 'Evidence appended'));
+  } else if (evt.type === 'debate_mediated') {
+    body.appendChild(document.createTextNode('Debate: '));
+    body.appendChild(buildEl('strong', {}, (data.from_agent || '?') + ' vs ' + (data.to_agent || '?')));
+    if (data.summary) {
+      body.appendChild(document.createElement('br'));
+      body.appendChild(document.createTextNode(String(data.summary).substring(0, 200)));
+    }
+  } else if (evt.type === 'convergence_checked') {
+    var converged = !!data.converged;
+    body.appendChild(buildEl('strong', {
+      className: converged ? 'cell-log-verdict-pass' : 'cell-log-verdict-fail',
+    }, converged ? 'CONVERGED' : 'NOT CONVERGED'));
+    if (data.weakest_link) {
+      body.appendChild(document.createTextNode(' · weakest: ' + data.weakest_link));
+    }
+  } else if (evt.type === 'cell_reopened' || evt.type === 'propagation_triggered') {
+    body.appendChild(document.createTextNode(data.reason || data.summary || evt.type.replace(/_/g, ' ')));
+  } else if (evt.type === 'decomposition_created') {
+    var childCount = (data.child_cell_ids || []).length;
+    body.appendChild(document.createTextNode('Decomposed into ' + childCount + ' child cell' + (childCount === 1 ? '' : 's')));
+  } else if (evt.type === 'decomposition_audit') {
+    body.appendChild(document.createTextNode(data.summary || 'Decomposition audited'));
+  } else if (data.summary) {
+    body.appendChild(document.createTextNode(data.summary));
+  } else {
+    // Unknown event type — show a terse single-line key=value pair dump
+    // (still human-readable, no stringified JSON braces).
+    var parts = [];
+    Object.keys(data).slice(0, 4).forEach(function(k) {
+      var v = data[k];
+      if (typeof v === 'string') parts.push(k + '=' + v.substring(0, 60));
+      else if (typeof v === 'number' || typeof v === 'boolean') parts.push(k + '=' + v);
+    });
+    body.appendChild(document.createTextNode(parts.join(' · ') || '—'));
+  }
+
+  // Agent attribution (small line under body).
+  body.appendChild(buildEl('span', { className: 'cell-log-agent' }, (evt.agent || 'unknown') + ' · iter ' + (evt.iteration || 0)));
+
+  row.appendChild(body);
+  return row;
 }
 
 // ── CRT Onboarding Terminal ─────────────────────────────────────────────
