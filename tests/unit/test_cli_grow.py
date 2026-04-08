@@ -66,7 +66,7 @@ def _make_run_one_pass(processed_sequence: list[int]):
 # ── 1. all-terminal exit ────────────────────────────────────────────────
 
 
-def test_loop_exits_when_all_nodes_terminal() -> None:
+def test_loop_exits_when_all_cells_terminal() -> None:
     get_states = _make_get_states([{"done": 3}])
     run_one_pass = _make_run_one_pass([3])
 

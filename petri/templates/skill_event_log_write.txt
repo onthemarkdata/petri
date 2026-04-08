@@ -1,10 +1,10 @@
 ---
-description: "Write an event to a node's event log with Pydantic validation"
+description: "Write an event to a cell's event log with Pydantic validation"
 ---
 
 # Event Log Write
 
-Append an event to a node's event log. This is the ONLY way to write events.
+Append an event to a cell's event log. This is the ONLY way to write events.
 
 ## Usage
 
@@ -12,12 +12,12 @@ Append an event to a node's event log. This is the ONLY way to write events.
 from petri.storage.event_log import append_event
 from pathlib import Path
 
-# Construct the events path for the target node
+# Construct the events path for the target cell
 events_path = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}/events.jsonl")
 
 append_event(
     events_path=events_path,
-    node_id="{node_id}",
+    cell_id="{cell_id}",
     event_type="{event_type}",
     agent="{agent_name}",
     iteration={iteration},

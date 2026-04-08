@@ -16,9 +16,9 @@ from petri.cli._bootstrap import (
 )
 from petri.cli_ui import print_error_and_exit
 from petri.storage.paths import (
+    cell_dir as cell_dir_for,
     events_path as events_file_path,
-    node_dir as node_dir_for,
-    parse_node_id,
+    parse_cell_id,
 )
 
 
@@ -87,32 +87,32 @@ def _run_substance_check(
         claim = new_claim.strip() or claim
 
 
-def _events_path_for(colony_path: Path, colony_model, node_id: str) -> Path:
-    """Resolve a node's events.jsonl path.
+def _events_path_for(colony_path: Path, colony_model, cell_id: str) -> Path:
+    """Resolve a cell's events.jsonl path.
 
-    Prefers the colony model's ``node_paths`` mapping when available,
-    falling back to parsing the node ID via ``storage.paths``.
+    Prefers the colony model's ``cell_paths`` mapping when available,
+    falling back to parsing the cell ID via ``storage.paths``.
     """
-    relative_path = colony_model.node_paths.get(node_id)
+    relative_path = colony_model.cell_paths.get(cell_id)
     if relative_path:
         return colony_path / relative_path / "events.jsonl"
-    _, _, level, seq = parse_node_id(node_id)
-    return events_file_path(node_dir_for(colony_path, level, seq))
+    _, _, level, seq = parse_cell_id(cell_id)
+    return events_file_path(cell_dir_for(colony_path, level, seq))
 
 
-def _log_node_event(
+def _log_cell_event(
     events_path: Path,
-    node_id: str,
+    cell_id: str,
     event_type: str,
     data: dict | None = None,
 ) -> None:
-    """Append an event to a node's events.jsonl with error handling."""
+    """Append an event to a cell's events.jsonl with error handling."""
     from petri.storage.event_log import append_event
 
     try:
         append_event(
             events_path=events_path,
-            node_id=node_id,
+            cell_id=cell_id,
             event_type=event_type,
             agent="decomposition_lead",
             iteration=0,
@@ -120,12 +120,12 @@ def _log_node_event(
         )
     except Exception as exc:
         typer.echo(
-            f"Warning: failed to log event {event_type} for {node_id}: {exc}",
+            f"Warning: failed to log event {event_type} for {cell_id}: {exc}",
             err=True,
         )
 
 
-def _make_node_created_callback(
+def _make_cell_created_callback(
     *,
     graph,
     colony_model,
@@ -133,40 +133,40 @@ def _make_node_created_callback(
     spinner,
     log_event: Callable[[str, str, dict], None],
 ) -> Callable:
-    """Return a callback for ``decompose_claim`` that persists each new node.
+    """Return a callback for ``decompose_claim`` that persists each new cell.
 
-    The callback adds the node + edges to the graph, re-serializes the
-    colony, logs a ``node_created`` event, and prints the new claim above
+    The callback adds the cell + edges to the graph, re-serializes the
+    colony, logs a ``cell_created`` event, and prints the new claim above
     the live spinner so the user retains a permanent record.
     """
     from petri.graph.colony import serialize_colony
 
-    def _on_node_created(node, new_edges) -> None:
+    def _on_cell_created(cell, new_edges) -> None:
         try:
-            graph.add_node(node)
+            graph.add_cell(cell)
             for edge in new_edges:
                 graph.add_edge(edge)
             # Re-serialize incrementally — serialize_colony preserves
             # existing events.jsonl files (touch only on first create).
             serialize_colony(graph, colony_model, colony_path)
             log_event(
-                node.id,
-                "node_created",
+                cell.id,
+                "cell_created",
                 {
-                    "level": node.level,
-                    "parents": [edge.from_node for edge in new_edges],
+                    "level": cell.level,
+                    "parents": [edge.from_cell for edge in new_edges],
                 },
             )
             # Print the new claim as a permanent line above the live
             # spinner so the user has a record of what was just created.
-            spinner.print_line(node.claim_text)
+            spinner.print_line(cell.claim_text)
         except Exception as exc:
             typer.echo(
-                f"Warning: failed to persist node {node.id}: {exc}",
+                f"Warning: failed to persist cell {cell.id}: {exc}",
                 err=True,
             )
 
-    return _on_node_created
+    return _on_cell_created
 
 
 # ── Command registration ────────────────────────────────────────────────
@@ -191,7 +191,7 @@ def register(app: typer.Typer) -> None:
 
         from petri.cli_ui import Spinner
         from petri.graph.colony import ColonyGraph, serialize_colony
-        from petri.models import Colony, Node, build_node_key
+        from petri.models import Cell, Colony, build_cell_key
         from petri.reasoning.decomposer import (
             decompose_claim,
             format_colony_display,
@@ -276,40 +276,40 @@ def register(app: typer.Typer) -> None:
         typer.echo(f"Claim: {claim}")
         typer.echo()
 
-        # ── Phase C: Pre-create colony directory + center node ──
+        # ── Phase C: Pre-create colony directory + center cell ──
         colony_name = colony or generate_colony_name(claim)
         colony_id = f"{dish_id}-{colony_name}"
-        center_id = build_node_key(dish_id, colony_name, 0, 0)
+        center_id = build_cell_key(dish_id, colony_name, 0, 0)
         colony_path = petri_dir / "petri-dishes" / colony_name
 
         # Wipe any leftover from a previous run before we start writing
         if colony_path.exists():
             shutil.rmtree(colony_path)
 
-        center_node = Node(
+        center_cell = Cell(
             id=center_id,
             colony_id=colony_id,
             claim_text=claim,
             level=0,
         )
         graph = ColonyGraph(colony_id=colony_id)
-        graph.add_node(center_node)
+        graph.add_cell(center_cell)
 
         colony_model = Colony(
             id=colony_id,
             dish=dish_id,
             center_claim=claim,
-            center_node_id=center_id,
+            center_cell_id=center_id,
             clarifications=[],
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         serialize_colony(graph, colony_model, colony_path)
 
         def log_for_this_run(
-            node_id: str, event_type: str, data: dict | None = None
+            cell_id: str, event_type: str, data: dict | None = None
         ) -> None:
-            events_file = _events_path_for(colony_path, colony_model, node_id)
-            _log_node_event(events_file, node_id, event_type, data)
+            events_file = _events_path_for(colony_path, colony_model, cell_id)
+            _log_cell_event(events_file, cell_id, event_type, data)
 
         log_for_this_run(
             center_id, "seed_started", {"claim": claim, "no_questions": no_questions}
@@ -387,7 +387,7 @@ def register(app: typer.Typer) -> None:
             if colony_path.exists():
                 shutil.rmtree(colony_path)
             graph = ColonyGraph(colony_id=colony_id)
-            graph.add_node(center_node)
+            graph.add_cell(center_cell)
             serialize_colony(graph, colony_model, colony_path)
 
             log_for_this_run(
@@ -400,7 +400,7 @@ def register(app: typer.Typer) -> None:
                 with Spinner(
                     "decomposing claim", force_plain=force_plain_spinner
                 ) as spinner:
-                    on_node_created = _make_node_created_callback(
+                    on_cell_created = _make_cell_created_callback(
                         graph=graph,
                         colony_model=colony_model,
                         colony_path=colony_path,
@@ -415,8 +415,8 @@ def register(app: typer.Typer) -> None:
                         provider=provider,
                         guidance=guidance,
                         on_progress=spinner.update,
-                        on_node_created=on_node_created,
-                        center=center_node,
+                        on_cell_created=on_cell_created,
+                        center=center_cell,
                     )
             except Exception as exc:
                 log_for_this_run(
@@ -429,7 +429,7 @@ def register(app: typer.Typer) -> None:
             log_for_this_run(
                 center_id,
                 "decomposition_completed",
-                {"node_count": len(result.nodes)},
+                {"cell_count": len(result.cells)},
             )
 
             typer.echo(format_colony_display(result))
@@ -463,17 +463,17 @@ def register(app: typer.Typer) -> None:
                 raise typer.Exit(code=1)
             # Loop iterates: top of the loop wipes the colony dir and rebuilds
 
-        # Final colony.json rewrite — ensures node_paths is consistent and
+        # Final colony.json rewrite — ensures cell_paths is consistent and
         # persists the user's clarifications alongside the approved decomposition.
         colony_model.clarifications = clarifications
         serialize_colony(graph, colony_model, colony_path)
         log_for_this_run(
             center_id,
             "colony_approved",
-            {"node_count": len(result.nodes) if result else 0},
+            {"cell_count": len(result.cells) if result else 0},
         )
 
         typer.echo(
             f"\nColony '{colony_name}' created with "
-            f"{len(result.nodes) if result else 0} nodes."
+            f"{len(result.cells) if result else 0} cells."
         )

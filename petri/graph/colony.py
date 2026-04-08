@@ -1,8 +1,8 @@
 """Colony graph module for DAG operations.
 
 Manages the directed acyclic graph structure of a colony. A colony is a
-connected DAG of nodes rooted at a colony center (level 0). Edges represent
-logical dependencies: Edge(from_node=A, to_node=B) means A depends on B.
+connected DAG of cells rooted at a colony center (level 0). Edges represent
+logical dependencies: Edge(from_cell=A, to_cell=B) means A depends on B.
 """
 
 from __future__ import annotations
@@ -11,75 +11,75 @@ import json
 from collections import deque
 from pathlib import Path
 
-from petri.models import Colony, Edge, Node, NodeStatus, build_node_key
+from petri.models import Cell, CellStatus, Colony, Edge
 
 
 class ColonyGraph:
-    """Mutable graph structure that manages nodes and directed dependency edges.
+    """Mutable graph structure that manages cells and directed dependency edges.
 
-    Nodes are keyed by composite ID. Edges are directed: from_node depends on
-    to_node. The adjacency dict (_adj) maps a node to the set of nodes that
+    Cells are keyed by composite ID. Edges are directed: from_cell depends on
+    to_cell. The adjacency dict (_adj) maps a cell to the set of cells that
     depend on it (forward/dependents). The reverse adjacency dict (_rev) maps a
-    node to the set of nodes it depends on (dependencies).
+    cell to the set of cells it depends on (dependencies).
     """
 
     def __init__(self, colony_id: str = "") -> None:
         self.colony_id: str = colony_id
-        self._nodes: dict[str, Node] = {}
+        self._cells: dict[str, Cell] = {}
         self._edges: list[Edge] = []
-        self._adj: dict[str, set[str]] = {}  # node_id -> dependents
-        self._rev: dict[str, set[str]] = {}  # node_id -> dependencies
+        self._adj: dict[str, set[str]] = {}  # cell_id -> dependents
+        self._rev: dict[str, set[str]] = {}  # cell_id -> dependencies
 
-    # ── Node operations ──────────────────────────────────────────────
+    # ── Cell operations ──────────────────────────────────────────────
 
-    def add_node(self, node: Node) -> None:
-        """Add a node to the graph.
+    def add_cell(self, cell: Cell) -> None:
+        """Add a cell to the graph.
 
-        Raises ValueError if a node with the same ID already exists.
+        Raises ValueError if a cell with the same ID already exists.
         """
-        if node.id in self._nodes:
-            raise ValueError(f"Node already exists: {node.id}")
-        self._nodes[node.id] = node
-        self._adj.setdefault(node.id, set())
-        self._rev.setdefault(node.id, set())
+        if cell.id in self._cells:
+            raise ValueError(f"Cell already exists: {cell.id}")
+        self._cells[cell.id] = cell
+        self._adj.setdefault(cell.id, set())
+        self._rev.setdefault(cell.id, set())
 
-    def remove_node(self, node_id: str) -> None:
-        """Remove a node and all edges that reference it.
+    def remove_cell(self, cell_id: str) -> None:
+        """Remove a cell and all edges that reference it.
 
-        Raises KeyError if the node is not found.
+        Raises KeyError if the cell is not found.
         """
-        if node_id not in self._nodes:
-            raise KeyError(f"Node not found: {node_id}")
+        if cell_id not in self._cells:
+            raise KeyError(f"Cell not found: {cell_id}")
 
-        # Remove edges that reference this node
+        # Remove edges that reference this cell
         self._edges = [
             edge
             for edge in self._edges
-            if edge.from_node != node_id and edge.to_node != node_id
+            if edge.from_cell != cell_id and edge.to_cell != cell_id
         ]
 
         # Clean up adjacency references
-        for dep_id in self._adj.get(node_id, set()):
-            self._rev.get(dep_id, set()).discard(node_id)
-        for dep_id in self._rev.get(node_id, set()):
-            self._adj.get(dep_id, set()).discard(node_id)
+        for dep_id in self._adj.get(cell_id, set()):
+            self._rev.get(dep_id, set()).discard(cell_id)
+        for dep_id in self._rev.get(cell_id, set()):
+            self._adj.get(dep_id, set()).discard(cell_id)
 
-        self._adj.pop(node_id, None)
-        self._rev.pop(node_id, None)
-        del self._nodes[node_id]
+        self._adj.pop(cell_id, None)
+        self._rev.pop(cell_id, None)
+        del self._cells[cell_id]
 
-    def get_node(self, node_id: str) -> Node:
-        """Get a node by its composite ID.
+    def get_cell(self, cell_id: str) -> Cell:
+        """Get a cell by its composite ID.
 
         Raises KeyError if not found.
         """
-        if node_id not in self._nodes:
-            raise KeyError(f"Node not found: {node_id}")
-        return self._nodes[node_id]
+        if cell_id not in self._cells:
+            raise KeyError(f"Cell not found: {cell_id}")
+        return self._cells[cell_id]
 
-    def get_nodes(self) -> list[Node]:
-        """Return all nodes sorted by level then seq."""
-        return sorted(self._nodes.values(), key=lambda n: (n.level, n.id))
+    def get_all_cells(self) -> list[Cell]:
+        """Return all cells sorted by level then seq."""
+        return sorted(self._cells.values(), key=lambda cell: (cell.level, cell.id))
 
     def get_edges(self) -> list[Edge]:
         """Return all edges."""
@@ -90,39 +90,39 @@ class ColonyGraph:
     def add_edge(self, edge: Edge) -> None:
         """Add a directed dependency edge.
 
-        Edge(from_node=A, to_node=B) means A depends on B. Before adding,
+        Edge(from_cell=A, to_cell=B) means A depends on B. Before adding,
         checks that adding this edge would not create a cycle.
 
         Raises ValueError if the edge would create a cycle.
         """
-        if self.has_cycle_with_edge(edge.from_node, edge.to_node):
+        if self.has_cycle_with_edge(edge.from_cell, edge.to_cell):
             raise ValueError(
-                f"Adding edge {edge.from_node} -> {edge.to_node} would create a cycle"
+                f"Adding edge {edge.from_cell} -> {edge.to_cell} would create a cycle"
             )
 
         self._edges.append(edge)
-        self._adj.setdefault(edge.to_node, set()).add(edge.from_node)
-        self._rev.setdefault(edge.from_node, set()).add(edge.to_node)
+        self._adj.setdefault(edge.to_cell, set()).add(edge.from_cell)
+        self._rev.setdefault(edge.from_cell, set()).add(edge.to_cell)
 
-    def has_cycle_with_edge(self, from_node: str, to_node: str) -> bool:
-        """Check if adding an edge from from_node to to_node would create a cycle.
+    def has_cycle_with_edge(self, from_cell: str, to_cell: str) -> bool:
+        """Check if adding an edge from from_cell to to_cell would create a cycle.
 
-        Uses DFS from to_node following _rev edges (dependency direction) to
-        see if from_node is reachable. If it is, adding the edge would close
+        Uses DFS from to_cell following _rev edges (dependency direction) to
+        see if from_cell is reachable. If it is, adding the edge would close
         a cycle.
         """
-        # Edge means from_node depends on to_node.
-        # A cycle would exist if to_node already (transitively) depends on
-        # from_node. We check by walking _rev from to_node.
-        if from_node == to_node:
+        # Edge means from_cell depends on to_cell.
+        # A cycle would exist if to_cell already (transitively) depends on
+        # from_cell. We check by walking _rev from to_cell.
+        if from_cell == to_cell:
             return True
 
         visited: set[str] = set()
-        stack: list[str] = [to_node]
+        stack: list[str] = [to_cell]
 
         while stack:
             current = stack.pop()
-            if current == from_node:
+            if current == from_cell:
                 return True
             if current in visited:
                 continue
@@ -139,14 +139,14 @@ class ColonyGraph:
         Uses Kahn's algorithm (topological sort via in-degree counting).
         Returns True if the graph is a valid DAG, False otherwise.
         """
-        # Compute in-degrees (number of dependencies for each node)
-        in_degree: dict[str, int] = {nid: 0 for nid in self._nodes}
-        for nid in self._nodes:
-            in_degree[nid] = len(self._rev.get(nid, set()))
+        # Compute in-degrees (number of dependencies for each cell)
+        in_degree: dict[str, int] = {cell_id: 0 for cell_id in self._cells}
+        for cell_id in self._cells:
+            in_degree[cell_id] = len(self._rev.get(cell_id, set()))
 
-        # Start with nodes that have no dependencies
+        # Start with cells that have no dependencies
         queue: deque[str] = deque(
-            nid for nid, deg in in_degree.items() if deg == 0
+            cell_id for cell_id, deg in in_degree.items() if deg == 0
         )
         processed = 0
 
@@ -158,21 +158,21 @@ class ColonyGraph:
                 if in_degree[dependent] == 0:
                     queue.append(dependent)
 
-        return processed == len(self._nodes)
+        return processed == len(self._cells)
 
     # ── Level computation ────────────────────────────────────────────
 
     def compute_levels(self, center_id: str) -> dict[str, int]:
-        """Compute node levels via BFS from the colony center.
+        """Compute cell levels via BFS from the colony center.
 
-        The center node is level 0. Levels increase outward following the
-        dependency direction: the center depends on level-1 nodes, level-1
-        nodes depend on level-2 nodes, etc.
+        The center cell is level 0. Levels increase outward following the
+        dependency direction: the center depends on level-1 cells, level-1
+        cells depend on level-2 cells, etc.
 
         BFS follows _rev edges from the center outward because
-        _rev[node] = the set of nodes that node depends on.
+        _rev[cell] = the set of cells that cell depends on.
 
-        Returns a dict mapping node_id to its computed level.
+        Returns a dict mapping cell_id to its computed level.
         """
         levels: dict[str, int] = {center_id: 0}
         queue: deque[str] = deque([center_id])
@@ -189,54 +189,51 @@ class ColonyGraph:
 
     # ── Dependency queries ───────────────────────────────────────────
 
-    def get_dependencies(self, node_id: str) -> list[str]:
-        """Return composite keys of nodes this node depends on."""
-        return sorted(self._rev.get(node_id, set()))
+    def get_dependencies(self, cell_id: str) -> list[str]:
+        """Return composite keys of cells this cell depends on."""
+        return sorted(self._rev.get(cell_id, set()))
 
-    def get_dependents(self, node_id: str) -> list[str]:
-        """Return composite keys of nodes that depend on this node."""
-        return sorted(self._adj.get(node_id, set()))
+    def get_dependents(self, cell_id: str) -> list[str]:
+        """Return composite keys of cells that depend on this cell."""
+        return sorted(self._adj.get(cell_id, set()))
 
-    def get_cell_nodes(self) -> list[Node]:
-        """Return cells — nodes that have no dependencies.
+    def get_cells(self) -> list[Cell]:
+        """Return cells that have no dependencies.
 
-        Cells are the most granular claims in the colony, at the deepest
+        These are the most granular claims in the colony, at the deepest
         levels of the DAG. They must be validated first (bottom-up).
         """
         return [
-            self._nodes[nid]
-            for nid in sorted(self._nodes)
-            if not self._rev.get(nid, set())
+            self._cells[cell_id]
+            for cell_id in sorted(self._cells)
+            if not self._rev.get(cell_id, set())
         ]
 
-    # Keep old name as alias for backwards compatibility in tests
-    get_leaf_nodes = get_cell_nodes
-
     def get_eligible_for_validation(
-        self, nodes_status: dict[str, NodeStatus]
-    ) -> list[Node]:
-        """Return nodes eligible to enter the validation queue.
+        self, cells_status: dict[str, CellStatus]
+    ) -> list[Cell]:
+        """Return cells eligible to enter the validation queue.
 
-        A node is eligible if it has NEW status AND either:
-        - It is a cell (no dependencies), OR
+        A cell is eligible if it has NEW status AND either:
+        - It has no dependencies, OR
         - ALL of its dependencies have VALIDATED status.
         """
-        eligible: list[Node] = []
-        for nid, node in sorted(self._nodes.items()):
-            status = nodes_status.get(nid, node.status)
-            if status != NodeStatus.NEW:
+        eligible: list[Cell] = []
+        for cell_id, cell in sorted(self._cells.items()):
+            status = cells_status.get(cell_id, cell.status)
+            if status != CellStatus.NEW:
                 continue
 
-            deps = self._rev.get(nid, set())
+            deps = self._rev.get(cell_id, set())
             if not deps:
-                # Cell node with NEW status
-                eligible.append(node)
+                # Cell with NEW status and no dependencies
+                eligible.append(cell)
             elif all(
-                nodes_status.get(dependency, NodeStatus.NEW) == NodeStatus.VALIDATED
+                cells_status.get(dependency, CellStatus.NEW) == CellStatus.VALIDATED
                 for dependency in deps
             ):
                 # All dependencies validated
-                eligible.append(node)
+                eligible.append(cell)
 
         return eligible
 
@@ -245,20 +242,20 @@ class ColonyGraph:
     def find_shared_premises(
         self, other: ColonyGraph
     ) -> list[tuple[str, str]]:
-        """Find nodes in this colony that share claim_text with another colony.
+        """Find cells in this colony that share claim_text with another colony.
 
-        Returns a list of (this_node_id, other_node_id) pairs where the
+        Returns a list of (this_cell_id, other_cell_id) pairs where the
         claim_text matches exactly.
         """
         # Index the other colony's claims for efficient lookup
         other_claims: dict[str, list[str]] = {}
-        for node in other._nodes.values():
-            other_claims.setdefault(node.claim_text, []).append(node.id)
+        for cell in other._cells.values():
+            other_claims.setdefault(cell.claim_text, []).append(cell.id)
 
         pairs: list[tuple[str, str]] = []
-        for node in self._nodes.values():
-            for other_id in other_claims.get(node.claim_text, []):
-                pairs.append((node.id, other_id))
+        for cell in self._cells.values():
+            for other_id in other_claims.get(cell.claim_text, []):
+                pairs.append((cell.id, other_id))
 
         return sorted(pairs)
 
@@ -283,55 +280,55 @@ def serialize_colony(
 
     base_path.mkdir(parents=True, exist_ok=True)
 
-    # Group nodes by level for level directory naming
+    # Group cells by level for level directory naming
     by_level: dict[int, list] = {}
-    for node in graph.get_nodes():
-        by_level.setdefault(node.level, []).append(node)
+    for cell in graph.get_all_cells():
+        by_level.setdefault(cell.level, []).append(cell)
 
-    # Build node_paths mapping
-    node_paths: dict[str, str] = {}
+    # Build cell_paths mapping
+    cell_paths: dict[str, str] = {}
 
-    for node in graph.get_nodes():
-        parts = node.id.split("-")
+    for cell in graph.get_all_cells():
+        parts = cell.id.split("-")
         seq_str = parts[-1]
         level_str = parts[-2]
 
-        # Level directory: use first node at this level for the level slug
-        level_nodes = by_level[node.level]
-        level_slug = claim_to_slug(level_nodes[0].claim_text)
+        # Level directory: use first cell at this level for the level slug
+        level_cells = by_level[cell.level]
+        level_slug = claim_to_slug(level_cells[0].claim_text)
         level_dir_name = f"{level_str}-{level_slug}"
 
-        # Node directory: seq + claim slug
-        node_slug = claim_to_slug(node.claim_text)
-        node_dir_name = f"{seq_str}-{node_slug}"
+        # Cell directory: seq + claim slug
+        cell_slug = claim_to_slug(cell.claim_text)
+        cell_dir_name = f"{seq_str}-{cell_slug}"
 
-        rel_path = f"{level_dir_name}/{node_dir_name}"
-        node_paths[node.id] = rel_path
+        rel_path = f"{level_dir_name}/{cell_dir_name}"
+        cell_paths[cell.id] = rel_path
 
-        node_dir = base_path / rel_path
-        node_dir.mkdir(parents=True, exist_ok=True)
+        cell_dir_path = base_path / rel_path
+        cell_dir_path.mkdir(parents=True, exist_ok=True)
 
         # metadata.json
-        (node_dir / "metadata.json").write_text(
-            json.dumps(node.model_dump(), indent=2, default=str) + "\n",
+        (cell_dir_path / "metadata.json").write_text(
+            json.dumps(cell.model_dump(), indent=2, default=str) + "\n",
             encoding="utf-8",
         )
 
         # events.jsonl (empty)
-        events_path = node_dir / "events.jsonl"
+        events_path = cell_dir_path / "events.jsonl"
         if not events_path.exists():
             events_path.touch()
 
         # evidence.md
-        (node_dir / "evidence.md").write_text(
-            f"# {node.id}\n\n"
-            f"**Claim:** {node.claim_text}\n\n"
-            f"**Status:** {NodeStatus.NEW.value}\n",
+        (cell_dir_path / "evidence.md").write_text(
+            f"# {cell.id}\n\n"
+            f"**Claim:** {cell.claim_text}\n\n"
+            f"**Status:** {CellStatus.NEW.value}\n",
             encoding="utf-8",
         )
 
-    # Write colony metadata with node_paths
-    colony.node_paths = node_paths
+    # Write colony metadata with cell_paths
+    colony.cell_paths = cell_paths
     (base_path / "colony.json").write_text(
         json.dumps(colony.model_dump(), indent=2, default=str) + "\n",
         encoding="utf-8",
@@ -344,7 +341,7 @@ def deserialize_colony(
     """Load a colony from the filesystem.
 
     Reads colony.json for the Colony model, then scans subdirectories for
-    node metadata.json files. Reconstructs the full graph with nodes and
+    cell metadata.json files. Reconstructs the full graph with cells and
     edges.
 
     Returns a (ColonyGraph, Colony) tuple.
@@ -356,22 +353,22 @@ def deserialize_colony(
 
     graph = ColonyGraph(colony_id=colony.id)
 
-    # Scan for node metadata (supports both flat and nested layouts)
-    nodes: list[Node] = []
+    # Scan for cell metadata (supports both flat and nested layouts)
+    cells: list[Cell] = []
     for metadata_path in sorted(base_path.rglob("metadata.json")):
-        node_data = json.loads(metadata_path.read_text(encoding="utf-8"))
-        node = Node.model_validate(node_data)
-        nodes.append(node)
+        cell_data = json.loads(metadata_path.read_text(encoding="utf-8"))
+        cell = Cell.model_validate(cell_data)
+        cells.append(cell)
 
-    # Add nodes first
-    for node in nodes:
-        graph.add_node(node)
+    # Add cells first
+    for cell in cells:
+        graph.add_cell(cell)
 
-    # Reconstruct edges from node dependency lists
+    # Reconstruct edges from cell dependency lists
     seen_edges: set[tuple[str, str]] = set()
-    for node in nodes:
-        for dep_id in node.dependencies:
-            edge_pair = (node.id, dep_id)
+    for cell in cells:
+        for dep_id in cell.dependencies:
+            edge_pair = (cell.id, dep_id)
             if edge_pair not in seen_edges:
                 seen_edges.add(edge_pair)
                 # Determine edge type based on colony membership
@@ -380,12 +377,12 @@ def deserialize_colony(
                 else:
                     edge_type = "cross_colony"
                 edge = Edge(
-                    from_node=node.id,
-                    to_node=dep_id,
+                    from_cell=cell.id,
+                    to_cell=dep_id,
                     edge_type=edge_type,
                 )
-                # Only add if both nodes are in the graph
-                if dep_id in graph._nodes:
+                # Only add if both cells are in the graph
+                if dep_id in graph._cells:
                     graph.add_edge(edge)
 
     return graph, colony

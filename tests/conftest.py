@@ -8,7 +8,7 @@ import pytest
 
 from petri.graph.colony import ColonyGraph, serialize_colony
 from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
-from petri.models import Colony, Edge, Node, NodeStatus, Verdict, build_node_key
+from petri.models import Cell, CellStatus, Colony, Edge, Verdict, build_cell_key
 
 
 # ── Fake InferenceProvider ───────────────────────────────────────────────
@@ -118,7 +118,7 @@ class FakeProvider:
 CANONICAL_DISH_ID = "test-dish"
 CANONICAL_COLONY_NAME = "colony"
 CANONICAL_COLONY_ID = "test-dish-colony"
-CANONICAL_NODE_IDS = {
+CANONICAL_CELL_IDS = {
     "center": "test-dish-colony-000-000",
     "premise1": "test-dish-colony-001-001",
     "premise2": "test-dish-colony-001-002",
@@ -130,21 +130,21 @@ CANONICAL_NODE_IDS = {
 # ── Shared Helpers ────────────────────────────────────────────────────────
 
 
-def make_node(
+def make_cell(
     dish: str,
     colony: str,
     level: int,
     seq: int,
     claim: str = "",
-    status: NodeStatus = NodeStatus.NEW,
+    status: CellStatus = CellStatus.NEW,
     dependencies: list[str] | None = None,
     dependents: list[str] | None = None,
-) -> Node:
-    """Build a test Node from composite-key parts."""
-    node_id = build_node_key(dish, colony, level, seq)
+) -> Cell:
+    """Build a test Cell from composite-key parts."""
+    cell_id = build_cell_key(dish, colony, level, seq)
     colony_id = f"{dish}-{colony}"
-    return Node(
-        id=node_id,
+    return Cell(
+        id=cell_id,
         colony_id=colony_id,
         claim_text=claim or f"claim-{level}-{seq}",
         level=level,
@@ -156,23 +156,23 @@ def make_node(
 
 def make_edge(from_id: str, to_id: str, edge_type: str = "intra_colony") -> Edge:
     """Build a test Edge."""
-    return Edge(from_node=from_id, to_node=to_id, edge_type=edge_type)
+    return Edge(from_cell=from_id, to_cell=to_id, edge_type=edge_type)
 
 
 def make_verdict(
     agent: str,
     verdict: str,
-    node_id: str = CANONICAL_NODE_IDS["center"],
+    cell_id: str = CANONICAL_CELL_IDS["center"],
 ) -> Verdict:
-    """Build a test Verdict using canonical node ID by default."""
+    """Build a test Verdict using canonical cell ID by default."""
     return Verdict(
-        node_id=node_id, agent=agent, iteration=0, verdict=verdict, summary=""
+        cell_id=cell_id, agent=agent, iteration=0, verdict=verdict, summary=""
     )
 
 
 def make_event(
     *,
-    node_id: str = CANONICAL_NODE_IDS["premise1"],
+    cell_id: str = CANONICAL_CELL_IDS["premise1"],
     event_id: str | None = None,
     event_type: str = "verdict_issued",
     agent: str = "analyst",
@@ -182,15 +182,15 @@ def make_event(
 ) -> dict:
     """Build a raw event dict (as it would appear serialised in JSONL).
 
-    Defaults to canonical node IDs from the shared colony fixture.
+    Defaults to canonical cell IDs from the shared colony fixture.
     """
     if event_id is None:
-        event_id = f"{node_id}-aabbccdd"
+        event_id = f"{cell_id}-aabbccdd"
     if data is None:
         data = {"verdict": "VALIDATED", "summary": "Looks good"}
     return {
         "id": event_id,
-        "node_id": node_id,
+        "cell_id": cell_id,
         "timestamp": timestamp,
         "type": event_type,
         "agent": agent,
@@ -276,58 +276,58 @@ def petri_env(tmp_path):
 
 
 def _build_canonical_colony(
-    cell_status: NodeStatus = NodeStatus.NEW,
-    premise_status: NodeStatus = NodeStatus.NEW,
-    center_status: NodeStatus = NodeStatus.NEW,
+    cell_status: CellStatus = CellStatus.NEW,
+    premise_status: CellStatus = CellStatus.NEW,
+    center_status: CellStatus = CellStatus.NEW,
 ) -> dict:
-    """Build the canonical 5-node diamond DAG.
+    """Build the canonical 5-cell diamond DAG.
 
     Structure:
         center (L0, 000-000) depends on premise1, premise2
         premise1 (L1, 001-001) depends on cell1, cell2
         premise2 (L1, 001-002) depends on cell2 (shared = diamond)
-        cell1 (L2, 002-003): cell node
-        cell2 (L2, 002-004): cell node (shared dependency)
+        cell1 (L2, 002-003): leaf cell
+        cell2 (L2, 002-004): leaf cell (shared dependency)
     """
     dish_id = CANONICAL_DISH_ID
     colony_name = CANONICAL_COLONY_NAME
     colony_id = CANONICAL_COLONY_ID
 
-    center = make_node(
+    center = make_cell(
         dish_id, colony_name, 0, 0, "Central thesis",
         status=center_status,
         dependencies=[
-            build_node_key(dish_id, colony_name, 1, 1),
-            build_node_key(dish_id, colony_name, 1, 2),
+            build_cell_key(dish_id, colony_name, 1, 1),
+            build_cell_key(dish_id, colony_name, 1, 2),
         ],
     )
-    premise1 = make_node(
+    premise1 = make_cell(
         dish_id, colony_name, 1, 1, "First premise",
         status=premise_status,
         dependencies=[
-            build_node_key(dish_id, colony_name, 2, 3),
-            build_node_key(dish_id, colony_name, 2, 4),
+            build_cell_key(dish_id, colony_name, 2, 3),
+            build_cell_key(dish_id, colony_name, 2, 4),
         ],
     )
-    premise2 = make_node(
+    premise2 = make_cell(
         dish_id, colony_name, 1, 2, "Second premise",
         status=premise_status,
         dependencies=[
-            build_node_key(dish_id, colony_name, 2, 4),
+            build_cell_key(dish_id, colony_name, 2, 4),
         ],
     )
-    cell1 = make_node(
-        dish_id, colony_name, 2, 3, "Cell premise of P1",
+    cell1 = make_cell(
+        dish_id, colony_name, 2, 3, "Leaf premise of P1",
         status=cell_status,
     )
-    cell2 = make_node(
-        dish_id, colony_name, 2, 4, "Shared cell premise",
+    cell2 = make_cell(
+        dish_id, colony_name, 2, 4, "Shared leaf premise",
         status=cell_status,
     )
 
     graph = ColonyGraph(colony_id=colony_id)
-    for node in [center, premise1, premise2, cell1, cell2]:
-        graph.add_node(node)
+    for cell in [center, premise1, premise2, cell1, cell2]:
+        graph.add_cell(cell)
 
     graph.add_edge(make_edge(center.id, premise1.id))
     graph.add_edge(make_edge(center.id, premise2.id))
@@ -339,7 +339,7 @@ def _build_canonical_colony(
         id=colony_id,
         dish=dish_id,
         center_claim="Central thesis",
-        center_node_id=center.id,
+        center_cell_id=center.id,
         created_at="2026-01-01T00:00:00Z",
     )
 
@@ -359,7 +359,7 @@ def _build_canonical_colony(
 
 @pytest.fixture
 def canonical_colony():
-    """Build the canonical 5-node diamond DAG (all nodes NEW)."""
+    """Build the canonical 5-cell diamond DAG (all cells NEW)."""
     return _build_canonical_colony()
 
 
@@ -367,13 +367,13 @@ def canonical_colony():
 def canonical_colony_validated_cells():
     """Build the canonical diamond DAG with cells and premises VALIDATED.
 
-    Used by propagation and dashboard tests where nodes need to be
+    Used by propagation and dashboard tests where cells need to be
     re-openable (VALIDATED -> NEW).
     """
     return _build_canonical_colony(
-        cell_status=NodeStatus.VALIDATED,
-        premise_status=NodeStatus.VALIDATED,
-        center_status=NodeStatus.NEW,
+        cell_status=CellStatus.VALIDATED,
+        premise_status=CellStatus.VALIDATED,
+        center_status=CellStatus.NEW,
     )
 
 
@@ -387,7 +387,7 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
         expect)
       - ``petri-dishes/<canonical colony>/`` serialized via the same
         ``serialize_colony`` path the production seed command uses
-      - ``queue.json`` with a queue entry for every node in the canonical
+      - ``queue.json`` with a queue entry for every cell in the canonical
         colony, in the default ``new`` state
 
     Sets cwd to ``tmp_path`` so ``runner.invoke(app, [...])`` finds the
@@ -429,12 +429,12 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
         canonical_colony["graph"], canonical_colony["colony_model"], colony_path
     )
 
-    # Populate queue.json with entries for every node — matches the state
-    # the engine expects after seeding (all nodes NEW / queued state empty).
+    # Populate queue.json with entries for every cell — matches the state
+    # the engine expects after seeding (all cells NEW / queued state empty).
     queue_entries: dict = {}
-    for node in canonical_colony["graph"].get_nodes():
-        queue_entries[node.id] = {
-            "node_id": node.id,
+    for cell in canonical_colony["graph"].get_all_cells():
+        queue_entries[cell.id] = {
+            "cell_id": cell.id,
             "queue_state": "",
             "iteration": 0,
             "entered_at": "2026-01-01T00:00:00+00:00",

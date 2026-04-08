@@ -17,11 +17,11 @@ runner = CliRunner()
 
 
 def test_stop_command_writes_stop_file(seeded_petri_dir) -> None:
-    """``petri stop`` must create ``.petri/.stop`` even with no active nodes."""
+    """``petri stop`` must create ``.petri/.stop`` even with no active cells."""
     result = runner.invoke(app, ["stop"])
 
     # The stop command always exits 0 — it never errors when nothing is
-    # running, it just reports "no active nodes to stop".
+    # running, it just reports "no active cells to stop".
     assert result.exit_code == 0, result.output
 
     petri_dir = seeded_petri_dir["petri_dir"]

@@ -1,6 +1,6 @@
 """Pipeline processor for the Petri Research Orchestration Framework.
 
-Processes nodes through the full validation pipeline:
+Processes cells through the full validation pipeline:
 research -> critique -> convergence -> red team -> evaluation.
 
 Pure library logic -- no CLI, no UI.  The CLI (``petri grow``) calls this.
@@ -28,11 +28,11 @@ from petri.analysis.convergence import (
 from petri.reasoning.debate import load_debate_pairings, log_debate, mediate_debate
 from petri.storage.event_log import append_event, get_verdicts, query_events
 from petri.models import (
+    CellStatus,
     ConvergenceOutcome,
     EvaluationResult,
     InferenceProvider,
-    NodeStatus,
-    ProcessNodeResult,
+    ProcessCellResult,
     QueueProcessingResult,
     QueueState,
 )
@@ -55,14 +55,14 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class NodeProgressEvent:
-    """Lifecycle event fired by process_node at every state transition.
+class CellProgressEvent:
+    """Lifecycle event fired by process_cell at every state transition.
 
     Consumed by the CLI's MultiSpinner to update per-slot rows in real time.
     The engine itself never reads these events — they're a write-only signal.
     """
-    slot_idx: int               # which worker slot owns this node (-1 if unassigned)
-    node_id: str
+    slot_idx: int               # which worker slot owns this cell (-1 if unassigned)
+    cell_id: str
     kind: str                   # "started" | "phase" | "agent" | "verdict" | "finished"
     phase: str | None = None    # set when kind in {"phase", "agent", "verdict"}
     agent: str | None = None    # set when kind in {"agent", "verdict"}
@@ -71,7 +71,7 @@ class NodeProgressEvent:
     error: str | None = None    # set when kind == "finished" with failure
 
 
-NodeProgressCallback = Callable[[NodeProgressEvent], None]
+CellProgressCallback = Callable[[CellProgressEvent], None]
 
 
 # ── Graceful Stop ────────────────────────────────────────────────────────
@@ -149,71 +149,71 @@ def _get_dish_id(petri_dir: Path) -> str:
     return petri_dir.parent.name
 
 
-def _colony_slug(node_id: str, dish_id: str) -> str:
-    """Extract the colony slug from a node's composite key."""
+def _colony_slug(cell_id: str, dish_id: str) -> str:
+    """Extract the colony slug from a cell's composite key."""
     dish_prefix = dish_id + "-"
-    if node_id.startswith(dish_prefix):
-        colony_and_rest = node_id[len(dish_prefix):]
+    if cell_id.startswith(dish_prefix):
+        colony_and_rest = cell_id[len(dish_prefix):]
         return colony_and_rest.rsplit("-", 2)[0]
-    parts = node_id.split("-")
+    parts = cell_id.split("-")
     return "-".join(parts[:-2])
 
 
-def _load_node_paths(petri_dir: Path, node_id: str, dish_id: str) -> dict[str, str]:
-    """Load node_paths from colony.json for the node's colony."""
-    slug = _colony_slug(node_id, dish_id)
+def _load_cell_paths(petri_dir: Path, cell_id: str, dish_id: str) -> dict[str, str]:
+    """Load cell_paths from colony.json for the cell's colony."""
+    slug = _colony_slug(cell_id, dish_id)
     colony_json = petri_dir / "petri-dishes" / slug / "colony.json"
     if colony_json.exists():
         data = json.loads(colony_json.read_text())
-        return data.get("node_paths", {})
+        return data.get("cell_paths", {})
     return {}
 
 
-def _node_dir(petri_dir: Path, node_id: str, dish_id: str) -> Path:
-    """Derive the filesystem path for a node.
+def _cell_dir(petri_dir: Path, cell_id: str, dish_id: str) -> Path:
+    """Derive the filesystem path for a cell.
 
-    Looks up the human-readable path from colony.json's node_paths mapping.
+    Looks up the human-readable path from colony.json's cell_paths mapping.
     Falls back to flat {level}-{seq} layout for backwards compatibility.
     """
-    slug = _colony_slug(node_id, dish_id)
+    slug = _colony_slug(cell_id, dish_id)
     colony_base = petri_dir / "petri-dishes" / slug
 
-    # Try node_paths from colony.json
-    node_paths = _load_node_paths(petri_dir, node_id, dish_id)
-    if node_id in node_paths:
-        return colony_base / node_paths[node_id]
+    # Try cell_paths from colony.json
+    cell_paths = _load_cell_paths(petri_dir, cell_id, dish_id)
+    if cell_id in cell_paths:
+        return colony_base / cell_paths[cell_id]
 
     # Fallback: flat layout
-    parts = node_id.split("-")
+    parts = cell_id.split("-")
     return colony_base / f"{parts[-2]}-{parts[-1]}"
 
 
-def _events_path(petri_dir: Path, node_id: str, dish_id: str) -> Path:
-    return _node_dir(petri_dir, node_id, dish_id) / "events.jsonl"
+def _events_path(petri_dir: Path, cell_id: str, dish_id: str) -> Path:
+    return _cell_dir(petri_dir, cell_id, dish_id) / "events.jsonl"
 
 
-def _metadata_path(petri_dir: Path, node_id: str, dish_id: str) -> Path:
-    return _node_dir(petri_dir, node_id, dish_id) / "metadata.json"
+def _metadata_path(petri_dir: Path, cell_id: str, dish_id: str) -> Path:
+    return _cell_dir(petri_dir, cell_id, dish_id) / "metadata.json"
 
 
-def _load_node_metadata(petri_dir: Path, node_id: str, dish_id: str) -> dict:
-    """Load a node's metadata.json."""
-    path = _metadata_path(petri_dir, node_id, dish_id)
+def _load_cell_metadata(petri_dir: Path, cell_id: str, dish_id: str) -> dict:
+    """Load a cell's metadata.json."""
+    path = _metadata_path(petri_dir, cell_id, dish_id)
     if not path.exists():
         return {}
     with open(path) as f:
         return json.load(f)
 
 
-# ── Node Status Update ──────────────────────────────────────────────────
+# ── Cell Status Update ──────────────────────────────────────────────────
 
 
-def _update_node_status(petri_dir: Path, node_id: str, new_status: str) -> None:
-    """Update a node's status in its metadata.json file."""
+def _update_cell_status(petri_dir: Path, cell_id: str, new_status: str) -> None:
+    """Update a cell's status in its metadata.json file."""
     dish_id = _get_dish_id(petri_dir)
-    path = _metadata_path(petri_dir, node_id, dish_id)
+    path = _metadata_path(petri_dir, cell_id, dish_id)
     if not path.exists():
-        logger.warning("metadata.json not found for node %s at %s", node_id, path)
+        logger.warning("metadata.json not found for cell %s at %s", cell_id, path)
         return
     with open(path) as f:
         metadata = json.load(f)
@@ -287,7 +287,7 @@ _LEVEL_NAMES = {
 
 
 def _log_sources_from_result(
-    events_file: Path, node_id: str, agent: str, iteration: int, result: object,
+    events_file: Path, cell_id: str, agent: str, iteration: int, result: object,
 ) -> None:
     """Extract sources_cited from agent output and log source_reviewed events."""
     sources = _get(result, "sources_cited", [])
@@ -324,7 +324,7 @@ def _log_sources_from_result(
             )
         append_event(
             events_path=events_file,
-            node_id=node_id,
+            cell_id=cell_id,
             event_type="source_reviewed",
             agent=agent,
             iteration=iteration,
@@ -333,37 +333,37 @@ def _log_sources_from_result(
 
 
 def _append_evidence(
-    petri_dir: Path, node_id: str, dish_id: str,
+    petri_dir: Path, cell_id: str, dish_id: str,
     phase: str, iteration: int, content: str,
 ) -> None:
-    """Append a section to a node's evidence.md and log evidence_appended."""
-    node_path = _node_dir(petri_dir, node_id, dish_id)
-    evidence_path = node_path / "evidence.md"
+    """Append a section to a cell's evidence.md and log evidence_appended."""
+    cell_path = _cell_dir(petri_dir, cell_id, dish_id)
+    evidence_path = cell_path / "evidence.md"
     if not evidence_path.exists():
         return
 
     with open(evidence_path, "a") as f:
         f.write(f"\n\n---\n\n{content}")
 
-    events_file = _events_path(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
     append_event(
         events_path=events_file,
-        node_id=node_id,
+        cell_id=cell_id,
         event_type="evidence_appended",
-        agent="node_lead",
+        agent="cell_lead",
         iteration=iteration,
         data={"summary": f"Appended {phase} findings (iteration {iteration})"},
     )
 
 
 def _update_evidence_status(
-    petri_dir: Path, node_id: str, dish_id: str, new_status: str,
+    petri_dir: Path, cell_id: str, dish_id: str, new_status: str,
 ) -> None:
-    """Update the Status line in a node's evidence.md file."""
+    """Update the Status line in a cell's evidence.md file."""
     import re as _re
 
-    node_path = _node_dir(petri_dir, node_id, dish_id)
-    evidence_path = node_path / "evidence.md"
+    cell_path = _cell_dir(petri_dir, cell_id, dish_id)
+    evidence_path = cell_path / "evidence.md"
     if not evidence_path.exists():
         return
     content = evidence_path.read_text()
@@ -530,10 +530,10 @@ def _format_evaluation_evidence(
 # ── Provider Guard ───────────────────────────────────────────────────────
 
 
-def _load_evidence_context(petri_dir: Path, node_id: str, dish_id: str) -> str:
+def _load_evidence_context(petri_dir: Path, cell_id: str, dish_id: str) -> str:
     """Load accumulated evidence from evidence.md for use as iteration context."""
-    node_path = _node_dir(petri_dir, node_id, dish_id)
-    evidence_path = node_path / "evidence.md"
+    cell_path = _cell_dir(petri_dir, cell_id, dish_id)
+    evidence_path = cell_path / "evidence.md"
     if not evidence_path.exists():
         return ""
     content = evidence_path.read_text()
@@ -603,7 +603,7 @@ _SOCRATIC_STEPS = [
 
 
 def _run_socratic_phase(
-    node_id: str,
+    cell_id: str,
     claim_text: str,
     petri_dir: Path,
     dish_id: str,
@@ -613,25 +613,25 @@ def _run_socratic_phase(
 ) -> None:
     """Phase 0: Socratic questioning — clarify, challenge assumptions, identify evidence needed.
 
-    This phase is **idempotent**.  If the node's event log already contains a
+    This phase is **idempotent**.  If the cell's event log already contains a
     ``verdict_issued`` event from any ``socratic_*`` agent, the phase is a
     no-op: it just advances the queue state to ``research_active`` and
     returns.  This prevents a restarted ``petri grow`` run from re-appending a
     duplicate ``### Socratic Analysis`` block to ``evidence.md``.
     """
-    events_file = _events_path(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
 
     # Idempotency guard — if any prior socratic_* verdict exists for this
-    # node, assume the Socratic phase has already run and skip it.
+    # cell, assume the Socratic phase has already run and skip it.
     prior_verdicts = query_events(
-        events_file, node_id=node_id, event_type="verdict_issued",
+        events_file, cell_id=cell_id, event_type="verdict_issued",
     )
     for prior_event in prior_verdicts:
         prior_agent = prior_event.get("agent", "")
         if isinstance(prior_agent, str) and prior_agent.startswith("socratic_"):
             update_state(
-                queue_file, node_id, QueueState.research_active.value,
+                queue_file, cell_id, QueueState.research_active.value,
             )
             return
 
@@ -641,7 +641,7 @@ def _run_socratic_phase(
         step_name = step["step"]
         prompt_text = step["prompt"]
 
-        # Use assess_node with a synthetic "socratic_questioner" role
+        # Use assess_cell with a synthetic "socratic_questioner" role
         context = {
             "iteration": iteration,
             "phase": f"socratic_{step_name}",
@@ -650,8 +650,8 @@ def _run_socratic_phase(
         step_agent_name = f"socratic_{step_name}"
         if fire is not None:
             fire("agent", phase="socratic", agent=step_agent_name, iteration=iteration)
-        result = provider.assess_node(
-            node_id, claim_text, context, "socratic_questioner"
+        result = provider.assess_cell(
+            cell_id, claim_text, context, "socratic_questioner"
         )
         if fire is not None:
             fire(
@@ -665,7 +665,7 @@ def _run_socratic_phase(
         # Log as verdict_issued
         append_event(
             events_path=events_file,
-            node_id=node_id,
+            cell_id=cell_id,
             event_type="verdict_issued",
             agent=f"socratic_{step_name}",
             iteration=iteration,
@@ -712,8 +712,8 @@ def _run_socratic_phase(
             agent="socratic_verifier",
             iteration=iteration,
         )
-    verification = provider.assess_node(
-        node_id, claim_text, verification_context, "socratic_questioner"
+    verification = provider.assess_cell(
+        cell_id, claim_text, verification_context, "socratic_questioner"
     )
     verification_verdict = _get(verification, "verdict", "VERIFIED")
     if fire is not None:
@@ -727,7 +727,7 @@ def _run_socratic_phase(
 
     append_event(
         events_path=events_file,
-        node_id=node_id,
+        cell_id=cell_id,
         event_type="verdict_issued",
         agent="socratic_verifier",
         iteration=iteration,
@@ -741,14 +741,14 @@ def _run_socratic_phase(
         lines.append(f"**Socratic Verification:** {verification_verdict}")
         lines.append(f"{verification_summary}\n")
     content = "\n".join(lines)
-    _append_evidence(petri_dir, node_id, dish_id, "socratic", iteration, content)
+    _append_evidence(petri_dir, cell_id, dish_id, "socratic", iteration, content)
 
     # Transition to research phase
-    update_state(queue_file, node_id, QueueState.research_active.value)
+    update_state(queue_file, cell_id, QueueState.research_active.value)
 
 
 def _run_decomposition_audit(
-    node_id: str,
+    cell_id: str,
     claim_text: str,
     petri_dir: Path,
     dish_id: str,
@@ -759,26 +759,26 @@ def _run_decomposition_audit(
 
     Asks whether the decomposition itself is flawed — not just the evidence.
     """
-    events_file = _events_path(petri_dir, node_id, dish_id)
-    prior_evidence = _load_evidence_context(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
+    prior_evidence = _load_evidence_context(petri_dir, cell_id, dish_id)
 
     context = {
         "iteration": iteration,
         "phase": "decomposition_audit",
         "prior_evidence": prior_evidence,
         "focused_directive": (
-            "This node has FAILED TO CONVERGE after multiple iterations. "
+            "This cell has FAILED TO CONVERGE after multiple iterations. "
             "The agents could not agree on a verdict. This means the problem "
             "may be in the DECOMPOSITION, not the evidence. "
-            "Ask: Are the assumptions for this node actually the RIGHT assumptions? "
+            "Ask: Are the assumptions for this cell actually the RIGHT assumptions? "
             "Should this claim be broken down DIFFERENTLY? "
             "Is the claim itself poorly formed or ambiguous? "
-            "In 'arguments', explain what's structurally wrong with how this node "
+            "In 'arguments', explain what's structurally wrong with how this cell "
             "is framed. In 'evidence', suggest how it should be restructured."
         ),
     }
-    result = provider.assess_node(
-        node_id, claim_text, context, "socratic_questioner"
+    result = provider.assess_cell(
+        cell_id, claim_text, context, "socratic_questioner"
     )
 
     suggestion = _to_str(_get(result, "arguments", ""))
@@ -786,7 +786,7 @@ def _run_decomposition_audit(
 
     append_event(
         events_path=events_file,
-        node_id=node_id,
+        cell_id=cell_id,
         event_type="decomposition_audit",
         agent="decomposition_auditor",
         iteration=iteration,
@@ -807,16 +807,16 @@ def _run_decomposition_audit(
     if suggestion:
         audit_lines.append(f"**Structural Suggestions:** {suggestion}\n")
     if should_restructure:
-        audit_lines.append("**Recommendation:** This node may need to be restructured.\n")
+        audit_lines.append("**Recommendation:** This cell may need to be restructured.\n")
 
     _append_evidence(
-        petri_dir, node_id, dish_id, "decomposition_audit", iteration,
+        petri_dir, cell_id, dish_id, "decomposition_audit", iteration,
         "\n".join(audit_lines),
     )
 
 
 def _run_phase1(
-    node_id: str,
+    cell_id: str,
     claim_text: str,
     petri_dir: Path,
     dish_id: str,
@@ -829,12 +829,12 @@ def _run_phase1(
     """Phase 1: Research -- agents assigned to the research phase in config."""
     from petri.config import get_research_agents
 
-    events_file = _events_path(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
     phase1_agents = get_research_agents()
     verdicts_collected: list[dict] = []
 
-    prior_evidence = _load_evidence_context(petri_dir, node_id, dish_id)
+    prior_evidence = _load_evidence_context(petri_dir, cell_id, dish_id)
     context = {
         "iteration": iteration,
         "weakest_link": queue_entry.get("weakest_link"),
@@ -850,8 +850,8 @@ def _run_phase1(
                 agent=agent_name,
                 iteration=iteration,
             )
-        result = provider.assess_node(
-            node_id, claim_text, context, agent_name
+        result = provider.assess_cell(
+            cell_id, claim_text, context, agent_name
         )
         if fire is not None:
             fire(
@@ -865,26 +865,26 @@ def _run_phase1(
         # Log verdict_issued event
         append_event(
             events_path=events_file,
-            node_id=node_id,
+            cell_id=cell_id,
             event_type="verdict_issued",
             agent=agent_name,
             iteration=iteration,
             data=_verdict_data(result),
         )
-        _log_sources_from_result(events_file, node_id, agent_name, iteration, result)
+        _log_sources_from_result(events_file, cell_id, agent_name, iteration, result)
         verdicts_collected.append(result)
 
     # Append research findings to evidence file
     content = _format_phase1_evidence(verdicts_collected, iteration)
-    _append_evidence(petri_dir, node_id, dish_id, "research", iteration, content)
+    _append_evidence(petri_dir, cell_id, dish_id, "research", iteration, content)
 
     # Transition to critique_active
-    update_state(queue_file, node_id, QueueState.critique_active.value)
+    update_state(queue_file, cell_id, QueueState.critique_active.value)
     return verdicts_collected
 
 
 def _run_phase2(
-    node_id: str,
+    cell_id: str,
     claim_text: str,
     petri_dir: Path,
     dish_id: str,
@@ -898,13 +898,13 @@ def _run_phase2(
     """Phase 2: Critique -- agents assigned to the critique phase in config."""
     from petri.config import get_critique_agents
 
-    events_file = _events_path(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
     phase2_agents = get_critique_agents()
     verdicts_collected: list[dict] = []
     agent_outputs: dict[str, dict] = {}
 
-    prior_evidence = _load_evidence_context(petri_dir, node_id, dish_id)
+    prior_evidence = _load_evidence_context(petri_dir, cell_id, dish_id)
     context = {
         "iteration": iteration,
         "weakest_link": queue_entry.get("weakest_link"),
@@ -920,8 +920,8 @@ def _run_phase2(
                 agent=agent_name,
                 iteration=iteration,
             )
-        result = provider.assess_node(
-            node_id, claim_text, context, agent_name
+        result = provider.assess_cell(
+            cell_id, claim_text, context, agent_name
         )
         if fire is not None:
             fire(
@@ -935,13 +935,13 @@ def _run_phase2(
         # Log verdict_issued event
         append_event(
             events_path=events_file,
-            node_id=node_id,
+            cell_id=cell_id,
             event_type="verdict_issued",
             agent=agent_name,
             iteration=iteration,
             data=_verdict_data(result),
         )
-        _log_sources_from_result(events_file, node_id, agent_name, iteration, result)
+        _log_sources_from_result(events_file, cell_id, agent_name, iteration, result)
         verdicts_collected.append(result)
         agent_outputs[agent_name] = result
 
@@ -962,7 +962,7 @@ def _run_phase2(
         )
         log_debate(
             events_path=events_file,
-            node_id=node_id,
+            cell_id=cell_id,
             iteration=iteration,
             debate_result=debate_result,
         )
@@ -970,15 +970,15 @@ def _run_phase2(
 
     # Append critique assessment to evidence file
     content = _format_phase2_evidence(verdicts_collected, debate_results, iteration)
-    _append_evidence(petri_dir, node_id, dish_id, "critique", iteration, content)
+    _append_evidence(petri_dir, cell_id, dish_id, "critique", iteration, content)
 
     # Transition to mediating
-    update_state(queue_file, node_id, QueueState.mediating.value)
+    update_state(queue_file, cell_id, QueueState.mediating.value)
     return verdicts_collected
 
 
 def _run_convergence(
-    node_id: str,
+    cell_id: str,
     claim_text: str,
     petri_dir: Path,
     dish_id: str,
@@ -989,11 +989,11 @@ def _run_convergence(
     fire: Callable[..., None] | None = None,
 ) -> ConvergenceOutcome:
     """Convergence check -- determines converged, iterate, or stalled."""
-    events_file = _events_path(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
 
-    # Gather all verdicts for this node at the current iteration
-    verdicts = get_verdicts(events_file, node_id=node_id, iteration=iteration)
+    # Gather all verdicts for this cell at the current iteration
+    verdicts = get_verdicts(events_file, cell_id=cell_id, iteration=iteration)
 
     # Check for short circuits first
     short_circuit = evaluate_short_circuits(verdicts, agent_roles)
@@ -1001,9 +1001,9 @@ def _run_convergence(
         sc_type = short_circuit.type
         append_event(
             events_path=events_file,
-            node_id=node_id,
+            cell_id=cell_id,
             event_type="convergence_checked",
-            agent="node_lead",
+            agent="cell_lead",
             iteration=iteration,
             data={
                 "converged": False,
@@ -1013,14 +1013,14 @@ def _run_convergence(
             },
         )
         if sc_type == "needs_experiment":
-            _update_node_status(petri_dir, node_id, NodeStatus.NEEDS_EXPERIMENT.value)
-            update_state(queue_file, node_id, QueueState.stalled.value)
-            update_state(queue_file, node_id, QueueState.needs_human.value)
+            _update_cell_status(petri_dir, cell_id, CellStatus.NEEDS_EXPERIMENT.value)
+            update_state(queue_file, cell_id, QueueState.stalled.value)
+            update_state(queue_file, cell_id, QueueState.needs_human.value)
             return ConvergenceOutcome(outcome="short_circuit", type=sc_type)
         elif sc_type == "defer_open":
-            _update_node_status(petri_dir, node_id, NodeStatus.DEFER_OPEN.value)
-            update_state(queue_file, node_id, QueueState.converged.value)
-            update_state(queue_file, node_id, QueueState.deferred_open.value)
+            _update_cell_status(petri_dir, cell_id, CellStatus.DEFER_OPEN.value)
+            update_state(queue_file, cell_id, QueueState.converged.value)
+            update_state(queue_file, cell_id, QueueState.deferred_open.value)
             return ConvergenceOutcome(outcome="short_circuit", type=sc_type)
 
     # Normal convergence check
@@ -1034,9 +1034,9 @@ def _run_convergence(
     # Log convergence event
     append_event(
         events_path=events_file,
-        node_id=node_id,
+        cell_id=cell_id,
         event_type="convergence_checked",
-        agent="node_lead",
+        agent="cell_lead",
         iteration=iteration,
         data={
             "converged": convergence.converged,
@@ -1048,18 +1048,18 @@ def _run_convergence(
     )
 
     if convergence.converged:
-        update_state(queue_file, node_id, QueueState.converged.value)
+        update_state(queue_file, cell_id, QueueState.converged.value)
         return ConvergenceOutcome(outcome="converged")
 
     # Not converged -- iterate or stall
     if breaker_fires:
         # Before stalling, run a decomposition audit (first-principles re-examination)
         _run_decomposition_audit(
-            node_id, claim_text, petri_dir, dish_id, iteration, provider,
+            cell_id, claim_text, petri_dir, dish_id, iteration, provider,
         )
-        update_state(queue_file, node_id, QueueState.stalled.value)
-        update_state(queue_file, node_id, QueueState.needs_human.value)
-        _update_node_status(petri_dir, node_id, NodeStatus.STALLED.value)
+        update_state(queue_file, cell_id, QueueState.stalled.value)
+        update_state(queue_file, cell_id, QueueState.needs_human.value)
+        _update_cell_status(petri_dir, cell_id, CellStatus.STALLED.value)
         return ConvergenceOutcome(outcome="circuit_breaker")
 
     # Iterate: increment iteration, set weakest link, back to research_active
@@ -1067,18 +1067,18 @@ def _run_convergence(
     # within the same convergence cycle, not a fresh cycle start.
     weakest_link = convergence.weakest_link
 
-    set_iteration(queue_file, node_id, iteration + 1)
+    set_iteration(queue_file, cell_id, iteration + 1)
     if weakest_link:
-        set_weakest_link(queue_file, node_id, weakest_link)
+        set_weakest_link(queue_file, cell_id, weakest_link)
         directive = f"Focus on addressing {weakest_link} concerns"
-        set_focused_directive(queue_file, node_id, directive)
+        set_focused_directive(queue_file, cell_id, directive)
 
-    update_state(queue_file, node_id, QueueState.research_active.value)
+    update_state(queue_file, cell_id, QueueState.research_active.value)
     return ConvergenceOutcome(outcome="iterate", weakest_link=weakest_link)
 
 
 def _run_red_team(
-    node_id: str,
+    cell_id: str,
     claim_text: str,
     petri_dir: Path,
     dish_id: str,
@@ -1088,10 +1088,10 @@ def _run_red_team(
     fire: Callable[..., None] | None = None,
 ) -> dict:
     """Red Team phase -- red_team_lead attempts disproval."""
-    events_file = _events_path(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
 
-    update_state(queue_file, node_id, QueueState.red_team_active.value)
+    update_state(queue_file, cell_id, QueueState.red_team_active.value)
 
     context = {"iteration": iteration, "phase": "red_team"}
     if fire is not None:
@@ -1101,7 +1101,7 @@ def _run_red_team(
             agent="red_team_lead",
             iteration=iteration,
         )
-    result = provider.assess_node(node_id, claim_text, context, "red_team_lead")
+    result = provider.assess_cell(cell_id, claim_text, context, "red_team_lead")
     if fire is not None:
         fire(
             "verdict",
@@ -1113,24 +1113,24 @@ def _run_red_team(
 
     append_event(
         events_path=events_file,
-        node_id=node_id,
+        cell_id=cell_id,
         event_type="verdict_issued",
         agent="red_team_lead",
         iteration=iteration,
         data=_verdict_data(result),
     )
-    _log_sources_from_result(events_file, node_id, "red_team_lead", iteration, result)
+    _log_sources_from_result(events_file, cell_id, "red_team_lead", iteration, result)
 
     # Append red team findings to evidence file
     content = _format_red_team_evidence(result, iteration)
-    _append_evidence(petri_dir, node_id, dish_id, "red_team", iteration, content)
+    _append_evidence(petri_dir, cell_id, dish_id, "red_team", iteration, content)
 
-    update_state(queue_file, node_id, QueueState.evaluating.value)
+    update_state(queue_file, cell_id, QueueState.evaluating.value)
     return result
 
 
 def _run_evaluation(
-    node_id: str,
+    cell_id: str,
     claim_text: str,
     petri_dir: Path,
     dish_id: str,
@@ -1140,11 +1140,11 @@ def _run_evaluation(
     fire: Callable[..., None] | None = None,
 ) -> EvaluationResult:
     """Evidence Evaluation -- final verdict based on source hierarchy."""
-    events_file = _events_path(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
 
     # Validate terminal sources
-    source_validation = validate_terminal_sources(events_file, node_id)
+    source_validation = validate_terminal_sources(events_file, cell_id)
 
     context = {
         "iteration": iteration,
@@ -1158,8 +1158,8 @@ def _run_evaluation(
             agent="evidence_evaluator",
             iteration=iteration,
         )
-    result = provider.assess_node(
-        node_id, claim_text, context, "evidence_evaluator"
+    result = provider.assess_cell(
+        cell_id, claim_text, context, "evidence_evaluator"
     )
     if fire is not None:
         fire(
@@ -1172,31 +1172,31 @@ def _run_evaluation(
 
     append_event(
         events_path=events_file,
-        node_id=node_id,
+        cell_id=cell_id,
         event_type="verdict_issued",
         agent="evidence_evaluator",
         iteration=iteration,
         data=_verdict_data(result),
     )
-    _log_sources_from_result(events_file, node_id, "evidence_evaluator", iteration, result)
+    _log_sources_from_result(events_file, cell_id, "evidence_evaluator", iteration, result)
 
-    # Determine final node status from evaluator verdict
+    # Determine final cell status from evaluator verdict
     evaluator_verdict = _get(result, "verdict", "EVIDENCE_CONFIRMS")
     if evaluator_verdict == "EVIDENCE_CONFIRMS":
-        final_status = NodeStatus.VALIDATED.value
+        final_status = CellStatus.VALIDATED.value
     elif evaluator_verdict == "EVIDENCE_REFUTES":
-        final_status = NodeStatus.DISPROVEN.value
+        final_status = CellStatus.DISPROVEN.value
     else:
         # EVIDENCE_INCONCLUSIVE or unknown
-        final_status = NodeStatus.DEFER_OPEN.value
+        final_status = CellStatus.DEFER_OPEN.value
 
     # Append evaluation findings to evidence file
     content = _format_evaluation_evidence(result, source_validation, iteration)
-    _append_evidence(petri_dir, node_id, dish_id, "evaluation", iteration, content)
-    _update_evidence_status(petri_dir, node_id, dish_id, final_status)
+    _append_evidence(petri_dir, cell_id, dish_id, "evaluation", iteration, content)
+    _update_evidence_status(petri_dir, cell_id, dish_id, final_status)
 
-    _update_node_status(petri_dir, node_id, final_status)
-    update_state(queue_file, node_id, QueueState.done.value)
+    _update_cell_status(petri_dir, cell_id, final_status)
+    update_state(queue_file, cell_id, QueueState.done.value)
 
     return EvaluationResult(verdict=evaluator_verdict, final_status=final_status)
 
@@ -1204,31 +1204,31 @@ def _run_evaluation(
 # ── Main Pipeline ────────────────────────────────────────────────────────
 
 
-def process_node(
-    node_id: str,
+def process_cell(
+    cell_id: str,
     petri_dir: Path,
     provider: InferenceProvider,
     agent_roles: dict | None = None,
     debate_pairings: list | None = None,
     slot_idx: int | None = None,
-    on_event: NodeProgressCallback | None = None,
-) -> ProcessNodeResult:
-    """Process a single node through the validation pipeline.
+    on_event: CellProgressCallback | None = None,
+) -> ProcessCellResult:
+    """Process a single cell through the validation pipeline.
 
-    Drives the node from its current queue state through successive phases
+    Drives the cell from its current queue state through successive phases
     until it reaches a terminal state (done, needs_human, deferred) or a
     graceful stop is requested.
 
     Returns a status dict:
-        {node_id, final_state, iterations, events_logged, ...}
+        {cell_id, final_state, iterations, events_logged, ...}
     """
     dish_id = _get_dish_id(petri_dir)
     queue_file = _queue_path(petri_dir)
-    events_file = _events_path(petri_dir, node_id, dish_id)
+    events_file = _events_path(petri_dir, cell_id, dish_id)
 
     # Resolve slot index used in emitted lifecycle events.  ``-1`` means the
     # caller did not participate in slot pooling (e.g. a direct
-    # ``process_node`` call from a unit test).
+    # ``process_cell`` call from a unit test).
     resolved_slot_idx = slot_idx if slot_idx is not None else -1
 
     def fire(kind: str, **fields: object) -> None:
@@ -1237,9 +1237,9 @@ def process_node(
             return
         try:
             on_event(
-                NodeProgressEvent(
+                CellProgressEvent(
                     slot_idx=resolved_slot_idx,
-                    node_id=node_id,
+                    cell_id=cell_id,
                     kind=kind,
                     **fields,  # type: ignore[arg-type]
                 )
@@ -1253,29 +1253,29 @@ def process_node(
     if agent_roles is None:
         agent_roles = load_agent_roles()
 
-    # Load node metadata for claim_text
-    metadata = _load_node_metadata(petri_dir, node_id, dish_id)
+    # Load cell metadata for claim_text
+    metadata = _load_cell_metadata(petri_dir, cell_id, dish_id)
     claim_text = metadata.get("claim_text", "")
 
     # Track processing stats
     iterations_run = 0
-    events_before = len(get_verdicts(events_file, node_id=node_id))
+    events_before = len(get_verdicts(events_file, cell_id=cell_id))
 
     # Load queue entry
     from petri.storage.queue import load_queue
 
     queue = load_queue(queue_file)
-    if node_id not in queue.get("entries", {}):
-        fire("finished", error=f"Node {node_id} not found in queue")
-        return ProcessNodeResult(
-            node_id=node_id,
+    if cell_id not in queue.get("entries", {}):
+        fire("finished", error=f"Cell {cell_id} not found in queue")
+        return ProcessCellResult(
+            cell_id=cell_id,
             final_state="not_in_queue",
             iterations=0,
             events_logged=0,
-            error=f"Node {node_id} not found in queue",
+            error=f"Cell {cell_id} not found in queue",
         )
 
-    initial_entry = queue["entries"].get(node_id, {})
+    initial_entry = queue["entries"].get(cell_id, {})
     fire("started", iteration=initial_entry.get("iteration", 0))
 
     # Drive the state machine until we reach a terminal state
@@ -1287,16 +1287,16 @@ def process_node(
 
         # Reload queue entry each loop iteration to get fresh state
         queue = load_queue(queue_file)
-        entry = queue["entries"].get(node_id, {})
+        entry = queue["entries"].get(cell_id, {})
         current_state = entry.get("queue_state", "done")
         iteration = entry.get("iteration", 0)
 
         # Check for graceful stop between phases
         if is_stop_requested():
-            logger.info("Graceful stop requested for node %s", node_id)
+            logger.info("Graceful stop requested for cell %s", cell_id)
             if current_state not in ("done", "needs_human", "deferred_open", "deferred_closed"):
                 try:
-                    update_state(queue_file, node_id, QueueState.stalled.value)
+                    update_state(queue_file, cell_id, QueueState.stalled.value)
                 except ValueError:
                     pass  # Already in a non-stallable state
             break
@@ -1307,13 +1307,13 @@ def process_node(
 
         # Dispatch based on current state
         if current_state == QueueState.queued.value:
-            _update_node_status(petri_dir, node_id, NodeStatus.RESEARCH.value)
-            update_state(queue_file, node_id, QueueState.socratic_active.value)
+            _update_cell_status(petri_dir, cell_id, CellStatus.RESEARCH.value)
+            update_state(queue_file, cell_id, QueueState.socratic_active.value)
 
         elif current_state == QueueState.socratic_active.value:
             fire("phase", phase="socratic", iteration=iteration)
             _run_socratic_phase(
-                node_id, claim_text, petri_dir, dish_id,
+                cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider,
                 fire=fire,
             )
@@ -1321,7 +1321,7 @@ def process_node(
         elif current_state == QueueState.research_active.value:
             fire("phase", phase="research", iteration=iteration)
             _run_phase1(
-                node_id, claim_text, petri_dir, dish_id,
+                cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, entry,
                 fire=fire,
             )
@@ -1330,7 +1330,7 @@ def process_node(
         elif current_state == QueueState.critique_active.value:
             fire("phase", phase="critique", iteration=iteration)
             _run_phase2(
-                node_id, claim_text, petri_dir, dish_id,
+                cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, debate_pairings, entry,
                 fire=fire,
             )
@@ -1338,7 +1338,7 @@ def process_node(
         elif current_state == QueueState.mediating.value:
             fire("phase", phase="mediating", iteration=iteration)
             convergence_outcome = _run_convergence(
-                node_id, claim_text, petri_dir, dish_id,
+                cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, entry,
                 fire=fire,
             )
@@ -1346,37 +1346,37 @@ def process_node(
                 iterations_run += 1
 
         elif current_state == QueueState.converged.value:
-            _update_node_status(petri_dir, node_id, NodeStatus.RED_TEAM.value)
+            _update_cell_status(petri_dir, cell_id, CellStatus.RED_TEAM.value)
             fire("phase", phase="red_team", iteration=iteration)
             _run_red_team(
-                node_id, claim_text, petri_dir, dish_id,
+                cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles,
                 fire=fire,
             )
 
         elif current_state == QueueState.evaluating.value:
-            _update_node_status(petri_dir, node_id, NodeStatus.EVALUATE.value)
+            _update_cell_status(petri_dir, cell_id, CellStatus.EVALUATE.value)
             fire("phase", phase="evaluating", iteration=iteration)
             _run_evaluation(
-                node_id, claim_text, petri_dir, dish_id,
+                cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles,
                 fire=fire,
             )
 
         elif current_state == QueueState.stalled.value:
-            update_state(queue_file, node_id, QueueState.needs_human.value)
+            update_state(queue_file, cell_id, QueueState.needs_human.value)
 
         else:
             # Unknown or unhandled state
-            logger.warning("Unhandled queue state %s for node %s", current_state, node_id)
+            logger.warning("Unhandled queue state %s for cell %s", current_state, cell_id)
             break
 
     # Compute final state
     queue = load_queue(queue_file)
-    final_entry = queue["entries"].get(node_id, {})
+    final_entry = queue["entries"].get(cell_id, {})
     final_state = final_entry.get("queue_state", "unknown")
 
-    events_after = len(get_verdicts(events_file, node_id=node_id))
+    events_after = len(get_verdicts(events_file, cell_id=cell_id))
     events_logged = events_after - events_before
 
     fire(
@@ -1384,8 +1384,8 @@ def process_node(
         iteration=final_entry.get("iteration", 0),
     )
 
-    return ProcessNodeResult(
-        node_id=node_id,
+    return ProcessCellResult(
+        cell_id=cell_id,
         final_state=final_state,
         iterations=iterations_run,
         events_logged=events_logged,
@@ -1393,23 +1393,23 @@ def process_node(
     )
 
 
-# ── Eligible Node Discovery ─────────────────────────────────────────────
+# ── Eligible Cell Discovery ─────────────────────────────────────────────
 
 
-def find_eligible_nodes(
+def find_eligible_cells(
     petri_dir: Path,
     dish_id: str,
-    node_ids: list[str] | None = None,
+    cell_ids: list[str] | None = None,
     colony_filter: str | None = None,
-    all_nodes: bool = False,
+    all_cells: bool = False,
 ) -> list[str]:
-    """Find nodes eligible for validation.
+    """Find cells eligible for validation.
 
-    Eligible = cell nodes (or nodes whose deps are all VALIDATED) in NEW status.
+    Eligible = leaf cells (or cells whose deps are all VALIDATED) in NEW status.
 
-    When *node_ids* is provided, only those specific nodes are considered.
-    When *colony_filter* is provided, only nodes from that colony are scanned.
-    When *all_nodes* is True, all colonies are scanned.
+    When *cell_ids* is provided, only those specific cells are considered.
+    When *colony_filter* is provided, only cells from that colony are scanned.
+    When *all_cells* is True, all colonies are scanned.
     """
     from petri.graph.colony import deserialize_colony
 
@@ -1419,9 +1419,9 @@ def find_eligible_nodes(
 
     eligible: list[str] = []
 
-    # If specific node IDs are given, return them directly (caller knows best)
-    if node_ids:
-        return list(node_ids)
+    # If specific cell IDs are given, return them directly (caller knows best)
+    if cell_ids:
+        return list(cell_ids)
 
     # Scan colonies
     for colony_dir in sorted(dishes_dir.iterdir()):
@@ -1438,16 +1438,16 @@ def find_eligible_nodes(
             continue
 
         # Build status map from metadata files
-        nodes_status: dict[str, NodeStatus] = {}
-        for node in graph.get_nodes():
-            nodes_status[node.id] = node.status
+        cells_status: dict[str, CellStatus] = {}
+        for cell in graph.get_all_cells():
+            cells_status[cell.id] = cell.status
 
-        # Get eligible nodes from graph
-        for node in graph.get_eligible_for_validation(nodes_status):
-            eligible.append(node.id)
+        # Get eligible cells from graph
+        for cell in graph.get_eligible_for_validation(cells_status):
+            eligible.append(cell.id)
 
         # If not processing all, stop after first colony
-        if not all_nodes and not colony_filter:
+        if not all_cells and not colony_filter:
             break
 
     return eligible
@@ -1460,13 +1460,13 @@ def process_queue(
     petri_dir: Path,
     provider: InferenceProvider | None = None,
     max_concurrent: int = MAX_CONCURRENT,
-    node_ids: list[str] | None = None,
+    cell_ids: list[str] | None = None,
     colony_filter: str | None = None,
-    all_nodes: bool = False,
+    all_cells: bool = False,
     dry_run: bool = False,
-    on_event: NodeProgressCallback | None = None,
+    on_event: CellProgressCallback | None = None,
 ) -> QueueProcessingResult:
-    """Process the queue, running eligible nodes through the pipeline.
+    """Process the queue, running eligible cells through the pipeline.
 
     Uses ``ThreadPoolExecutor`` for concurrent processing.
 
@@ -1481,12 +1481,12 @@ def process_queue(
     dish_id = _get_dish_id(petri_dir)
     queue_file = _queue_path(petri_dir)
 
-    # Find eligible nodes
-    eligible = find_eligible_nodes(
+    # Find eligible cells
+    eligible = find_eligible_cells(
         petri_dir, dish_id,
-        node_ids=node_ids,
+        cell_ids=cell_ids,
         colony_filter=colony_filter,
-        all_nodes=all_nodes,
+        all_cells=all_cells,
     )
 
     if dry_run:
@@ -1508,12 +1508,12 @@ def process_queue(
             results=[],
         )
 
-    # Enqueue eligible nodes that are not already in the queue
-    existing_queue = {entry["node_id"] for entry in list_queue(queue_file)}
-    for nid in eligible:
-        if nid not in existing_queue:
+    # Enqueue eligible cells that are not already in the queue
+    existing_queue = {entry["cell_id"] for entry in list_queue(queue_file)}
+    for eligible_cell_id in eligible:
+        if eligible_cell_id not in existing_queue:
             try:
-                add_to_queue(queue_file, nid)
+                add_to_queue(queue_file, eligible_cell_id)
             except ValueError:
                 pass  # Already in queue (race condition)
 
@@ -1522,14 +1522,14 @@ def process_queue(
     debate_pairings = load_debate_pairings()
 
     # Process concurrently
-    results: list[ProcessNodeResult] = []
+    results: list[ProcessCellResult] = []
     succeeded = 0
     failed = 0
     stalled = 0
 
     # Slot pool — a bounded FIFO of slot indices, one per worker.  Each
-    # submission pulls an index before calling ``process_node`` and returns
-    # it after.  This gives every in-flight node a stable slot identity
+    # submission pulls an index before calling ``process_cell`` and returns
+    # it after.  This gives every in-flight cell a stable slot identity
     # which the CLI's MultiSpinner uses to pick the row to update.
     #
     # NOTE: the stdlib module is aliased to ``_stdlib_queue`` because
@@ -1541,11 +1541,11 @@ def process_queue(
     for slot_index in range(max_concurrent):
         slot_pool.put(slot_index)
 
-    def _process_one(nid: str) -> ProcessNodeResult:
+    def _process_one(worker_cell_id: str) -> ProcessCellResult:
         slot_index = slot_pool.get()
         try:
-            return process_node(
-                nid, petri_dir,
+            return process_cell(
+                worker_cell_id, petri_dir,
                 provider=provider,
                 agent_roles=agent_roles,
                 debate_pairings=debate_pairings,
@@ -1553,21 +1553,21 @@ def process_queue(
                 on_event=on_event,
             )
         except Exception as exc:
-            logger.exception("Error processing node %s", nid)
+            logger.exception("Error processing cell %s", worker_cell_id)
             if on_event is not None:
                 try:
                     on_event(
-                        NodeProgressEvent(
+                        CellProgressEvent(
                             slot_idx=slot_index,
-                            node_id=nid,
+                            cell_id=worker_cell_id,
                             kind="finished",
                             error=str(exc),
                         )
                     )
                 except Exception:
                     pass
-            return ProcessNodeResult(
-                node_id=nid,
+            return ProcessCellResult(
+                cell_id=worker_cell_id,
                 final_state="error",
                 iterations=0,
                 events_logged=0,
@@ -1592,18 +1592,18 @@ def process_queue(
             while remaining or active_futures:
                 # Submit new work up to the balancer's recommended level
                 while remaining and len(active_futures) < balancer.recommended_workers:
-                    nid = remaining.pop(0)
-                    future = executor.submit(_process_one, nid)
-                    active_futures[future] = nid
+                    next_cell_id = remaining.pop(0)
+                    future = executor.submit(_process_one, next_cell_id)
+                    active_futures[future] = next_cell_id
 
                 # Poll for completed futures
                 newly_done = [completed for completed in active_futures if completed.done()]
 
                 for future in newly_done:
-                    node_result = future.result()
-                    results.append(node_result)
+                    cell_result = future.result()
+                    results.append(cell_result)
                     del active_futures[future]
-                    final = node_result.final_state
+                    final = cell_result.final_state
                     if final == "done":
                         succeeded += 1
                     elif final in ("needs_human", "stalled"):

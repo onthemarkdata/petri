@@ -37,7 +37,7 @@ EVENT_COLORS = {
     "evidence_appended": "#06b6d4",
     "debate_mediated": "#f97316",
     "convergence_checked": "#ef4444",
-    "node_reopened": "#ec4899",
+    "cell_reopened": "#ec4899",
     "propagation_triggered": "#818cf8",
     "decomposition_created": "#8b5cf6",
     "decomposition_audit": "#a78bfa",

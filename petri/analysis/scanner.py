@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from petri.analysis.convergence import load_agent_roles
-from petri.models import AgentRole, EventType, NodeStatus, QueueState
+from petri.models import AgentRole, CellStatus, EventType, QueueState
 from petri.storage.queue import VALID_TRANSITIONS
 
 # ── Authority Hierarchy ─────────────────────────────────────────────────
@@ -85,7 +85,7 @@ def scan(
     code_agent_roles = load_agent_roles()
     code_event_types = {e.value for e in EventType}
     code_queue_states = {s.value for s in QueueState}
-    code_node_statuses = {s.value for s in NodeStatus}
+    code_cell_statuses = {s.value for s in CellStatus}
     code_transitions = VALID_TRANSITIONS
 
     # Load consolidated petri.yaml from defaults
@@ -126,9 +126,9 @@ def scan(
         _check_convergence_logic(code_agent_roles, defaults_agents)
     )
 
-    # 7. Branching / node status consistency
+    # 7. Branching / cell status consistency
     issues.extend(
-        _check_node_statuses(code_node_statuses, generated_dir)
+        _check_cell_statuses(code_cell_statuses, generated_dir)
     )
 
     # 8. Role separation (lead vs specialist)
@@ -417,13 +417,13 @@ def _check_queue_schema(petri_dir: Path) -> list[ScanIssue]:
         ))
 
     # Validate queue state values
-    for node_id, entry in data.get("entries", {}).items():
+    for cell_id, entry in data.get("entries", {}).items():
         state = entry.get("queue_state", "")
         if state and state not in {s.value for s in QueueState}:
             issues.append(ScanIssue(
                 category="queue_schema",
                 description=(
-                    f"Node '{node_id}' has invalid queue state: '{state}'"
+                    f"Cell '{cell_id}' has invalid queue state: '{state}'"
                 ),
                 file_path=str(queue_path),
                 authority="code",
@@ -457,15 +457,15 @@ def _check_convergence_logic(
     return issues
 
 
-def _check_node_statuses(
+def _check_cell_statuses(
     code_statuses: set[str],
     generated_dir: Path | None,
 ) -> list[ScanIssue]:
-    """Category 7: Node status values consistent in generated files."""
+    """Category 7: Cell status values consistent in generated files."""
     issues: list[ScanIssue] = []
 
     if generated_dir:
-        # Check rules for node status references
+        # Check rules for cell status references
         rules_dir = generated_dir / "rules"
         if rules_dir.exists():
             for rule_file in rules_dir.iterdir():
@@ -479,9 +479,9 @@ def _check_node_statuses(
                 if found_statuses and len(found_statuses) < len(code_statuses) // 2:
                     missing = code_statuses - found_statuses
                     issues.append(ScanIssue(
-                        category="node_statuses",
+                        category="cell_statuses",
                         description=(
-                            f"Rule '{rule_file.stem}' references some but not all node "
+                            f"Rule '{rule_file.stem}' references some but not all cell "
                             f"statuses. Missing: {sorted(missing)}"
                         ),
                         file_path=str(rule_file),

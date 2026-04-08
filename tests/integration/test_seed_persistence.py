@@ -3,13 +3,13 @@
 These tests pin bug #4 from
 ``/Users/onthemarkdata/.claude/plans/quiet-doodling-pumpkin.md``: the
 ``petri seed`` command previously wrote ``dependencies: []`` to the center
-node's on-disk ``metadata.json`` because the CLI and the decomposer each
-constructed their own level-0 ``Node`` instance. The CLI serialized *its*
+cell's on-disk ``metadata.json`` because the CLI and the decomposer each
+constructed their own level-0 ``Cell`` instance. The CLI serialized *its*
 center (which was never mutated) while the decomposer wired dependencies
-onto a throwaway local Node, so the on-disk center always looked like a
+onto a throwaway local Cell, so the on-disk center always looked like a
 sink with no children.
 
-The fix threads the CLI's ``center_node`` into ``decompose_claim`` via
+The fix threads the CLI's ``center_cell`` into ``decompose_claim`` via
 the ``center=`` kwarg so the decomposer mutates the same object the CLI
 later serializes.
 """
@@ -25,7 +25,7 @@ from typer.testing import CliRunner
 
 from petri.cli import app
 from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
-from petri.models import build_node_key
+from petri.models import build_cell_key
 
 from tests.conftest import FakeProvider
 
@@ -53,7 +53,7 @@ class SeedFakeProvider(FakeProvider):
             ],
             "edges": [],
         }
-        # Force atomic level-1 nodes — no Five Whys recursion.
+        # Force atomic level-1 cells — no Five Whys recursion.
         self.why_response = []
 
 
@@ -101,8 +101,8 @@ def petri_dir_for_seed(tmp_path, monkeypatch):
 
 
 def test_seed_persists_center_dependencies_to_disk(petri_dir_for_seed, monkeypatch):
-    """Regression: bug #4 — center node's on-disk metadata.json had
-    dependencies=[] because the CLI and decomposer created separate Node
+    """Regression: bug #4 — center cell's on-disk metadata.json had
+    dependencies=[] because the CLI and decomposer created separate Cell
     objects.
 
     Path chosen: drive the *full* CLI ``petri seed ... --no-questions``
@@ -112,7 +112,7 @@ def test_seed_persists_center_dependencies_to_disk(petri_dir_for_seed, monkeypat
     Accept/Regenerate/Abort prompt), and ``_resolve_provider`` is
     monkeypatched to return a deterministic ``SeedFakeProvider`` so we
     never touch the real Claude Code CLI. After the command exits, we
-    open ``metadata.json`` for the center node directly off disk and
+    open ``metadata.json`` for the center cell directly off disk and
     assert that ``dependencies`` is the exact set of level-1 IDs that
     the fake decomposition produced.
 
@@ -148,7 +148,7 @@ def test_seed_persists_center_dependencies_to_disk(petri_dir_for_seed, monkeypat
         "injected provider, but no calls were recorded."
     )
 
-    # ── Locate the center node's metadata.json on disk ──────────────
+    # ── Locate the center cell's metadata.json on disk ──────────────
     petri_dir = petri_dir_for_seed / ".petri"
     dishes_dir = petri_dir / "petri-dishes"
     colony_dirs = [child for child in dishes_dir.iterdir() if child.is_dir()]
@@ -158,7 +158,7 @@ def test_seed_persists_center_dependencies_to_disk(petri_dir_for_seed, monkeypat
     )
     colony_path = colony_dirs[0]
 
-    # The center node lives at level 0, seq 0 — its directory name
+    # The center cell lives at level 0, seq 0 — its directory name
     # starts with ``000-`` under a level dir whose name also starts
     # with ``000-``. Find it via a glob rather than hard-coding the
     # claim slug (which depends on the slugify implementation).
@@ -184,31 +184,31 @@ def test_seed_persists_center_dependencies_to_disk(petri_dir_for_seed, monkeypat
     persisted_dependencies = center_metadata.get("dependencies", [])
     assert isinstance(persisted_dependencies, list)
     assert persisted_dependencies, (
-        "REGRESSION (bug #4): center node metadata.json was serialized "
+        "REGRESSION (bug #4): center cell metadata.json was serialized "
         "with an empty dependencies list. The CLI and decomposer are "
-        "operating on separate Node instances again — the decomposer's "
+        "operating on separate Cell instances again — the decomposer's "
         "``center=`` kwarg fix has been undone or the CLI is no longer "
-        "passing center_node through.\n"
+        "passing center_cell through.\n"
         f"metadata.json contents: {json.dumps(center_metadata, indent=2)}"
     )
 
     # Build the exact set of level-1 IDs the FakeProvider should have
     # produced, then compare against what's on disk. The decomposer
-    # constructs node keys via build_node_key(dish_id, colony_name,
+    # constructs cell keys via build_cell_key(dish_id, colony_name,
     # level, seq), so we have to know the colony name. The CLI
     # auto-generates it from the claim text, but rather than reproduce
     # that logic, we recover it from the colony directory name.
     dish_id = "test-dish"
     colony_name = colony_path.name
     expected_level_one_ids = {
-        build_node_key(dish_id, colony_name, 1, 1),
-        build_node_key(dish_id, colony_name, 1, 2),
-        build_node_key(dish_id, colony_name, 1, 3),
+        build_cell_key(dish_id, colony_name, 1, 1),
+        build_cell_key(dish_id, colony_name, 1, 2),
+        build_cell_key(dish_id, colony_name, 1, 3),
     }
 
     assert set(persisted_dependencies) == expected_level_one_ids, (
-        "Center node's persisted dependencies do not match the "
-        "level-1 nodes returned by the fake decomposition.\n"
+        "Center cell's persisted dependencies do not match the "
+        "level-1 cells returned by the fake decomposition.\n"
         f"  expected: {sorted(expected_level_one_ids)}\n"
         f"  actual:   {sorted(persisted_dependencies)}"
     )

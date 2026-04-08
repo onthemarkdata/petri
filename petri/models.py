@@ -21,7 +21,7 @@ from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 # ── Enums ────────────────────────────────────────────────────────────────
 
 
-class NodeStatus(str, Enum):
+class CellStatus(str, Enum):
     NEW = "NEW"
     RESEARCH = "RESEARCH"
     RED_TEAM = "RED_TEAM"
@@ -59,7 +59,7 @@ class EventType(str, Enum):
     evidence_appended = "evidence_appended"
     debate_mediated = "debate_mediated"
     convergence_checked = "convergence_checked"
-    node_reopened = "node_reopened"
+    cell_reopened = "cell_reopened"
     propagation_triggered = "propagation_triggered"
     decomposition_created = "decomposition_created"
     decomposition_audit = "decomposition_audit"
@@ -73,7 +73,7 @@ class EventType(str, Enum):
     decomposition_started = "decomposition_started"
     decomposition_completed = "decomposition_completed"
     decomposition_failed = "decomposition_failed"
-    node_created = "node_created"
+    cell_created = "cell_created"
     colony_approved = "colony_approved"
 
 
@@ -148,19 +148,19 @@ class ConvergenceCheckedData(BaseModel):
     focused_directive: Optional[str] = None
 
 
-class NodeReopenedData(BaseModel):
+class CellReopenedData(BaseModel):
     trigger: str
     prior_status: str
 
 
 class PropagationTriggeredData(BaseModel):
-    reopened_node_id: str
+    reopened_cell_id: str
     flagged_dependents: list[str]
 
 
 class DecompositionCreatedData(BaseModel):
-    parent_node_id: str
-    child_node_ids: list[str]
+    parent_cell_id: str
+    child_cell_ids: list[str]
 
 
 class DecompositionAuditData(BaseModel):
@@ -177,7 +177,7 @@ class AgentStepData(BaseModel):
     Used by every agent-step event the seed CLI logs incrementally
     (seed_started, clarifying_questions_requested/received/failed,
     clarification_recorded/skipped, decomposition_started/completed/failed,
-    node_created, colony_approved). Fields are not constrained — these
+    cell_created, colony_approved). Fields are not constrained — these
     events log whatever context the caller has at the moment, and the
     audit log treats them as opaque records.
     """
@@ -196,7 +196,7 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "evidence_appended": EvidenceAppendedData,
     "debate_mediated": DebateMediatedData,
     "convergence_checked": ConvergenceCheckedData,
-    "node_reopened": NodeReopenedData,
+    "cell_reopened": CellReopenedData,
     "propagation_triggered": PropagationTriggeredData,
     "decomposition_created": DecompositionCreatedData,
     "decomposition_audit": DecompositionAuditData,
@@ -212,7 +212,7 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "decomposition_started": AgentStepData,
     "decomposition_completed": AgentStepData,
     "decomposition_failed": AgentStepData,
-    "node_created": AgentStepData,
+    "cell_created": AgentStepData,
     "colony_approved": AgentStepData,
 }
 
@@ -233,7 +233,7 @@ class Event(BaseModel):
     """An immutable record of an agent action."""
 
     id: str
-    node_id: str
+    cell_id: str
     timestamp: str
     type: EventType
     agent: str
@@ -244,43 +244,43 @@ class Event(BaseModel):
 class Verdict(BaseModel):
     """A verdict event -- convenience wrapper for querying."""
 
-    node_id: str
+    cell_id: str
     agent: str
     iteration: int
     verdict: str
     summary: str = ""
 
 
-class Node(BaseModel):
+class Cell(BaseModel):
     """A unit of logic -- claim, premise, or assumption."""
 
     id: str  # composite key: {dish}-{colony}-{level}-{seq}
     colony_id: str  # composite: {dish}-{colony}
     claim_text: str
     level: int = Field(ge=0)
-    status: NodeStatus = NodeStatus.NEW
-    dependencies: list[str] = Field(default_factory=list)  # composite node keys
-    dependents: list[str] = Field(default_factory=list)  # composite node keys
+    status: CellStatus = CellStatus.NEW
+    dependencies: list[str] = Field(default_factory=list)  # composite cell keys
+    dependents: list[str] = Field(default_factory=list)  # composite cell keys
     created_at: str = ""  # ISO 8601 UTC
 
 
 class Edge(BaseModel):
-    """A directed dependency between nodes."""
+    """A directed dependency between cells."""
 
-    from_node: str  # composite node key (the node that depends)
-    to_node: str  # composite node key (the dependency)
+    from_cell: str  # composite cell key (the cell that depends)
+    to_cell: str  # composite cell key (the dependency)
     edge_type: str = "intra_colony"  # "intra_colony" or "cross_colony"
 
 
 class Colony(BaseModel):
-    """A connected DAG of nodes rooted at a colony center."""
+    """A connected DAG of cells rooted at a colony center."""
 
     id: str  # composite: {dish}-{colony}
     dish: str
     center_claim: str
-    center_node_id: str
+    center_cell_id: str
     clarifications: list[dict] = Field(default_factory=list)  # list of {question, answer}
-    node_paths: dict[str, str] = Field(default_factory=dict)  # node_id -> relative dir path
+    cell_paths: dict[str, str] = Field(default_factory=dict)  # cell_id -> relative dir path
     created_at: str = ""
 
 
@@ -295,9 +295,9 @@ class PetriDish(BaseModel):
 
 
 class QueueEntry(BaseModel):
-    """A node's position in the validation workflow."""
+    """A cell's position in the validation workflow."""
 
-    node_id: str  # composite node key
+    cell_id: str  # composite cell key
     queue_state: QueueState = QueueState.queued
     iteration: int = Field(default=0, ge=0)
     max_iterations: int = Field(default=MAX_ITERATIONS, ge=1)
@@ -377,7 +377,7 @@ class SourceCitation(BaseModel):
 
 
 class AssessmentResult(BaseModel):
-    """Result from an agent's assess_node call."""
+    """Result from an agent's assess_cell call."""
 
     agent: str
     verdict: str
@@ -403,10 +403,10 @@ class EvaluationResult(BaseModel):
     final_status: str  # VALIDATED, DISPROVEN, DEFER_OPEN
 
 
-class ProcessNodeResult(BaseModel):
-    """Result from processing a single node through the pipeline."""
+class ProcessCellResult(BaseModel):
+    """Result from processing a single cell through the pipeline."""
 
-    node_id: str
+    cell_id: str
     final_state: str
     iterations: int = 0
     events_logged: int = 0
@@ -421,7 +421,7 @@ class QueueProcessingResult(BaseModel):
     succeeded: int = 0
     failed: int = 0
     stalled: int = 0
-    results: list[ProcessNodeResult] = Field(default_factory=list)
+    results: list[ProcessCellResult] = Field(default_factory=list)
     dry_run: bool = False
     would_process: list[str] = Field(default_factory=list)
 
@@ -475,7 +475,7 @@ class ShortCircuitCondition(BaseModel):
 class DecompositionResult(BaseModel):
     """Result from decomposing a claim into a colony DAG."""
 
-    nodes: list["Node"] = Field(default_factory=list)
+    cells: list["Cell"] = Field(default_factory=list)
     edges: list["Edge"] = Field(default_factory=list)
     colony_name: str = ""
     center_claim: str = ""
@@ -490,9 +490,9 @@ class ClarifyingQuestion(BaseModel):
 
 
 class EvidenceMatch(BaseModel):
-    """A match between new evidence and an existing node."""
+    """A match between new evidence and an existing cell."""
 
-    node_id: str
+    cell_id: str
     relevance: float = 0.0
     reason: str = ""
 
@@ -500,14 +500,14 @@ class EvidenceMatch(BaseModel):
 # ── Composite Key Utilities ──────────────────────────────────────────────
 
 
-def build_node_key(dish: str, colony: str, level: int, seq: int) -> str:
-    """Build a composite node key: {dish}-{colony}-{level:03d}-{seq:03d}"""
+def build_cell_key(dish: str, colony: str, level: int, seq: int) -> str:
+    """Build a composite cell key: {dish}-{colony}-{level:03d}-{seq:03d}"""
     return f"{dish}-{colony}-{level:03d}-{seq:03d}"
 
 
-def build_event_key(node_key: str, hex_id: str) -> str:
-    """Build a composite event key: {node_key}-{8hex}"""
-    return f"{node_key}-{hex_id}"
+def build_event_key(cell_key: str, hex_id: str) -> str:
+    """Build a composite event key: {cell_key}-{8hex}"""
+    return f"{cell_key}-{hex_id}"
 
 
 def parse_key(key: str, dish_id: str | None = None) -> dict:
@@ -516,7 +516,7 @@ def parse_key(key: str, dish_id: str | None = None) -> dict:
     Returns dict with available segments:
     - Always: 'raw' (original key)
     - If event key (5+ segments ending in 8-hex): 'event_hex', 'seq', 'level', 'colony_prefix'
-    - If node key (ends in two 3-digit groups): 'seq', 'level', 'colony_prefix'
+    - If cell key (ends in two 3-digit groups): 'seq', 'level', 'colony_prefix'
     - If dish_id provided: 'dish', 'colony' (split from colony_prefix)
     """
     parts = key.split("-")
@@ -641,7 +641,7 @@ class InferenceProvider(Protocol):
         max_premises: int = 5,
         on_progress: "Optional[Callable[[str], None]]" = None,
     ) -> DecompositionResult:
-        """Decompose a claim into nodes and edges.
+        """Decompose a claim into cells and edges.
 
         ``guidance`` is optional free-text feedback from a re-roll request;
         when non-empty it should be threaded into the model context so the
@@ -669,16 +669,16 @@ class InferenceProvider(Protocol):
         """
         ...
 
-    def assess_node(
-        self, node_id: str, claim_text: str, context: dict, agent_role: str
+    def assess_cell(
+        self, cell_id: str, claim_text: str, context: dict, agent_role: str
     ) -> AssessmentResult:
-        """Run an agent role assessment on a node."""
+        """Run an agent role assessment on a cell."""
         ...
 
     def match_evidence(
-        self, content: str, nodes: list[Node]
+        self, content: str, cells: list[Cell]
     ) -> list[EvidenceMatch]:
-        """Match new evidence to existing nodes.
+        """Match new evidence to existing cells.
         """
         ...
 

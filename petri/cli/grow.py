@@ -11,7 +11,7 @@ from petri.cli_ui import (
     MultiSpinner,
     grow_status_loop,
     print_error_and_exit,
-    short_node_id,
+    short_cell_id,
 )
 from petri.config import MAX_CONCURRENT
 from petri.engine.grow_loop import (
@@ -25,19 +25,19 @@ from petri.engine.grow_loop import (
 def register(app: typer.Typer) -> None:
     @app.command()
     def grow(
-        nodes: Optional[list[str]] = typer.Argument(None, help="Node IDs to grow"),
+        cells: Optional[list[str]] = typer.Argument(None, help="Cell IDs to grow"),
         colony_name: Optional[str] = typer.Option(
             None, "--colony", help="Grow all in colony"
         ),
-        all_nodes: bool = typer.Option(False, "--all", help="Grow all eligible"),
+        all_cells: bool = typer.Option(False, "--all", help="Grow all eligible"),
         max_concurrent: int = typer.Option(
-            MAX_CONCURRENT, "--max-concurrent", help="Max parallel nodes"
+            MAX_CONCURRENT, "--max-concurrent", help="Max parallel cells"
         ),
         dry_run: bool = typer.Option(
             False, "--dry-run", help="Show what would process"
         ),
     ) -> None:
-        """Enqueue nodes and process through validation pipeline.
+        """Enqueue cells and process through validation pipeline.
 
         Loops calling ``process_queue`` until every queue entry is in a
         terminal state, the cross-process stop sentinel appears, or two
@@ -60,7 +60,7 @@ def register(app: typer.Typer) -> None:
 
         from petri.engine.processor import (
             NoProviderError,
-            NodeProgressEvent,
+            CellProgressEvent,
             clear_stop_file,
             is_stop_file_present,
             process_queue,
@@ -82,9 +82,9 @@ def register(app: typer.Typer) -> None:
                     petri_dir=petri_dir,
                     provider=provider,
                     max_concurrent=max_concurrent,
-                    node_ids=nodes,
+                    cell_ids=cells,
                     colony_filter=colony_name,
-                    all_nodes=all_nodes,
+                    all_cells=all_cells,
                     dry_run=True,
                 )
             except NoProviderError:
@@ -95,11 +95,11 @@ def register(app: typer.Typer) -> None:
 
             would_process = dry_result.would_process
             if would_process:
-                typer.echo(f"Would process {len(would_process)} nodes:")
-                for node_id in would_process:
-                    typer.echo(f"  {node_id}")
+                typer.echo(f"Would process {len(would_process)} cells:")
+                for cell_id in would_process:
+                    typer.echo(f"  {cell_id}")
             else:
-                typer.echo("No eligible nodes found.")
+                typer.echo("No eligible cells found.")
             raise typer.Exit(code=0)
 
         # ── live path: loop until terminal/stopped/no-progress ──
@@ -122,33 +122,33 @@ def register(app: typer.Typer) -> None:
             with MultiSpinner("growing", slot_count=max_concurrent) as multi:
                 # Render every row up-front with an "idle" label so all
                 # N slots are visible from t=0 — before any worker has
-                # actually picked up a node.
+                # actually picked up a cell.
                 for slot_index in range(max_concurrent):
                     multi.update_slot(slot_index, "idle")
 
-                def _on_event(event: NodeProgressEvent) -> None:
+                def _on_event(event: CellProgressEvent) -> None:
                     """Translate a processor lifecycle event into a row update."""
                     if event.slot_idx < 0 or event.slot_idx >= max_concurrent:
                         return
-                    node_label = short_node_id(event.node_id)
+                    cell_label = short_cell_id(event.cell_id)
                     if event.kind == "started":
-                        row_text = f"{node_label} starting"
+                        row_text = f"{cell_label} starting"
                     elif event.kind == "phase":
-                        row_text = f"{node_label} {event.phase}"
+                        row_text = f"{cell_label} {event.phase}"
                     elif event.kind == "agent":
-                        row_text = f"{node_label} {event.phase} · {event.agent}"
+                        row_text = f"{cell_label} {event.phase} · {event.agent}"
                     elif event.kind == "verdict":
                         verdict_short = (event.verdict or "")[:24]
                         row_text = (
-                            f"{node_label} {event.phase} · "
+                            f"{cell_label} {event.phase} · "
                             f"{event.agent}: {verdict_short}"
                         )
                     elif event.kind == "finished":
                         if event.error:
                             error_short = (event.error or "")[:60]
-                            row_text = f"{node_label} ✗ {error_short}"
+                            row_text = f"{cell_label} ✗ {error_short}"
                         else:
-                            row_text = f"{node_label} ✓"
+                            row_text = f"{cell_label} ✓"
                         # Do NOT sleep here — blocking the worker thread
                         # delays slot release. Let the next "started"
                         # event for this slot overwrite the result.
@@ -163,9 +163,9 @@ def register(app: typer.Typer) -> None:
                         petri_dir=petri_dir,
                         provider=provider,
                         max_concurrent=max_concurrent,
-                        node_ids=nodes,
+                        cell_ids=cells,
                         colony_filter=colony_name,
-                        all_nodes=all_nodes,
+                        all_cells=all_cells,
                         dry_run=False,
                         on_event=_on_event,
                     )
@@ -221,17 +221,17 @@ def register(app: typer.Typer) -> None:
         typer.echo(f"  Final queue: {format_state_summary(final_states)}")
 
         if last_result is not None:
-            typer.echo(f"  Last pass processed: {last_result.processed} nodes")
+            typer.echo(f"  Last pass processed: {last_result.processed} cells")
             typer.echo(f"    Succeeded: {last_result.succeeded}")
             if last_result.stalled:
                 typer.echo(f"    Stalled:   {last_result.stalled}")
             if last_result.failed:
                 typer.echo(f"    Failed:    {last_result.failed}")
-            for node_result in last_result.results:
+            for cell_result in last_result.results:
                 typer.echo(
-                    f"    {node_result.node_id}: {node_result.final_state} "
-                    f"({node_result.iterations} iterations, "
-                    f"{node_result.events_logged} events)"
+                    f"    {cell_result.cell_id}: {cell_result.final_state} "
+                    f"({cell_result.iterations} iterations, "
+                    f"{cell_result.events_logged} events)"
                 )
 
         if outcome.reason == "all_terminal":

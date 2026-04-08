@@ -6,20 +6,20 @@ in a fixed tree::
     <petri_dir>/petri-dishes/
         <colony_slug>/
             colony.json
-            <level:03d>-<seq:03d>/          # fallback node directory name
+            <level:03d>-<seq:03d>/          # fallback cell directory name
                 events.jsonl
                 metadata.json
                 evidence.md
 
-In practice the node directory on disk is whatever
+In practice the cell directory on disk is whatever
 :func:`petri.graph.colony.serialize_colony` wrote into
-``colony.node_paths`` (a slugified ``<level>-<level_slug>/<seq>-<node_slug>``
-layout), but callers that have only a node ID fall back to the
+``colony.cell_paths`` (a slugified ``<level>-<level_slug>/<seq>-<cell_slug>``
+layout), but callers that have only a cell ID fall back to the
 ``<level:03d>-<seq:03d>`` convention — which is what the helpers here
 build.
 
-Node IDs follow the schema defined by
-:func:`petri.models.build_node_key`::
+Cell IDs follow the schema defined by
+:func:`petri.models.build_cell_key`::
 
     {dish}-{colony}-{level:03d}-{seq:03d}
 
@@ -35,19 +35,19 @@ from pathlib import Path
 from typing import Iterator
 
 __all__ = [
-    "parse_node_id",
+    "parse_cell_id",
     "colony_dir",
-    "node_dir",
+    "cell_dir",
     "events_path",
     "metadata_path",
     "iter_events_files",
 ]
 
 
-def parse_node_id(node_id: str) -> tuple[str, str, int, int]:
-    """Parse a composite node ID into its four logical parts.
+def parse_cell_id(cell_id: str) -> tuple[str, str, int, int]:
+    """Parse a composite cell ID into its four logical parts.
 
-    Node IDs use the schema ``{dish}-{colony}-{level:03d}-{seq:03d}``.
+    Cell IDs use the schema ``{dish}-{colony}-{level:03d}-{seq:03d}``.
     Both the dish and colony slugs may contain hyphens, so parsing is
     done right-to-left: the last two hyphen-separated segments are
     ``level`` and ``seq``, and everything before them is the combined
@@ -57,28 +57,28 @@ def parse_node_id(node_id: str) -> tuple[str, str, int, int]:
     treated as the dish and the second as the colony slug. When it has
     more, the first segment is taken as the dish and the remaining
     middle segments are joined back together as the colony slug. This
-    is a lossy heuristic — the node ID alone does not carry enough
+    is a lossy heuristic — the cell ID alone does not carry enough
     information to unambiguously recover a multi-hyphen dish — but it
     matches the right-to-left convention used elsewhere in the
     codebase (see :func:`petri.models.parse_key`).
 
     Args:
-        node_id: Composite node ID string.
+        cell_id: Composite cell ID string.
 
     Returns:
         ``(dish, colony_slug, level, seq)`` with level and seq as ints.
 
     Raises:
-        ValueError: If ``node_id`` has fewer than four hyphen-separated
+        ValueError: If ``cell_id`` has fewer than four hyphen-separated
             parts, or if the level/seq segments are not integers.
     """
-    if not isinstance(node_id, str):
-        raise ValueError(f"node_id must be a string, got {type(node_id).__name__}")
+    if not isinstance(cell_id, str):
+        raise ValueError(f"cell_id must be a string, got {type(cell_id).__name__}")
 
-    parts = node_id.split("-")
+    parts = cell_id.split("-")
     if len(parts) < 4:
         raise ValueError(
-            f"node_id {node_id!r} has fewer than 4 hyphen-separated parts; "
+            f"cell_id {cell_id!r} has fewer than 4 hyphen-separated parts; "
             f"expected '{{dish}}-{{colony}}-{{level}}-{{seq}}'"
         )
 
@@ -88,13 +88,13 @@ def parse_node_id(node_id: str) -> tuple[str, str, int, int]:
         level_int = int(level_str)
     except ValueError as exc:
         raise ValueError(
-            f"node_id {node_id!r} level segment {level_str!r} is not an integer"
+            f"cell_id {cell_id!r} level segment {level_str!r} is not an integer"
         ) from exc
     try:
         seq_int = int(seq_str)
     except ValueError as exc:
         raise ValueError(
-            f"node_id {node_id!r} seq segment {seq_str!r} is not an integer"
+            f"cell_id {cell_id!r} seq segment {seq_str!r} is not an integer"
         ) from exc
 
     dish = parts[0]
@@ -134,21 +134,21 @@ def colony_dir(petri_dir: Path, dish_id: str, colony_id: str) -> Path:
     return petri_dir / "petri-dishes" / colony_slug
 
 
-def node_dir(colony_path: Path, level: int, seq: int) -> Path:
-    """Return the fallback on-disk directory for a node within a colony.
+def cell_dir(colony_path: Path, level: int, seq: int) -> Path:
+    """Return the fallback on-disk directory for a cell within a colony.
 
     Uses the ``{level:03d}-{seq:03d}`` zero-padded naming convention
     that :func:`petri.graph.colony.serialize_colony` falls back to
-    when ``colony.node_paths`` does not contain an entry for the node.
+    when ``colony.cell_paths`` does not contain an entry for the cell.
     Whenever possible, callers should prefer the path stored in
-    ``colony.node_paths`` — this helper is for the fallback case and
-    for callers that only have a node ID in hand.
+    ``colony.cell_paths`` — this helper is for the fallback case and
+    for callers that only have a cell ID in hand.
 
     Args:
         colony_path: The on-disk colony directory (from
             :func:`colony_dir`).
-        level: Node level (``Node.level``).
-        seq: Node sequence number within its level.
+        level: Cell level (``Cell.level``).
+        seq: Cell sequence number within its level.
 
     Returns:
         ``<colony_path>/<level:03d>-<seq:03d>/``.
@@ -156,22 +156,22 @@ def node_dir(colony_path: Path, level: int, seq: int) -> Path:
     return colony_path / f"{level:03d}-{seq:03d}"
 
 
-def events_path(node_path: Path) -> Path:
-    """Return the ``events.jsonl`` file inside a node directory."""
-    return node_path / "events.jsonl"
+def events_path(cell_path: Path) -> Path:
+    """Return the ``events.jsonl`` file inside a cell directory."""
+    return cell_path / "events.jsonl"
 
 
-def metadata_path(node_path: Path) -> Path:
-    """Return the ``metadata.json`` file inside a node directory."""
-    return node_path / "metadata.json"
+def metadata_path(cell_path: Path) -> Path:
+    """Return the ``metadata.json`` file inside a cell directory."""
+    return cell_path / "metadata.json"
 
 
 def iter_events_files(petri_dir: Path) -> Iterator[Path]:
     """Yield every ``events.jsonl`` file under ``petri-dishes/``.
 
     Walks ``<petri_dir>/petri-dishes/`` recursively. Used by the grow
-    status loop and the stop command to scan all node event logs
-    without having to reconstruct per-node paths. If
+    status loop and the stop command to scan all cell event logs
+    without having to reconstruct per-cell paths. If
     ``petri-dishes/`` does not exist the iterator yields nothing
     rather than raising, so callers do not need to pre-check the
     directory.

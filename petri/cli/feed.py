@@ -43,63 +43,63 @@ def register(app: typer.Typer) -> None:
             content = source
 
         # Without a InferenceProvider, we can't do intelligent matching.
-        # Instead, show all nodes and let the user choose which to re-open.
-        all_nodes = []
+        # Instead, show all cells and let the user choose which to re-open.
+        all_cells = []
         for colony_graph, colony in colonies:
             if colony_name and colony.id.split("-", 1)[-1] != colony_name:
                 continue
-            for node in colony_graph.get_nodes():
-                all_nodes.append((colony_graph, colony, node))
+            for cell in colony_graph.get_all_cells():
+                all_cells.append((colony_graph, colony, cell))
 
-        # Display nodes that could be affected
+        # Display cells that could be affected
         typer.echo(f"\nSource: {source}")
         typer.echo(f"Content length: {len(content)} characters\n")
 
-        from petri.models import NodeStatus
+        from petri.models import CellStatus
 
         reopenable = [
-            (colony_graph, colony, node)
-            for colony_graph, colony, node in all_nodes
-            if node.status
+            (colony_graph, colony, cell)
+            for colony_graph, colony, cell in all_cells
+            if cell.status
             in (
-                NodeStatus.VALIDATED,
-                NodeStatus.DISPROVEN,
-                NodeStatus.DEFER_OPEN,
+                CellStatus.VALIDATED,
+                CellStatus.DISPROVEN,
+                CellStatus.DEFER_OPEN,
             )
-            or node.status.value
+            or cell.status.value
             in ("VALIDATED", "DISPROVEN", "DEFER_OPEN")
         ]
 
         if not reopenable:
             typer.echo(
-                "No nodes are in a re-openable state "
+                "No cells are in a re-openable state "
                 "(VALIDATED, DISPROVEN, or DEFER_OPEN)."
             )
             raise typer.Exit(code=1)
 
-        typer.echo(f"Re-openable nodes ({len(reopenable)}):")
-        for index, (colony_graph, colony, node) in enumerate(reopenable, 1):
+        typer.echo(f"Re-openable cells ({len(reopenable)}):")
+        for index, (colony_graph, colony, cell) in enumerate(reopenable, 1):
             status_val = (
-                node.status.value
-                if isinstance(node.status, NodeStatus)
-                else str(node.status)
+                cell.status.value
+                if isinstance(cell.status, CellStatus)
+                else str(cell.status)
             )
-            typer.echo(f"  {index}. [{status_val}] {node.id}: {node.claim_text}")
+            typer.echo(f"  {index}. [{status_val}] {cell.id}: {cell.claim_text}")
 
-        # Re-open nodes
+        # Re-open cells
         from petri.engine.propagation import (
             get_impact_report,
             propagate_upward,
-            reopen_node,
+            reopen_cell,
         )
 
         if auto_reopen:
             # Re-open all
-            for colony_graph, colony, node in reopenable:
-                reopen_node(petri_dir, node.id, trigger=f"New evidence from: {source}")
-                flagged = propagate_upward(petri_dir, node.id, colony_graph, dish_id)
+            for colony_graph, colony, cell in reopenable:
+                reopen_cell(petri_dir, cell.id, trigger=f"New evidence from: {source}")
+                flagged = propagate_upward(petri_dir, cell.id, colony_graph, dish_id)
                 typer.echo(
-                    f"  Re-opened {node.id}, flagged {len(flagged)} dependents"
+                    f"  Re-opened {cell.id}, flagged {len(flagged)} dependents"
                 )
         else:
             # In non-interactive mode, just show the impact report
@@ -107,31 +107,31 @@ def register(app: typer.Typer) -> None:
 
             if not sys.stdin.isatty():
                 typer.echo(
-                    "\nRun with --auto-reopen to re-open all affected nodes."
+                    "\nRun with --auto-reopen to re-open all affected cells."
                 )
                 raise typer.Exit(code=0)
 
-            # Interactive: ask for each node
+            # Interactive: ask for each cell
             try:
                 import questionary
 
-                for colony_graph, colony, node in reopenable:
-                    report = get_impact_report(petri_dir, node.id, colony_graph, dish_id)
-                    typer.echo(f"\n{node.id}: {node.claim_text}")
+                for colony_graph, colony, cell in reopenable:
+                    report = get_impact_report(petri_dir, cell.id, colony_graph, dish_id)
+                    typer.echo(f"\n{cell.id}: {cell.claim_text}")
                     typer.echo(
-                        f"  Would affect {report['total_affected']} dependent nodes"
+                        f"  Would affect {report['total_affected']} dependent cells"
                     )
 
                     if questionary.confirm(
-                        f"Re-open {node.id}?", default=False
+                        f"Re-open {cell.id}?", default=False
                     ).ask():
-                        reopen_node(
+                        reopen_cell(
                             petri_dir,
-                            node.id,
+                            cell.id,
                             trigger=f"New evidence from: {source}",
                         )
                         flagged = propagate_upward(
-                            petri_dir, node.id, colony_graph, dish_id
+                            petri_dir, cell.id, colony_graph, dish_id
                         )
                         typer.echo(
                             f"  Re-opened. Flagged {len(flagged)} dependents."

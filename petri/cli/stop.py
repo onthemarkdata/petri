@@ -8,10 +8,10 @@ import typer
 
 from petri.cli._bootstrap import find_petri_dir
 from petri.storage.paths import (
+    cell_dir as cell_dir_for,
     events_path as events_file_path,
     metadata_path as metadata_file_path,
-    node_dir as node_dir_for,
-    parse_node_id,
+    parse_cell_id,
 )
 
 
@@ -33,7 +33,7 @@ def register(app: typer.Typer) -> None:
         request_stop()
         request_stop_file(petri_dir)
 
-        # Find active nodes and stall them
+        # Find active cells and stall them
         active_states = {
             "socratic_active",
             "research_active",
@@ -43,25 +43,25 @@ def register(app: typer.Typer) -> None:
             "evaluating",
         }
         entries = list_queue(queue_path)
-        stopped_nodes: list[str] = []
+        stopped_cells: list[str] = []
 
         for entry in entries:
             state = entry.get("queue_state", "")
-            node_id = entry.get("node_id", "")
-            if state in active_states and node_id:
+            cell_id = entry.get("cell_id", "")
+            if state in active_states and cell_id:
                 try:
                     if force:
                         # Force stop: stall immediately
-                        update_state(queue_path, node_id, "stalled")
+                        update_state(queue_path, cell_id, "stalled")
                     else:
                         # Graceful: stall
-                        update_state(queue_path, node_id, "stalled")
+                        update_state(queue_path, cell_id, "stalled")
 
                     # Log stop event — walk each per-colony directory looking
-                    # for a matching node dir (using the zero-padded fallback
-                    # layout, which is what the node-ID alone can reconstruct).
+                    # for a matching cell dir (using the zero-padded fallback
+                    # layout, which is what the cell-ID alone can reconstruct).
                     try:
-                        _, _, level_int, seq_int = parse_node_id(node_id)
+                        _, _, level_int, seq_int = parse_cell_id(cell_id)
                     except ValueError:
                         level_int = seq_int = None
 
@@ -71,20 +71,20 @@ def register(app: typer.Typer) -> None:
                             for colony_path in dishes_dir.iterdir():
                                 if not colony_path.is_dir():
                                     continue
-                                candidate_node_dir = node_dir_for(
+                                candidate_cell_dir = cell_dir_for(
                                     colony_path, level_int, seq_int
                                 )
-                                candidate_metadata = metadata_file_path(candidate_node_dir)
+                                candidate_metadata = metadata_file_path(candidate_cell_dir)
                                 if not candidate_metadata.exists():
                                     continue
                                 try:
                                     meta = json.loads(candidate_metadata.read_text())
-                                    if meta.get("id") == node_id:
+                                    if meta.get("id") == cell_id:
                                         append_event(
-                                            events_path=events_file_path(candidate_node_dir),
-                                            node_id=node_id,
+                                            events_path=events_file_path(candidate_cell_dir),
+                                            cell_id=cell_id,
                                             event_type="verdict_issued",
-                                            agent="node_lead",
+                                            agent="cell_lead",
                                             iteration=entry.get("iteration", 0),
                                             data={
                                                 "verdict": "PIPELINE_STALLED",
@@ -96,22 +96,22 @@ def register(app: typer.Typer) -> None:
                                 except Exception:
                                     pass
 
-                    stopped_nodes.append(node_id)
+                    stopped_cells.append(cell_id)
                 except ValueError:
                     pass  # Transition not valid
 
-        if stopped_nodes:
-            typer.echo(f"Stopped {len(stopped_nodes)} nodes:")
-            for nid in stopped_nodes:
-                typer.echo(f"  {nid}: stalled")
+        if stopped_cells:
+            typer.echo(f"Stopped {len(stopped_cells)} cells:")
+            for stopped_cell_id in stopped_cells:
+                typer.echo(f"  {stopped_cell_id}: stalled")
         else:
-            typer.echo("No active nodes to stop.")
+            typer.echo("No active cells to stop.")
 
-        # Also check for queued nodes
-        queued_nodes = [
+        # Also check for queued cells
+        queued_cells = [
             entry for entry in entries if entry.get("queue_state") == "queued"
         ]
-        if queued_nodes:
-            typer.echo(f"\n{len(queued_nodes)} nodes remain queued (not started).")
+        if queued_cells:
+            typer.echo(f"\n{len(queued_cells)} cells remain queued (not started).")
 
         raise typer.Exit(code=0)

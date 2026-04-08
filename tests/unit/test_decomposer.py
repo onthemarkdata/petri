@@ -122,7 +122,7 @@ class TestDecomposeClaim:
             {"question": "Q2?", "answer": "free text", "options": []},
         ]
 
-    def test_raises_when_provider_returns_no_nodes(self):
+    def test_raises_when_provider_returns_no_cells(self):
         """The deleted ``_default_decompose`` fallback must NOT be reinstated.
 
         When the LLM returns nothing usable, the call must fail loudly so the
@@ -142,7 +142,7 @@ class TestDecomposeClaim:
             )
 
     def test_raises_when_provider_only_returns_center(self):
-        """A response with only a level-0 node is not enough."""
+        """A response with only a level-0 cell is not enough."""
         provider = FakeProvider()
         provider.decompose_response = {
             "nodes": [{"level": 0, "seq": 0, "claim_text": "claim"}],
@@ -157,7 +157,7 @@ class TestDecomposeClaim:
                 provider=provider,
             )
 
-    def test_builds_center_and_level_one_nodes(self):
+    def test_builds_center_and_level_one_cells(self):
         provider = FakeProvider()
         provider.decompose_response = {
             "nodes": [
@@ -174,38 +174,38 @@ class TestDecomposeClaim:
             provider=provider,
         )
 
-        # 1 center + 2 level-1 nodes
-        assert len(result.nodes) == 3
-        center = result.nodes[0]
+        # 1 center + 2 level-1 cells
+        assert len(result.cells) == 3
+        center = result.cells[0]
         assert center.level == 0
         assert center.claim_text == "a claim"
 
-        level_one = [n for n in result.nodes if n.level == 1]
+        level_one = [cell for cell in result.cells if cell.level == 1]
         assert len(level_one) == 2
-        assert {n.claim_text for n in level_one} == {
+        assert {cell.claim_text for cell in level_one} == {
             "first premise",
             "second premise",
         }
 
-        # Center depends on both level-1 nodes
-        assert sorted(center.dependencies) == sorted(n.id for n in level_one)
-        # Each level-1 node lists center as a dependent
-        for node in level_one:
-            assert node.dependents == [center.id]
+        # Center depends on both level-1 cells
+        assert sorted(center.dependencies) == sorted(cell.id for cell in level_one)
+        # Each level-1 cell lists center as a dependent
+        for cell in level_one:
+            assert cell.dependents == [center.id]
 
-        # Edges go center → each level-1 node
+        # Edges go center → each level-1 cell
         assert len(result.edges) == 2
         for edge in result.edges:
-            assert edge.from_node == center.id
-            assert edge.to_node in {n.id for n in level_one}
+            assert edge.from_cell == center.id
+            assert edge.to_cell in {cell.id for cell in level_one}
 
 
-# ── per-layer cap (max_nodes_per_layer) ─────────────────────────────────
+# ── per-layer cap (max_cells_per_layer) ─────────────────────────────────
 
 
 class TestPerLayerCap:
-    """The seed-time decomposer caps each level at ``max_nodes_per_layer``
-    so a single seed run never produces 100+ nodes. The cap is enforced
+    """The seed-time decomposer caps each level at ``max_cells_per_layer``
+    so a single seed run never produces 100+ cells. The cap is enforced
     in two places: the prompt asks for the top N most important premises,
     and the decomposer hard-truncates the model's response as a safety
     net (in case the model ignores the prompt).
@@ -222,7 +222,7 @@ class TestPerLayerCap:
         )
 
     def test_level_one_truncated_to_cap(self, monkeypatch):
-        """If the model returns 10 level-1 nodes, only the first 5 survive."""
+        """If the model returns 10 level-1 cells, only the first 5 survive."""
         self._force_cap(monkeypatch, 5)
         provider = FakeProvider()
         provider.decompose_response = {
@@ -241,7 +241,7 @@ class TestPerLayerCap:
             provider=provider,
         )
 
-        level_one = [n for n in result.nodes if n.level == 1]
+        level_one = [cell for cell in result.cells if cell.level == 1]
         assert len(level_one) == 5
 
     def test_max_premises_passed_to_decompose_claim(self, monkeypatch):
@@ -292,7 +292,7 @@ class TestPerLayerCap:
             provider=provider,
         )
 
-        level_two = [n for n in result.nodes if n.level == 2]
+        level_two = [cell for cell in result.cells if cell.level == 2]
         assert len(level_two) == 5
 
     def test_remaining_budget_passed_to_decompose_why(self, monkeypatch):
@@ -358,7 +358,7 @@ class TestPerLayerCap:
         assert len(provider.why_calls) == 1
 
 
-# ── on_progress + on_node_created callbacks ──────────────────────────────
+# ── on_progress + on_cell_created callbacks ─────────────────────────────
 
 
 class TestOnProgress:
@@ -439,7 +439,7 @@ class TestOnProgress:
         )
 
 
-class TestOnNodeCreated:
+class TestOnCellCreated:
     def _three_layer_provider(self) -> FakeProvider:
         """Provider that yields 2 level-1 premises and one atomic
         sub-premise for each, so the Five Whys loop runs once per premise.
@@ -457,7 +457,7 @@ class TestOnNodeCreated:
         ]
         return provider
 
-    def test_called_for_every_node_except_center(self):
+    def test_called_for_every_cell_except_center(self):
         provider = self._three_layer_provider()
         recorded: list = []
 
@@ -467,29 +467,29 @@ class TestOnNodeCreated:
             dish_id="dish",
             colony_name="colony",
             provider=provider,
-            on_node_created=lambda node, edges: recorded.append((node, edges)),
+            on_cell_created=lambda cell, edges: recorded.append((cell, edges)),
         )
 
         # Center is created by the CLI before decompose_claim runs, so the
-        # callback fires for every node *except* the center.
-        non_center = [n for n in result.nodes if n.level > 0]
+        # callback fires for every cell *except* the center.
+        non_center = [cell for cell in result.cells if cell.level > 0]
         assert len(recorded) == len(non_center)
-        assert {n.id for n, _ in recorded} == {n.id for n in non_center}
+        assert {cell.id for cell, _ in recorded} == {cell.id for cell in non_center}
 
     def test_called_in_topological_order_with_correct_parent_edges(self):
         """A child must never appear in the callback before its parent."""
         provider = self._three_layer_provider()
         seen_ids: list[str] = []
 
-        def _callback(node, edges):
+        def _callback(cell, edges):
             # Every parent referenced in edges must already have been seen
             # (or be the center, which the CLI creates upfront).
             for edge in edges:
                 assert (
-                    edge.from_node in seen_ids
-                    or edge.from_node.endswith("-000-000")
-                ), f"child {node.id} appeared before parent {edge.from_node}"
-            seen_ids.append(node.id)
+                    edge.from_cell in seen_ids
+                    or edge.from_cell.endswith("-000-000")
+                ), f"child {cell.id} appeared before parent {edge.from_cell}"
+            seen_ids.append(cell.id)
 
         decompose_claim(
             claim="a claim",
@@ -497,14 +497,14 @@ class TestOnNodeCreated:
             dish_id="dish",
             colony_name="colony",
             provider=provider,
-            on_node_created=_callback,
+            on_cell_created=_callback,
         )
 
         assert len(seen_ids) > 0
 
     def test_callback_optional(self):
         provider = FakeProvider()
-        # Must not raise without on_node_created
+        # Must not raise without on_cell_created
         result = decompose_claim(
             claim="a claim",
             clarifications=[],
@@ -512,28 +512,28 @@ class TestOnNodeCreated:
             colony_name="colony",
             provider=provider,
         )
-        assert len(result.nodes) >= 1
+        assert len(result.cells) >= 1
 
 
-# ── caller-supplied center node (bottom-up inversion fix) ────────────────
+# ── caller-supplied center cell (bottom-up inversion fix) ────────────────
 
 
 class TestCallerSuppliedCenter:
-    """The CLI's Phase C creates its own ``center_node`` object and then
+    """The CLI's Phase C creates its own ``center_cell`` object and then
     calls ``decompose_claim``. Before the fix, the decomposer constructed
-    its *own* ``center = Node(...)`` internally and wired dependencies on
-    that local object — leaving the CLI's ``center_node`` with an empty
-    dependencies list, so the engine treated the center as a leaf. The
-    new ``center`` parameter lets the CLI pass in its own Node and have
+    its *own* ``center = Cell(...)`` internally and wired dependencies on
+    that local object — leaving the CLI's ``center_cell`` with an empty
+    dependencies list, so the engine treated the center as a cell. The
+    new ``center`` parameter lets the CLI pass in its own Cell and have
     the decomposer mutate it in place.
     """
 
     def test_decompose_claim_populates_passed_center_dependencies(self):
-        """When a ``center`` Node is passed in, its dependencies must be
-        populated with the IDs of every level-1 node built from the LLM
+        """When a ``center`` Cell is passed in, its dependencies must be
+        populated with the IDs of every level-1 cell built from the LLM
         response — mutating the caller's object in place.
         """
-        from petri.models import Node, build_node_key
+        from petri.models import Cell, build_cell_key
 
         provider = FakeProvider()
         provider.decompose_response = {
@@ -547,8 +547,8 @@ class TestCallerSuppliedCenter:
 
         dish_id = "dish"
         colony_name = "colony"
-        center_id = build_node_key(dish_id, colony_name, 0, 0)
-        caller_center = Node(
+        center_id = build_cell_key(dish_id, colony_name, 0, 0)
+        caller_center = Cell(
             id=center_id,
             colony_id=f"{dish_id}-{colony_name}",
             claim_text="a claim",
@@ -566,24 +566,24 @@ class TestCallerSuppliedCenter:
         )
 
         # The exact Python object passed in must have been mutated — not
-        # a different Node with the same id.
-        level_one_nodes = [
-            node for node in result.nodes if node.level == 1
+        # a different Cell with the same id.
+        level_one_cells = [
+            cell for cell in result.cells if cell.level == 1
         ]
-        assert len(level_one_nodes) == 3
-        expected_ids = {node.id for node in level_one_nodes}
+        assert len(level_one_cells) == 3
+        expected_ids = {cell.id for cell in level_one_cells}
         assert set(caller_center.dependencies) == expected_ids
 
-        # And the DecompositionResult's level-0 node must be the very
+        # And the DecompositionResult's level-0 cell must be the very
         # same object the caller handed in (identity, not equality).
         result_center = next(
-            node for node in result.nodes if node.level == 0
+            cell for cell in result.cells if cell.level == 0
         )
         assert result_center is caller_center
 
     def test_decompose_claim_creates_center_when_none_passed(self):
         """Backwards-compat: omitting ``center`` must still produce a
-        level-0 node with correct dependencies.
+        level-0 cell with correct dependencies.
         """
         provider = FakeProvider()
         provider.decompose_response = {
@@ -602,15 +602,15 @@ class TestCallerSuppliedCenter:
             provider=provider,
         )
 
-        level_zero_nodes = [
-            node for node in result.nodes if node.level == 0
+        level_zero_cells = [
+            cell for cell in result.cells if cell.level == 0
         ]
-        assert len(level_zero_nodes) == 1
-        internal_center = level_zero_nodes[0]
+        assert len(level_zero_cells) == 1
+        internal_center = level_zero_cells[0]
         assert internal_center.claim_text == "another claim"
 
         level_one_ids = {
-            node.id for node in result.nodes if node.level == 1
+            cell.id for cell in result.cells if cell.level == 1
         }
         assert len(level_one_ids) == 2
         assert set(internal_center.dependencies) == level_one_ids

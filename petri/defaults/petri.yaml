@@ -75,7 +75,7 @@ source_hierarchy:
       terminal_eligible: false
 
 # ── Debates ─────────────────────────────────────────────────────────────
-# 4 structured debates mediated by Node Lead during critique phase
+# 4 structured debates mediated by Cell Lead during critique phase
 
 debates:
   - pair: [skeptic, champion]
@@ -111,8 +111,8 @@ agents:
     verdicts_block: []
     redirect_on_block: null
 
-  node_lead:
-    display_name: Node Lead
+  cell_lead:
+    display_name: Cell Lead
     is_lead: true
     scope: pipeline
     phase: null

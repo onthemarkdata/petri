@@ -18,14 +18,14 @@ from petri.cli_ui import print_error_and_exit
 def register(app: typer.Typer) -> None:
     @app.command()
     def connect(
-        from_node: Optional[str] = typer.Argument(
-            None, help="Source node ID"
+        from_cell: Optional[str] = typer.Argument(
+            None, help="Source cell ID"
         ),
-        to_node: Optional[str] = typer.Argument(
-            None, help="Target node ID"
+        to_cell: Optional[str] = typer.Argument(
+            None, help="Target cell ID"
         ),
     ) -> None:
-        """Create a cross-colony edge between two nodes."""
+        """Create a cross-colony edge between two cells."""
         from petri.graph.colony import serialize_colony
         from petri.models import Edge
 
@@ -33,54 +33,54 @@ def register(app: typer.Typer) -> None:
         dish_id = get_dish_id(petri_dir)
 
         # Interactive fallback when positional args omitted.
-        if from_node is None or to_node is None:
+        if from_cell is None or to_cell is None:
             if detect_interactive_mode():
                 try:
                     import questionary
 
-                    from_node = questionary.text("First node ID:").ask()
-                    to_node = questionary.text("Second node ID:").ask()
-                    if not from_node or not to_node:
+                    from_cell = questionary.text("First cell ID:").ask()
+                    to_cell = questionary.text("Second cell ID:").ask()
+                    if not from_cell or not to_cell:
                         typer.echo("Cancelled.")
                         raise typer.Exit(code=0)
                 except ImportError:
                     print_error_and_exit(
-                        "Usage: petri connect NODE1 NODE2",
+                        "Usage: petri connect CELL1 CELL2",
                     )
             else:
                 print_error_and_exit(
-                    "Usage: petri connect NODE1 NODE2",
+                    "Usage: petri connect CELL1 CELL2",
                 )
 
-        node1_id, node2_id = from_node, to_node
+        first_cell_id, second_cell_id = from_cell, to_cell
         colonies = load_colonies(petri_dir, dish_id)
 
-        # Find the nodes across colonies
+        # Find the cells across colonies
         source_graph = None
         source_colony = None
         target_found = False
 
         for colony_graph, colony in colonies:
             try:
-                colony_graph.get_node(node1_id)
+                colony_graph.get_cell(first_cell_id)
                 source_graph = colony_graph
                 source_colony = colony
             except KeyError:
                 pass
             try:
-                colony_graph.get_node(node2_id)
+                colony_graph.get_cell(second_cell_id)
                 target_found = True
             except KeyError:
                 pass
 
         if source_graph is None:
-            print_error_and_exit(f"Node '{node1_id}' not found.")
+            print_error_and_exit(f"Cell '{first_cell_id}' not found.")
         if not target_found:
-            print_error_and_exit(f"Node '{node2_id}' not found.")
+            print_error_and_exit(f"Cell '{second_cell_id}' not found.")
 
         edge = Edge(
-            from_node=node1_id,
-            to_node=node2_id,
+            from_cell=first_cell_id,
+            to_cell=second_cell_id,
             edge_type="cross_colony",
         )
 
@@ -95,6 +95,6 @@ def register(app: typer.Typer) -> None:
         serialize_colony(source_graph, source_colony, colony_path)
 
         typer.echo(
-            f"Cross-colony edge created: {node1_id} -> {node2_id}"
+            f"Cross-colony edge created: {first_cell_id} -> {second_cell_id}"
         )
         raise typer.Exit(code=0)

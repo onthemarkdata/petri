@@ -291,59 +291,233 @@ body {
   border: 1px solid var(--border); border-radius: 6px;
   margin-bottom: 6px; font-size: 12px;
 }
-.queue-node { color: var(--green); cursor: pointer; font-weight: 600; }
-.queue-node:hover { text-decoration: underline; }
+.queue-cell { color: var(--green); cursor: pointer; font-weight: 600; }
+.queue-cell:hover { text-decoration: underline; }
 .queue-state-badge {
   padding: 2px 8px; border-radius: 3px; font-size: 10px;
   font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
   background: rgba(0,255,136,0.1); color: var(--green);
 }
 
-/* ── Colony DAG View ─────────────────────────────────────────────── */
-#screen-colony { background: var(--bg); }
-.dag-container { flex: 1; position: relative; overflow: hidden; cursor: grab; }
+/* ── Colony DAG View — retro HUD map-screen chrome ──────────────── */
+#screen-colony { background: #000000; }
+
+.dag-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  background: #000000;
+  /* Faint magenta grid overlay, retro HUD style */
+  background-image:
+    linear-gradient(to right,  #2a0d1f 1px, transparent 1px),
+    linear-gradient(to bottom, #2a0d1f 1px, transparent 1px);
+  background-size: 24px 24px;
+  image-rendering: pixelated;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
 .dag-container.grabbing { cursor: grabbing; }
-.dag-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.dag-node { cursor: pointer; transition: filter 0.2s; }
-.dag-node:hover { filter: brightness(1.3); }
-.dag-edge { fill: none; stroke-width: 1.5; }
-.dag-edge.intra { stroke: rgba(0,255,136,0.25); }
-.dag-edge.cross { stroke: rgba(255,165,0,0.3); stroke-dasharray: 6 4; }
-.dag-label { font-size: 10px; fill: var(--text-mid); text-anchor: middle; pointer-events: none; }
-.dag-tooltip {
-  display: none; position: fixed;
-  background: var(--bg-card); border: 1px solid var(--border-bright);
-  border-radius: 8px; padding: 12px 16px; font-size: 12px;
-  max-width: 320px; z-index: 200;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.7); pointer-events: none; line-height: 1.5;
-}
-.dag-legend {
-  position: absolute; bottom: 16px; left: 16px;
-  background: rgba(10,15,24,0.9); border: 1px solid var(--border);
-  border-radius: 8px; padding: 10px 14px; font-size: 11px;
-  display: flex; flex-wrap: wrap; gap: 10px; z-index: 5;
-  backdrop-filter: blur(8px);
-}
-.legend-item { display: flex; align-items: center; gap: 5px; color: var(--text-dim); }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.dag-back {
-  position: absolute; top: 8px; left: 8px; z-index: 5;
-  background: rgba(10,15,24,0.9); border: 1px solid var(--border);
-  border-radius: 6px; padding: 6px 14px; color: var(--text-mid);
-  cursor: pointer; font-size: 12px; font-family: inherit;
-  backdrop-filter: blur(8px);
-}
-.dag-back:hover { color: var(--text); border-color: var(--border-bright); }
-.dag-colony-title {
-  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-  z-index: 5; font-size: 14px; font-weight: 700; color: var(--green);
-  letter-spacing: 2px; background: rgba(10,15,24,0.9);
-  padding: 6px 18px; border-radius: 6px; border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
+
+.dag-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
 }
 
-@keyframes pulse-glow { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
-.node-active { animation: pulse-glow 1.5s ease-in-out infinite; }
+/* Top HUD bar */
+.dag-hud-top {
+  position: absolute;
+  top: 12px; left: 12px; right: 12px;
+  height: 32px;
+  background: #001018;
+  border: 1px solid #00ccff;
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0, 100% 8px,
+    100% 100%,
+    0 100%,
+    0 8px
+  );
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  gap: 14px;
+  pointer-events: none;
+  z-index: 10;
+}
+.dag-hud-top .hud-label {
+  color: #5fa8b8;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.dag-hud-top .hud-value {
+  color: #ffcc00;
+  font-size: 11px;
+  letter-spacing: 1px;
+  font-weight: bold;
+}
+.dag-hud-top .hud-title {
+  flex: 1;
+  text-align: center;
+  color: #ffcc00;
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+/* Bottom HUD bar — legend + BACK */
+.dag-hud-bottom {
+  position: absolute;
+  bottom: 12px; left: 12px; right: 12px;
+  min-height: 28px;
+  background: #001018;
+  border: 1px solid #00ccff;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - 8px), calc(100% - 8px) 100%,
+    8px 100%, 0 calc(100% - 8px)
+  );
+  display: flex;
+  align-items: center;
+  padding: 4px 14px;
+  gap: 14px;
+  flex-wrap: wrap;
+  z-index: 10;
+}
+.dag-hud-bottom .legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #5fa8b8;
+  text-transform: uppercase;
+}
+.dag-hud-bottom .legend-swatch {
+  width: 8px; height: 8px;
+  border: 1px solid #00ccff;
+  flex-shrink: 0;
+}
+
+/* Back button — cut-corner cyan chip below the top HUD */
+.dag-back {
+  position: absolute;
+  top: 52px;
+  left: 12px;
+  background: #001018;
+  color: #00ccff;
+  border: 1px solid #00ccff;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 5px 12px;
+  cursor: pointer;
+  z-index: 11;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% 100%, 0 100%, 0 6px
+  );
+}
+.dag-back:hover { background: #002838; color: #ffcc00; }
+
+/* Corner brackets — four L-shaped magenta accents framing the map window */
+.dag-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+  z-index: 5;
+}
+.dag-corner.tl { top: 50px;    left: 12px;  border-top: 2px solid #ff3399; border-left: 2px solid #ff3399; }
+.dag-corner.tr { top: 50px;    right: 12px; border-top: 2px solid #ff3399; border-right: 2px solid #ff3399; }
+.dag-corner.bl { bottom: 46px; left: 12px;  border-bottom: 2px solid #ff3399; border-left: 2px solid #ff3399; }
+.dag-corner.br { bottom: 46px; right: 12px; border-bottom: 2px solid #ff3399; border-right: 2px solid #ff3399; }
+
+/* Nodes & edges */
+.dag-cell { cursor: pointer; transition: filter 0.15s; }
+.dag-cell:hover { filter: brightness(1.4); }
+
+.dag-edge { fill: none; stroke-linejoin: miter; stroke-linecap: square; }
+.dag-edge.intra { stroke: #00ff88; stroke-width: 2; }
+.dag-edge.cross { stroke: #ff3399; stroke-width: 2; stroke-dasharray: 3 3; }
+
+/* HTML body mounted inside each cell via <foreignObject> */
+.cell-body {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px 5px 8px;
+  font-family: inherit;
+  color: #e0f0ff;
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cell-id {
+  color: #00ccff;
+  font-size: 8px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.cell-claim {
+  color: #e0f0ff;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+.dag-cell.is-seed .cell-id { color: #00ff88; }
+.dag-cell.is-seed .cell-body { padding-left: 22px; }  /* leave room for the H glyph */
+.dag-cell.is-ghost .cell-body { opacity: 0.65; }
+.dag-cell.is-ghost .cell-claim { -webkit-line-clamp: 2; font-size: 9px; }
+.dag-cell.is-ghost .cell-id { font-size: 7px; }
+
+/* Tooltip — cut-corner cyan panel matching HUD chrome */
+.dag-tooltip {
+  display: none;
+  position: fixed;
+  background: #001018;
+  border: 1px solid #00ccff;
+  color: #5fa8b8;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-family: inherit;
+  pointer-events: none;
+  line-height: 1.5;
+  max-width: 320px;
+  z-index: 200;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
+}
+.dag-tooltip .tt-claim { color: #ffcc00; margin-bottom: 4px; letter-spacing: 0.5px; }
+.dag-tooltip .tt-status {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 9px;
+  color: #000;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+@keyframes pulse-glow { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+.cell-active { animation: pulse-glow 1.5s ease-in-out infinite; }
 
 /* ── Research Logs ───────────────────────────────────────────────── */
 #screen-logs { background: var(--bg); }
@@ -373,24 +547,24 @@ body {
   text-transform: uppercase; letter-spacing: 0.3px;
 }
 .log-agent { color: var(--text-mid); flex-shrink: 0; min-width: 120px; }
-.log-node { color: var(--green); cursor: pointer; font-weight: 600; flex-shrink: 0; }
-.log-node:hover { text-decoration: underline; }
+.log-cell { color: var(--green); cursor: pointer; font-weight: 600; flex-shrink: 0; }
+.log-cell:hover { text-decoration: underline; }
 .log-iter { color: var(--text-dim); flex-shrink: 0; }
 .logs-empty { color: var(--text-dim); text-align: center; padding: 60px 20px; font-size: 14px; }
 
-/* ── Node Detail ─────────────────────────────────────────────────── */
-#screen-node { background: var(--bg); }
-.node-content { flex: 1; overflow-y: auto; padding: 20px; }
-.node-content::-webkit-scrollbar { width: 6px; }
-.node-content::-webkit-scrollbar-track { background: transparent; }
-.node-content::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
-.node-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
-.node-claim { font-size: 18px; font-weight: 600; flex: 1; min-width: 200px; }
-.node-status-badge {
+/* ── Cell Detail ─────────────────────────────────────────────────── */
+#screen-cell { background: var(--bg); }
+.cell-content { flex: 1; overflow-y: auto; padding: 20px; }
+.cell-content::-webkit-scrollbar { width: 6px; }
+.cell-content::-webkit-scrollbar-track { background: transparent; }
+.cell-content::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+.cell-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+.cell-claim { font-size: 18px; font-weight: 600; flex: 1; min-width: 200px; }
+.cell-status-badge {
   padding: 4px 12px; border-radius: 4px; font-size: 11px;
   font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; flex-shrink: 0;
 }
-.node-meta-grid {
+.cell-meta-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px; margin-bottom: 24px;
 }
@@ -416,13 +590,13 @@ body {
 .expand-toggle:hover { color: var(--text-mid); }
 .expand-content { display: none; margin-top: 6px; padding: 8px; background: var(--bg-panel); border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
 
-.node-back { margin-bottom: 16px; }
-.node-back button {
+.cell-back { margin-bottom: 16px; }
+.cell-back button {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 6px; padding: 6px 14px; color: var(--text-mid);
   cursor: pointer; font-size: 12px; font-family: inherit;
 }
-.node-back button:hover { color: var(--text); border-color: var(--border-bright); }
+.cell-back button:hover { color: var(--text); border-color: var(--border-bright); }
 
 /* ── Loading / Empty States ──────────────────────────────────────── */
 .loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); font-size: 14px; }
@@ -483,17 +657,22 @@ body {
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
   </div>
   <div class="dag-container" id="dag-container">
-    <button class="dag-back" id="dag-back-btn">&larr; Back</button>
-    <div class="dag-colony-title" id="dag-title"></div>
-    <svg class="dag-svg" id="dag-svg">
-      <defs>
-        <filter id="glow">
-          <feGaussianBlur stdDeviation="3" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
-    </svg>
-    <div class="dag-legend" id="dag-legend"></div>
+    <div class="dag-hud-top">
+      <span class="hud-label">CELLS</span>
+      <span class="hud-value" id="dag-stat-cells">000</span>
+      <span class="hud-label">ACTIVE</span>
+      <span class="hud-value" id="dag-stat-active">00</span>
+      <span class="hud-title" id="dag-title">&mdash;</span>
+      <span class="hud-label">LEVELS</span>
+      <span class="hud-value" id="dag-stat-levels">00</span>
+    </div>
+    <button class="dag-back" id="dag-back-btn">&larr; BACK</button>
+    <div class="dag-corner tl"></div>
+    <div class="dag-corner tr"></div>
+    <div class="dag-corner bl"></div>
+    <div class="dag-corner br"></div>
+    <svg class="dag-svg" id="dag-svg"></svg>
+    <div class="dag-hud-bottom" id="dag-legend"></div>
     <div class="dag-tooltip" id="dag-tooltip"></div>
   </div>
 </div>
@@ -510,7 +689,7 @@ body {
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
   </div>
   <div class="logs-toolbar">
-    <input class="logs-filter" id="filter-node" placeholder="Filter node..." />
+    <input class="logs-filter" id="filter-cell" placeholder="Filter cell..." />
     <input class="logs-filter" id="filter-agent" placeholder="Filter agent..." />
     <select class="logs-filter" id="filter-type">
       <option value="">All types</option>
@@ -521,7 +700,7 @@ body {
       <option>evidence_appended</option>
       <option>debate_mediated</option>
       <option>convergence_checked</option>
-      <option>node_reopened</option>
+      <option>cell_reopened</option>
       <option>propagation_triggered</option>
       <option>decomposition_created</option>
       <option>decomposition_audit</option>
@@ -532,8 +711,8 @@ body {
   </div>
 </div>
 
-<!-- Node Detail -->
-<div id="screen-node" class="screen">
+<!-- Cell Detail -->
+<div id="screen-cell" class="screen">
   <div class="header-bar">
     <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
     <div class="header-nav">
@@ -543,8 +722,8 @@ body {
     <div class="header-spacer"></div>
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
   </div>
-  <div class="node-content" id="node-content">
-    <div class="loading"><span class="spinner"></span>Loading node...</div>
+  <div class="cell-content" id="cell-content">
+    <div class="loading"><span class="spinner"></span>Loading cell...</div>
   </div>
 </div>
 
@@ -570,14 +749,14 @@ var PASS_VERDICTS = new Set($pass_verdicts_json);
 // ── State ───────────────────────────────────────────────────────────────
 
 var State = {
-  nodes: [],
+  cells: [],
   queue: [],
   stats: {},
   events: [],
   sseConnected: false,
   currentView: 'title',
   currentColony: null,
-  currentNode: null,
+  currentCell: null,
 };
 
 // ── Utility ─────────────────────────────────────────────────────────────
@@ -687,11 +866,11 @@ function handleRoute() {
       updateNavTabs('logs');
       loadLogs();
       break;
-    case 'node':
-      document.getElementById('screen-node').classList.add('active');
+    case 'cell':
+      document.getElementById('screen-cell').classList.add('active');
       updateNavTabs(null);
-      State.currentNode = param;
-      loadNodeDetail(param);
+      State.currentCell = param;
+      loadCellDetail(param);
       break;
     default:
       document.getElementById('screen-title').classList.add('active');
@@ -758,7 +937,7 @@ function connectSSE() {
     if (State.currentView === 'logs') appendLogRow(data);
     if (State.currentView === 'lab') loadLabData();
     if (State.currentView === 'colony' && State.currentColony) loadColonyDAG(State.currentColony);
-    if (State.currentView === 'node' && State.currentNode === data.node_id) loadNodeDetail(State.currentNode);
+    if (State.currentView === 'cell' && State.currentCell === data.cell_id) loadCellDetail(State.currentCell);
   });
 
   eventSource.onerror = function() {
@@ -781,11 +960,11 @@ function fetchJSON(url) {
 
 function loadLabData() {
   Promise.all([
-    fetchJSON('/api/nodes'),
+    fetchJSON('/api/cells'),
     fetchJSON('/api/queue'),
     fetchJSON('/api/stats'),
   ]).then(function(results) {
-    State.nodes = results[0];
+    State.cells = results[0];
     State.queue = results[1];
     State.stats = results[2];
     renderLab();
@@ -801,15 +980,15 @@ function renderLab() {
   container.textContent = '';
 
   var stats = State.stats;
-  var nodes = State.nodes;
+  var cells = State.cells;
   var queue = State.queue;
 
-  // Group nodes by colony
+  // Group cells by colony
   var colonies = {};
-  nodes.forEach(function(node) {
-    var cid = node.colony_id || 'unknown';
+  cells.forEach(function(cell) {
+    var cid = cell.colony_id || 'unknown';
     if (!colonies[cid]) colonies[cid] = [];
-    colonies[cid].push(node);
+    colonies[cid].push(cell);
   });
 
   var queueEntries = Array.isArray(queue) ? queue : Object.values(queue.entries || queue);
@@ -821,7 +1000,7 @@ function renderLab() {
   var ribbon = buildEl('div', { className: 'stats-ribbon' });
   [
     [stats.total_events || 0, 'Events'],
-    [nodes.length, 'Nodes'],
+    [cells.length, 'Cells'],
     [stats.queue_size || 0, 'In Queue'],
     [activeQueue.length, 'Active'],
   ].forEach(function(pair) {
@@ -839,16 +1018,16 @@ function renderLab() {
     var grid = buildEl('div', { className: 'colony-grid' });
 
     colonyKeys.forEach(function(colonyId) {
-      var colonyNodes = colonies[colonyId];
-      var hasActive = colonyNodes.some(function(node) {
+      var colonyCells = colonies[colonyId];
+      var hasActive = colonyCells.some(function(cell) {
         return queueEntries.some(function(entry) {
-          return entry.node_id === node.node_id && QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1;
+          return entry.cell_id === cell.cell_id && QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1;
         });
       });
 
       var statusCounts = {};
-      colonyNodes.forEach(function(node) {
-        statusCounts[node.status] = (statusCounts[node.status] || 0) + 1;
+      colonyCells.forEach(function(cell) {
+        statusCounts[cell.status] = (statusCounts[cell.status] || 0) + 1;
       });
 
       var displayName = colonyId.split('-').slice(1).join('-') || colonyId;
@@ -860,10 +1039,10 @@ function renderLab() {
       nameEl.appendChild(document.createTextNode(displayName));
       card.appendChild(nameEl);
 
-      card.appendChild(buildEl('div', { className: 'colony-meta' }, colonyNodes.length + ' nodes'));
+      card.appendChild(buildEl('div', { className: 'colony-meta' }, colonyCells.length + ' cells'));
 
       var bar = buildEl('div', { className: 'status-bar' });
-      var total = colonyNodes.length;
+      var total = colonyCells.length;
       Object.keys(statusCounts).forEach(function(status) {
         var pct = (statusCounts[status] / total * 100).toFixed(1);
         var color = STATUS_COLORS[status] || '#555';
@@ -884,8 +1063,8 @@ function renderLab() {
     var panel = buildEl('div', { className: 'queue-panel' });
     activeQueue.forEach(function(entry) {
       var row = buildEl('div', { className: 'queue-row' });
-      var nodeLink = buildEl('span', { className: 'queue-node', onclick: function() { navigate('node', entry.node_id); } }, entry.node_id);
-      row.appendChild(nodeLink);
+      var cellLink = buildEl('span', { className: 'queue-cell', onclick: function() { navigate('cell', entry.cell_id); } }, entry.cell_id);
+      row.appendChild(cellLink);
       row.appendChild(buildEl('span', { className: 'queue-state-badge' }, entry.queue_state));
       if (entry.iteration) row.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'iter ' + entry.iteration));
       panel.appendChild(row);
@@ -897,187 +1076,381 @@ function renderLab() {
 // ── Colony DAG View ─────────────────────────────────────────────────────
 
 function loadColonyDAG(colonyId) {
-  Promise.all([fetchJSON('/api/nodes'), fetchJSON('/api/queue')]).then(function(results) {
-    var allNodes = results[0];
+  Promise.all([fetchJSON('/api/cells'), fetchJSON('/api/queue')]).then(function(results) {
+    var allCells = results[0];
     var queue = results[1];
-    var colonyNodes = allNodes.filter(function(node) { return node.colony_id === colonyId; });
-    if (colonyNodes.length === 0) {
-      setText(document.getElementById('dag-title'), 'Colony not found');
+    var colonyCells = allCells.filter(function(cell) { return cell.colony_id === colonyId; });
+    if (colonyCells.length === 0) {
+      setText(document.getElementById('dag-title'), 'NOT FOUND');
       return;
     }
 
     var queueEntries = Array.isArray(queue) ? queue : Object.values(queue.entries || queue);
     var activeSet = {};
     queueEntries.forEach(function(entry) {
-      if (QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1) activeSet[entry.node_id] = entry.queue_state;
+      if (QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1) {
+        activeSet[entry.cell_id] = entry.queue_state;
+      }
     });
 
-    var displayName = colonyId.split('-').slice(1).join('-') || colonyId;
-    setText(document.getElementById('dag-title'), displayName.toUpperCase());
-    renderDAG(colonyNodes, activeSet);
+    var displayName = (colonyId.split('-').slice(1).join('-') || colonyId).toUpperCase();
+    var maxLevel = 0;
+    colonyCells.forEach(function(cell) { if (cell.level > maxLevel) maxLevel = cell.level; });
+    var activeCount = colonyCells.filter(function(cell) { return activeSet[cell.cell_id]; }).length;
+
+    var padLeft = function(num, width) {
+      var str = String(num);
+      while (str.length < width) str = '0' + str;
+      return str;
+    };
+
+    setText(document.getElementById('dag-title'), displayName);
+    setText(document.getElementById('dag-stat-cells'),  padLeft(colonyCells.length, 3));
+    setText(document.getElementById('dag-stat-active'), padLeft(activeCount, 2));
+    setText(document.getElementById('dag-stat-levels'), padLeft(maxLevel + 1, 2));
+
+    renderDAG(colonyCells, allCells, colonyId, activeSet);
     renderDAGLegend();
   });
 }
 
-function renderDAG(colonyNodes, activeSet) {
+function renderDAG(colonyCells, allCells, colonyId, activeSet) {
   var svg = document.getElementById('dag-svg');
   var container = document.getElementById('dag-container');
   var width = container.clientWidth;
   var height = container.clientHeight;
+  var centerX = width / 2;
+  var centerY = height / 2;
 
-  var nodeMap = {};
-  colonyNodes.forEach(function(node) { nodeMap[node.node_id] = node; });
+  var maxLevel = 0;
+  colonyCells.forEach(function(cell) { if (cell.level > maxLevel) maxLevel = cell.level; });
 
-  var simNodes = colonyNodes.map(function(node) {
-    var edgeCount = (node.dependencies || []).length + (node.dependents || []).length;
-    return {
-      id: node.node_id, data: node,
-      x: width / 2 + (Math.random() - 0.5) * width * 0.5,
-      y: height / 2 + (Math.random() - 0.5) * height * 0.5,
-      vx: 0, vy: 0,
-      radius: Math.max(8, Math.min(24, 6 + edgeCount * 3)),
-      edgeCount: edgeCount,
-      isCenter: node.level === 0,
-    };
+  // Fixed cell dimensions — large enough to show ID + a few wrapped lines
+  // of claim context. Seed hub is bigger, cross-colony ghost stubs smaller.
+  var CELL_W = 190;
+  var CELL_H = 58;
+  var HUB_W  = 220;
+  var HUB_H  = 70;
+  var GHOST_W = 130;
+  var GHOST_H = 40;
+
+  // Ring spacing needs to fit a CELL_W-wide cell on every ring without
+  // siblings overlapping. 240 is empirically comfortable for 6+ siblings.
+  var ringSpacing = Math.max(240, Math.min(width, height) * 0.22);
+
+  // Group cells by level so siblings can be distributed around each ring.
+  var byLevel = {};
+  colonyCells.forEach(function(cell) {
+    (byLevel[cell.level] = byLevel[cell.level] || []).push(cell);
   });
 
-  var centerNode = simNodes.find(function(n) { return n.isCenter; }) || simNodes[0];
-  if (centerNode) { centerNode.x = width / 2; centerNode.y = height / 2; centerNode.radius = 28; }
+  var simCells = [];
+  var simMap = {};
+  Object.keys(byLevel).forEach(function(levelKey) {
+    var level = parseInt(levelKey, 10);
+    var siblings = byLevel[levelKey];
+    var ringRadius = level === 0 ? 0 : level * ringSpacing;
+    siblings.forEach(function(cell, idx) {
+      var angle = (idx / siblings.length) * Math.PI * 2 + level * 0.35;
+      var edgeCount = (cell.dependencies || []).length + (cell.dependents || []).length;
+      var isCenter = (level === 0);
+      var sim = {
+        id: cell.cell_id,
+        data: cell,
+        x: centerX + Math.cos(angle) * ringRadius,
+        y: centerY + Math.sin(angle) * ringRadius,
+        vx: 0, vy: 0,
+        level: level,
+        ringRadius: ringRadius,
+        edgeCount: edgeCount,
+        width:  isCenter ? HUB_W : CELL_W,
+        height: isCenter ? HUB_H : CELL_H,
+        // Border thickness scales with edge count (gravity/importance)
+        borderWidth: Math.max(1, Math.min(5, 1 + Math.floor(edgeCount / 2))),
+        isCenter: isCenter,
+        isGhost: false,
+      };
+      simCells.push(sim);
+      simMap[sim.id] = sim;
+    });
+  });
+
+  // Build edges. Cross-colony dependencies get a dimmed ghost stub on the
+  // outer rim so the user can see them reach into neighboring colonies.
+  var allCellMap = {};
+  (allCells || []).forEach(function(cell) { allCellMap[cell.cell_id] = cell; });
 
   var simEdges = [];
-  colonyNodes.forEach(function(node) {
-    (node.dependencies || []).forEach(function(depId) {
-      if (nodeMap[depId]) simEdges.push({ source: node.node_id, target: depId });
+  var crossStubs = {};
+  colonyCells.forEach(function(cell) {
+    (cell.dependencies || []).forEach(function(depId) {
+      var dep = allCellMap[depId];
+      if (!dep) return;
+      if (dep.colony_id === colonyId) {
+        simEdges.push({ source: cell.cell_id, target: depId, kind: 'intra' });
+        return;
+      }
+      if (!crossStubs[depId]) {
+        var srcSim = simMap[cell.cell_id];
+        var outerR = (maxLevel + 1.5) * ringSpacing;
+        var ang = Math.atan2(srcSim.y - centerY, srcSim.x - centerX);
+        var stub = {
+          id: depId,
+          data: dep,
+          x: centerX + Math.cos(ang) * outerR,
+          y: centerY + Math.sin(ang) * outerR,
+          vx: 0, vy: 0,
+          level: -1,
+          ringRadius: outerR,
+          edgeCount: 0,
+          width:  GHOST_W,
+          height: GHOST_H,
+          borderWidth: 1,
+          isCenter: false,
+          isGhost: true,
+        };
+        crossStubs[depId] = stub;
+        simCells.push(stub);
+        simMap[depId] = stub;
+      }
+      simEdges.push({ source: cell.cell_id, target: depId, kind: 'cross' });
     });
   });
 
-  var simMap = {};
-  simNodes.forEach(function(n) { simMap[n.id] = n; });
+  // Light relaxation: radial pull toward target ring + rectangular AABB
+  // minimum-translation repulsion. Seed stays pinned, ghost stubs stay
+  // pinned on the outer rim.
+  var TICKS = 60;
+  for (var tick = 0; tick < TICKS; tick++) {
+    var alpha = 1 - tick / TICKS;
 
-  // Force simulation
-  for (var tick = 0; tick < 120; tick++) {
-    var alpha = 1 - tick / 120;
-    simNodes.forEach(function(node) {
-      var strength = node.isCenter ? 0.1 : 0.005;
-      node.vx += (width / 2 - node.x) * strength * alpha;
-      node.vy += (height / 2 - node.y) * strength * alpha;
+    simCells.forEach(function(simCell) {
+      if (simCell.isCenter) { simCell.x = centerX; simCell.y = centerY; simCell.vx = 0; simCell.vy = 0; return; }
+      if (simCell.isGhost) return;
+      var dxc = simCell.x - centerX;
+      var dyc = simCell.y - centerY;
+      var curR = Math.sqrt(dxc * dxc + dyc * dyc) || 1;
+      var pull = (simCell.ringRadius - curR) * 0.08 * alpha;
+      simCell.vx += (dxc / curR) * pull;
+      simCell.vy += (dyc / curR) * pull;
     });
-    simEdges.forEach(function(edge) {
-      var src = simMap[edge.source], tgt = simMap[edge.target];
-      if (!src || !tgt) return;
-      var dx = tgt.x - src.x, dy = tgt.y - src.y;
-      var dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      var ideal = 80 + src.radius + tgt.radius;
-      var force = (dist - ideal) * 0.02 * alpha;
-      var fx = dx / dist * force, fy = dy / dist * force;
-      src.vx += fx; src.vy += fy; tgt.vx -= fx; tgt.vy -= fy;
-    });
-    for (var nodeIdx = 0; nodeIdx < simNodes.length; nodeIdx++) {
-      for (var otherIdx = nodeIdx + 1; otherIdx < simNodes.length; otherIdx++) {
-        var nA = simNodes[nodeIdx], nB = simNodes[otherIdx];
-        var dx = nB.x - nA.x, dy = nB.y - nA.y;
-        var dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        if (dist < (nA.radius + nB.radius + 20) * 3) {
-          var rep = 800 / (dist * dist) * alpha;
-          var fx = dx / dist * rep, fy = dy / dist * rep;
-          nA.vx -= fx; nA.vy -= fy; nB.vx += fx; nB.vy += fy;
+
+    for (var i = 0; i < simCells.length; i++) {
+      for (var j = i + 1; j < simCells.length; j++) {
+        var a = simCells[i];
+        var b = simCells[j];
+        var dx = b.x - a.x;
+        var dy = b.y - a.y;
+        // Rectangular overlap with ~20 px x / 16 px y padding.
+        var xOverlap = (a.width  + b.width)  / 2 + 20 - Math.abs(dx);
+        var yOverlap = (a.height + b.height) / 2 + 16 - Math.abs(dy);
+        if (xOverlap > 0 && yOverlap > 0) {
+          // Separate along the axis with the smaller overlap (MTV).
+          if (xOverlap < yOverlap) {
+            var pushX = (dx < 0 ? -1 : 1) * xOverlap * 0.5 * alpha;
+            if (!a.isCenter && !a.isGhost) a.vx -= pushX;
+            if (!b.isCenter && !b.isGhost) b.vx += pushX;
+          } else {
+            var pushY = (dy < 0 ? -1 : 1) * yOverlap * 0.5 * alpha;
+            if (!a.isCenter && !a.isGhost) a.vy -= pushY;
+            if (!b.isCenter && !b.isGhost) b.vy += pushY;
+          }
         }
       }
     }
-    simNodes.forEach(function(node) {
-      if (node.isCenter && tick < 30) return;
-      node.vx *= 0.85; node.vy *= 0.85;
-      node.x += node.vx; node.y += node.vy;
-      node.x = Math.max(40, Math.min(width - 40, node.x));
-      node.y = Math.max(90, Math.min(height - 40, node.y));
+
+    simCells.forEach(function(simCell) {
+      if (simCell.isCenter || simCell.isGhost) return;
+      simCell.vx *= 0.80;
+      simCell.vy *= 0.80;
+      simCell.x += simCell.vx;
+      simCell.y += simCell.vy;
     });
   }
 
-  // Clear SVG except defs
-  var defs = svg.querySelector('defs');
-  while (svg.lastChild && svg.lastChild !== defs) svg.removeChild(svg.lastChild);
+  // Two-segment elbow path from the source cell's border to the target
+  // cell's border. Horizontal-first if |dx| >= |dy|, else vertical-first.
+  // Result: "M sx,sy L bx,by L tx,ty" — a single right-angle bend.
+  function elbowPath(src, tgt) {
+    var dx = tgt.x - src.x;
+    var dy = tgt.y - src.y;
+    var sx, sy, bx, by, tx, ty;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      // Exit source on its left/right border at the source's vertical center.
+      sx = src.x + (dx >= 0 ? 1 : -1) * src.width / 2;
+      sy = src.y;
+      // Enter target on its top/bottom border at the target's horizontal center.
+      tx = tgt.x;
+      ty = tgt.y + (dy >= 0 ? -1 : 1) * tgt.height / 2;
+      bx = tx;
+      by = sy;
+    } else {
+      // Exit source on its top/bottom border.
+      sx = src.x;
+      sy = src.y + (dy >= 0 ? 1 : -1) * src.height / 2;
+      // Enter target on its left/right border.
+      tx = tgt.x + (dx >= 0 ? -1 : 1) * tgt.width / 2;
+      ty = tgt.y;
+      bx = sx;
+      by = ty;
+    }
+    return 'M' + Math.round(sx) + ',' + Math.round(sy) +
+           ' L' + Math.round(bx) + ',' + Math.round(by) +
+           ' L' + Math.round(tx) + ',' + Math.round(ty);
+  }
+
+  // Build a compact ID label: "<colony-slug> · L<level>.<seq>".
+  function cellIdLabel(simCell) {
+    var fullId = simCell.id || '';
+    var colonyId = simCell.data.colony_id || '';
+    var suffix = fullId;
+    if (colonyId && fullId.indexOf(colonyId) === 0) {
+      suffix = fullId.slice(colonyId.length + 1); // drop the leading "-"
+    }
+    var parts = suffix.split('-');
+    var levelSeq = parts.length >= 2
+      ? 'L' + parts[0] + '.' + parts[1]
+      : (suffix || ('L' + simCell.level));
+    var slug = colonyId.split('-').slice(1).join('-') || colonyId;
+    return (slug ? slug + ' · ' : '') + levelSeq;
+  }
+
+  // Clear SVG completely and build two explicit sub-groups so the layer
+  // order is obvious: edges on the bottom, cells on top, always.
+  while (svg.lastChild) svg.removeChild(svg.lastChild);
 
   var viewX = 0, viewY = 0, viewScale = 1;
   var group = buildSVGEl('g', { id: 'dag-group' });
   svg.appendChild(group);
+  var edgeLayer = buildSVGEl('g', { class: 'dag-edge-layer' });
+  var cellLayer = buildSVGEl('g', { class: 'dag-cell-layer' });
+  group.appendChild(edgeLayer);
+  group.appendChild(cellLayer);
 
-  // Edges
+  // Edges — elbow paths with a single right-angle bend, on the bottom layer.
   simEdges.forEach(function(edge) {
-    var src = simMap[edge.source], tgt = simMap[edge.target];
+    var src = simMap[edge.source];
+    var tgt = simMap[edge.target];
     if (!src || !tgt) return;
-    var mx = (src.x + tgt.x) / 2, my = (src.y + tgt.y) / 2;
-    var dx = tgt.x - src.x, dy = tgt.y - src.y;
-    var len = Math.sqrt(dx * dx + dy * dy) || 1;
-    var off = Math.min(20, len * 0.15);
-    var cx = mx + (-dy / len) * off, cy = my + (dx / len) * off;
-    group.appendChild(buildSVGEl('path', {
-      d: 'M' + src.x + ',' + src.y + ' Q' + cx + ',' + cy + ' ' + tgt.x + ',' + tgt.y,
-      class: 'dag-edge intra',
+    edgeLayer.appendChild(buildSVGEl('path', {
+      d: elbowPath(src, tgt),
+      class: 'dag-edge ' + (edge.kind === 'cross' ? 'cross' : 'intra'),
     }));
   });
 
-  // Nodes
-  simNodes.forEach(function(node) {
-    var nodeGroup = buildSVGEl('g', { class: 'dag-node', 'data-id': node.id });
-    var isActive = activeSet[node.id];
-    var color = STATUS_COLORS[node.data.status] || '#5c5c6e';
+  // Cells — rectangular rects with foreignObject HTML content, top layer.
+  simCells.forEach(function(simCell) {
+    var groupClasses = ['dag-cell'];
+    if (simCell.isCenter) groupClasses.push('is-seed');
+    if (simCell.isGhost)  groupClasses.push('is-ghost');
+    var cellGroup = buildSVGEl('g', { class: groupClasses.join(' '), 'data-id': simCell.id });
 
+    var isActive = !!activeSet[simCell.id];
+    var statusColor = STATUS_COLORS[simCell.data.status] || '#001018';
+    // Seed hub keeps the Petri brand green border; other cells use cyan.
+    var borderColor = simCell.isCenter ? '#00ff88' : '#00ccff';
+    var halfW = simCell.width  / 2;
+    var halfH = simCell.height / 2;
+    var rx = Math.round(simCell.x - halfW);
+    var ry = Math.round(simCell.y - halfH);
+
+    // Active-cell pulse — yellow dashed outer ring, pulses via @keyframes.
     if (isActive) {
-      nodeGroup.appendChild(buildSVGEl('circle', {
-        cx: String(node.x), cy: String(node.y), r: String(node.radius + 6),
-        fill: 'none', stroke: color, 'stroke-width': '2',
-        opacity: '0.5', class: 'node-active', filter: 'url(#glow)',
+      cellGroup.appendChild(buildSVGEl('rect', {
+        x: String(rx - 4), y: String(ry - 4),
+        width:  String(simCell.width  + 8),
+        height: String(simCell.height + 8),
+        fill: 'none', stroke: '#ffcc00', 'stroke-width': '1',
+        'stroke-dasharray': '2 2',
+        class: 'cell-active',
       }));
     }
 
-    nodeGroup.appendChild(buildSVGEl('circle', {
-      cx: String(node.x), cy: String(node.y), r: String(node.radius),
-      fill: color,
-      stroke: isActive ? '#00ff88' : 'rgba(255,255,255,0.15)',
-      'stroke-width': isActive ? '2' : '1',
+    cellGroup.appendChild(buildSVGEl('rect', {
+      x: String(rx), y: String(ry),
+      width:  String(simCell.width),
+      height: String(simCell.height),
+      fill: statusColor,
+      stroke: borderColor,
+      'stroke-width': String(simCell.borderWidth),
+      opacity: simCell.isGhost ? '0.75' : '1',
     }));
 
-    if (node.radius >= 12) {
-      var label = (node.data.claim_text || '').substring(0, 30);
-      if ((node.data.claim_text || '').length > 30) label += '...';
-      var textEl = buildSVGEl('text', {
-        x: String(node.x), y: String(node.y + node.radius + 14), class: 'dag-label',
+    // Seed hub "H" glyph — tucked into the top-left corner of the cell
+    // body so it doesn't collide with the HTML label content.
+    if (simCell.isCenter) {
+      var markX = rx + 6;
+      var markY = ry + 6;
+      [[0, 0, 1, 6], [4, 0, 1, 6], [1, 2, 3, 1]].forEach(function(segment) {
+        cellGroup.appendChild(buildSVGEl('rect', {
+          x: String(markX + segment[0]),
+          y: String(markY + segment[1]),
+          width:  String(segment[2]),
+          height: String(segment[3]),
+          fill: '#00ff88',
+        }));
       });
-      textEl.textContent = label;
-      nodeGroup.appendChild(textEl);
     }
 
-    nodeGroup.addEventListener('click', function() { navigate('node', node.id); });
+    // HTML body: ID line + wrapped claim text via <foreignObject>.
+    var fo = buildSVGEl('foreignObject', {
+      x: String(rx), y: String(ry),
+      width:  String(simCell.width),
+      height: String(simCell.height),
+    });
+    var body = document.createElement('div');
+    body.className = 'cell-body';
+
+    var idDiv = document.createElement('div');
+    idDiv.className = 'cell-id';
+    idDiv.textContent = cellIdLabel(simCell);
+    body.appendChild(idDiv);
+
+    var claimDiv = document.createElement('div');
+    claimDiv.className = 'cell-claim';
+    claimDiv.textContent = simCell.data.claim_text || '(no claim text)';
+    body.appendChild(claimDiv);
+
+    fo.appendChild(body);
+    cellGroup.appendChild(fo);
+
+    cellGroup.addEventListener('click', function() {
+      if (simCell.isGhost) { navigate('colony', simCell.data.colony_id); }
+      else                 { navigate('cell', simCell.id); }
+    });
 
     var tooltip = document.getElementById('dag-tooltip');
-    nodeGroup.addEventListener('mouseenter', function(evt) {
+    cellGroup.addEventListener('mouseenter', function(evt) {
       tooltip.textContent = '';
-      var claimDiv = buildEl('div', { className: 'tt-claim' }, node.data.claim_text || node.id);
-      var statusSpan = buildEl('span', { className: 'tt-status', style: { background: color } }, node.data.status);
-      var levelSpan = buildEl('span', { style: { marginLeft: '8px', color: 'var(--text-dim)', fontSize: '11px' } }, 'Level ' + node.data.level);
-      tooltip.appendChild(claimDiv);
+      var claimLine = buildEl('div', { className: 'tt-claim' }, simCell.data.claim_text || simCell.id);
+      var statusSpan = buildEl('span', { className: 'tt-status', style: { background: statusColor } }, simCell.data.status);
+      var levelSpan = buildEl('span', { style: { marginLeft: '8px', color: '#5fa8b8', fontSize: '9px', letterSpacing: '1px' } }, 'LVL ' + simCell.data.level);
+      tooltip.appendChild(claimLine);
       tooltip.appendChild(statusSpan);
       tooltip.appendChild(levelSpan);
       tooltip.style.display = 'block';
       tooltip.style.left = (evt.clientX + 12) + 'px';
       tooltip.style.top = (evt.clientY + 12) + 'px';
     });
-    nodeGroup.addEventListener('mousemove', function(evt) {
+    cellGroup.addEventListener('mousemove', function(evt) {
       tooltip.style.left = (evt.clientX + 12) + 'px';
       tooltip.style.top = (evt.clientY + 12) + 'px';
     });
-    nodeGroup.addEventListener('mouseleave', function() { tooltip.style.display = 'none'; });
+    cellGroup.addEventListener('mouseleave', function() { tooltip.style.display = 'none'; });
 
-    group.appendChild(nodeGroup);
+    cellLayer.appendChild(cellGroup);
   });
 
-  // Pan & Zoom
+  // Pan & Zoom — preserved. Guard against starting a pan from HUD chrome.
   var isPanning = false, panStartX = 0, panStartY = 0;
   function updateTransform() {
     group.setAttribute('transform', 'translate(' + viewX + ',' + viewY + ') scale(' + viewScale + ')');
   }
   container.addEventListener('mousedown', function(evt) {
-    if (evt.target.closest('.dag-node') || evt.target.closest('.dag-back') || evt.target.closest('.dag-legend')) return;
+    if (evt.target.closest('.dag-cell') ||
+        evt.target.closest('.dag-back') ||
+        evt.target.closest('.dag-hud-top') ||
+        evt.target.closest('.dag-hud-bottom')) return;
     isPanning = true;
     panStartX = evt.clientX - viewX;
     panStartY = evt.clientY - viewY;
@@ -1107,10 +1480,10 @@ function renderDAGLegend() {
   var legend = document.getElementById('dag-legend');
   legend.textContent = '';
   ['NEW', 'RESEARCH', 'RED_TEAM', 'VALIDATED', 'DISPROVEN', 'STALLED'].forEach(function(status) {
-    var item = buildEl('div', { className: 'legend-item' });
-    item.appendChild(buildEl('div', { className: 'legend-dot', style: { background: STATUS_COLORS[status] } }));
-    item.appendChild(document.createTextNode(status));
-    legend.appendChild(item);
+    var chip = buildEl('span', { className: 'legend-chip' });
+    chip.appendChild(buildEl('span', { className: 'legend-swatch', style: { background: STATUS_COLORS[status] } }));
+    chip.appendChild(document.createTextNode(status));
+    legend.appendChild(chip);
   });
 }
 
@@ -1130,11 +1503,11 @@ function loadLogs() {
 function appendLogRow(evt, skipScroll) {
   var feed = document.getElementById('logs-feed');
 
-  var filterNode = document.getElementById('filter-node').value.toLowerCase();
+  var filterCell = document.getElementById('filter-cell').value.toLowerCase();
   var filterAgent = document.getElementById('filter-agent').value.toLowerCase();
   var filterType = document.getElementById('filter-type').value;
 
-  if (filterNode && (evt.node_id || '').toLowerCase().indexOf(filterNode) === -1) return;
+  if (filterCell && (evt.cell_id || '').toLowerCase().indexOf(filterCell) === -1) return;
   if (filterAgent && (evt.agent || '').toLowerCase().indexOf(filterAgent) === -1) return;
   if (filterType && evt.type !== filterType) return;
 
@@ -1149,7 +1522,7 @@ function appendLogRow(evt, skipScroll) {
   var badge = buildEl('span', { className: 'log-type-badge', style: { background: typeColor + '22', color: typeColor } }, (evt.type || '').replace(/_/g, ' '));
   row.appendChild(badge);
   row.appendChild(buildEl('span', { className: 'log-agent' }, evt.agent || ''));
-  row.appendChild(buildEl('span', { className: 'log-node', onclick: function() { navigate('node', evt.node_id); } }, evt.node_id || ''));
+  row.appendChild(buildEl('span', { className: 'log-cell', onclick: function() { navigate('cell', evt.cell_id); } }, evt.cell_id || ''));
   row.appendChild(buildEl('span', { className: 'log-iter' }, 'iter ' + (evt.iteration || 0)));
 
   feed.insertBefore(row, feed.firstChild);
@@ -1157,48 +1530,48 @@ function appendLogRow(evt, skipScroll) {
   if (!skipScroll) feed.scrollTop = 0;
 }
 
-['filter-node', 'filter-agent', 'filter-type'].forEach(function(id) {
+['filter-cell', 'filter-agent', 'filter-type'].forEach(function(id) {
   document.getElementById(id).addEventListener('input', function() {
     if (State.currentView === 'logs') loadLogs();
   });
 });
 
-// ── Node Detail ─────────────────────────────────────────────────────────
+// ── Cell Detail ─────────────────────────────────────────────────────────
 
-function loadNodeDetail(nodeId) {
-  var container = document.getElementById('node-content');
+function loadCellDetail(cellId) {
+  var container = document.getElementById('cell-content');
   container.textContent = '';
   var loading = buildEl('div', { className: 'loading' });
   loading.appendChild(buildEl('span', { className: 'spinner' }));
-  loading.appendChild(document.createTextNode('Loading node...'));
+  loading.appendChild(document.createTextNode('Loading cell...'));
   container.appendChild(loading);
 
-  fetchJSON('/api/node/' + encodeURIComponent(nodeId)).then(function(node) {
-    renderNodeDetail(node);
+  fetchJSON('/api/cell/' + encodeURIComponent(cellId)).then(function(cell) {
+    renderCellDetail(cell);
   }).catch(function() {
     container.textContent = '';
-    container.appendChild(buildEl('div', { className: 'loading' }, 'Node not found: ' + nodeId));
+    container.appendChild(buildEl('div', { className: 'loading' }, 'Cell not found: ' + cellId));
   });
 }
 
-function renderNodeDetail(node) {
-  var container = document.getElementById('node-content');
+function renderCellDetail(cell) {
+  var container = document.getElementById('cell-content');
   container.textContent = '';
-  var statusColor = STATUS_COLORS[node.status] || '#555';
+  var statusColor = STATUS_COLORS[cell.status] || '#555';
 
   // Back
-  var backDiv = buildEl('div', { className: 'node-back' });
+  var backDiv = buildEl('div', { className: 'cell-back' });
   backDiv.appendChild(buildEl('button', { onclick: function() { history.back(); } }, '\u2190 Back'));
   container.appendChild(backDiv);
 
   // Header
-  var header = buildEl('div', { className: 'node-header' });
-  header.appendChild(buildEl('div', { className: 'node-claim' }, node.claim_text || node.node_id));
-  header.appendChild(buildEl('span', { className: 'node-status-badge', style: { background: statusColor } }, node.status));
+  var header = buildEl('div', { className: 'cell-header' });
+  header.appendChild(buildEl('div', { className: 'cell-claim' }, cell.claim_text || cell.cell_id));
+  header.appendChild(buildEl('span', { className: 'cell-status-badge', style: { background: statusColor } }, cell.status));
   container.appendChild(header);
 
   // Meta grid
-  var metaGrid = buildEl('div', { className: 'node-meta-grid' });
+  var metaGrid = buildEl('div', { className: 'cell-meta-grid' });
 
   function addMetaItem(label, valueContent) {
     var item = buildEl('div', { className: 'meta-item' });
@@ -1210,31 +1583,31 @@ function renderNodeDetail(node) {
     metaGrid.appendChild(item);
   }
 
-  addMetaItem('Node ID', node.node_id);
-  addMetaItem('Colony', node.colony_id || '');
-  addMetaItem('Level', String(node.level));
+  addMetaItem('Cell ID', cell.cell_id);
+  addMetaItem('Colony', cell.colony_id || '');
+  addMetaItem('Level', String(cell.level));
 
   var depsDiv = document.createDocumentFragment();
-  (node.dependencies || []).forEach(function(depId) {
-    var link = buildEl('span', { className: 'meta-link', onclick: function() { navigate('node', depId); } }, depId);
+  (cell.dependencies || []).forEach(function(depId) {
+    var link = buildEl('span', { className: 'meta-link', onclick: function() { navigate('cell', depId); } }, depId);
     depsDiv.appendChild(link);
     depsDiv.appendChild(document.createElement('br'));
   });
-  if ((node.dependencies || []).length === 0) depsDiv.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'None (leaf node)'));
-  addMetaItem('Dependencies (' + (node.dependencies || []).length + ')', depsDiv);
+  if ((cell.dependencies || []).length === 0) depsDiv.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'None (cell)'));
+  addMetaItem('Dependencies (' + (cell.dependencies || []).length + ')', depsDiv);
 
   var depntsDiv = document.createDocumentFragment();
-  (node.dependents || []).forEach(function(depId) {
-    depntsDiv.appendChild(buildEl('span', { className: 'meta-link', onclick: function() { navigate('node', depId); } }, depId));
+  (cell.dependents || []).forEach(function(depId) {
+    depntsDiv.appendChild(buildEl('span', { className: 'meta-link', onclick: function() { navigate('cell', depId); } }, depId));
     depntsDiv.appendChild(document.createElement('br'));
   });
-  if ((node.dependents || []).length === 0) depntsDiv.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'None'));
-  addMetaItem('Dependents (' + (node.dependents || []).length + ')', depntsDiv);
+  if ((cell.dependents || []).length === 0) depntsDiv.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'None'));
+  addMetaItem('Dependents (' + (cell.dependents || []).length + ')', depntsDiv);
 
   container.appendChild(metaGrid);
 
   // Verdicts
-  var events = node.events || [];
+  var events = cell.events || [];
   var verdicts = events.filter(function(evt) { return evt.type === 'verdict_issued'; });
   if (verdicts.length > 0) {
     container.appendChild(buildEl('div', { className: 'section-title' }, 'Verdicts'));
@@ -1323,7 +1696,7 @@ function renderNodeDetail(node) {
       container.appendChild(grp);
     });
   } else {
-    container.appendChild(buildEl('div', { className: 'logs-empty' }, 'No events recorded for this node yet.'));
+    container.appendChild(buildEl('div', { className: 'logs-empty' }, 'No events recorded for this cell yet.'));
   }
 }
 
@@ -1495,10 +1868,10 @@ function startOnboarding() {
       });
       var seedData = await seedRes.json();
       if (seedData.status === 'ok') {
-        addLineInstant('[OK] Colony "' + seedData.colony_name + '" created with ' + seedData.node_count + ' nodes', 'bright');
+        addLineInstant('[OK] Colony "' + seedData.colony_name + '" created with ' + seedData.cell_count + ' cells', 'bright');
         addLineInstant('');
-        if (seedData.nodes) {
-          seedData.nodes.forEach(function(nd) {
+        if (seedData.cells) {
+          seedData.cells.forEach(function(nd) {
             addLineInstant('  L' + nd.level + '  ' + (nd.claim_text || '').substring(0, 60), 'dim');
           });
         }

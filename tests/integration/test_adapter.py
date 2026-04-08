@@ -86,7 +86,7 @@ class TestClaudeCodeAdapterGeneration:
             "event_log_read.md",
             "queue_update.md",
             "convergence_check.md",
-            "read_node.md",
+            "read_cell.md",
         ]
         for skill in expected_skills:
             assert (output_dir / "skills" / skill).exists(), (
@@ -156,7 +156,7 @@ class TestLeadAgentConstitutionReread:
         output_dir = petri_env / ".claude"
         adapter.generate(output_dir)
 
-        lead_names = ["decomposition_lead", "node_lead", "red_team_lead"]
+        lead_names = ["decomposition_lead", "cell_lead", "red_team_lead"]
         for name in lead_names:
             content = (output_dir / "agents" / f"{name}.md").read_text()
             assert "re-read" in content.lower() or "reread" in content.lower(), (
@@ -206,7 +206,7 @@ class TestScannerOnGeneratedConfig:
         # Filter for actual errors (some informational issues may remain)
         errors = [
             i for i in issues
-            if i.category not in ("node_statuses",)  # informational
+            if i.category not in ("cell_statuses",)  # informational
         ]
         assert len(errors) == 0, (
             f"Scanner found {len(errors)} issues on fresh generate: "

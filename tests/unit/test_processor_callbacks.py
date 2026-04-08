@@ -1,8 +1,8 @@
 """Tests for the optional ``on_event`` lifecycle callback plumbing.
 
 Phase 2 of the multi-spinner plan adds an ``on_event`` parameter to
-``process_node``/``process_queue`` so the CLI can paint a per-slot status
-row whenever a node transitions phase, fires an agent, or finishes.
+``process_cell``/``process_queue`` so the CLI can paint a per-slot status
+row whenever a cell transitions phase, fires an agent, or finishes.
 
 These tests:
   * confirm the existing call sites are not affected (``on_event`` defaults
@@ -10,8 +10,8 @@ These tests:
   * confirm the callback receives ``started``/``phase``/``agent``/
     ``verdict``/``finished`` events in a sensible order
   * confirm callback exceptions never break the engine
-  * confirm slot indices are stable per node and unique across concurrent
-    nodes
+  * confirm slot indices are stable per cell and unique across concurrent
+    cells
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ from pathlib import Path
 import pytest
 
 from petri.engine.processor import (
-    NodeProgressEvent,
-    process_node,
+    CellProgressEvent,
+    process_cell,
     process_queue,
     reset_stop,
 )
@@ -38,7 +38,7 @@ def _reset_processor_stop_signal():
 
     The ``petri stop`` CLI tests call ``request_stop()`` and never reset
     it, leaving the module-level ``_stop_event`` in a "set" state for any
-    later test that calls ``process_node`` directly.  ``process_node``
+    later test that calls ``process_cell`` directly.  ``process_cell``
     short-circuits at the very first stop check, which makes our
     callback assertions fail in the full suite while passing in
     isolation.  Resetting around every test isolates us from that
@@ -51,7 +51,7 @@ def _reset_processor_stop_signal():
 
 DISH_ID = "test-dish"
 COLONY_NAME = "callbacks"
-NODE_ID_TEMPLATE = f"{DISH_ID}-{COLONY_NAME}-001-{{seq:03d}}"
+CELL_ID_TEMPLATE = f"{DISH_ID}-{COLONY_NAME}-001-{{seq:03d}}"
 
 
 # ── Deterministic InferenceProvider ─────────────────────────────────────
@@ -72,23 +72,23 @@ class CallbackTestProvider:
       * Evidence evaluator returns ``EVIDENCE_CONFIRMS``.
 
     A small artificial delay (``call_delay``) makes it possible to overlap
-    multiple ``process_node`` invocations under ``ThreadPoolExecutor``.
+    multiple ``process_cell`` invocations under ``ThreadPoolExecutor``.
     """
 
     def __init__(self, call_delay: float = 0.0) -> None:
         self.call_delay = call_delay
         self.assess_calls: list[dict] = []
 
-    def assess_node(
+    def assess_cell(
         self,
-        node_id: str,
+        cell_id: str,
         claim_text: str,
         context: dict,
         agent_role: str,
     ) -> dict:
         self.assess_calls.append(
             {
-                "node_id": node_id,
+                "cell_id": cell_id,
                 "agent_role": agent_role,
                 "phase": context.get("phase", ""),
             }
@@ -147,7 +147,7 @@ class CallbackTestProvider:
     def decompose_why(self, premise, parent_level, parent_seq, max_premises=5, on_progress=None):
         return []
 
-    def match_evidence(self, content, nodes):
+    def match_evidence(self, content, cells):
         return []
 
 
@@ -155,16 +155,16 @@ class CallbackTestProvider:
 
 
 def _build_callback_dish(tmp_path: Path, seqs: list[int]) -> dict:
-    """Build a minimal .petri/ layout with one node per seq.
+    """Build a minimal .petri/ layout with one cell per seq.
 
-    Each node uses the flat fallback layout
+    Each cell uses the flat fallback layout
     (``petri-dishes/<colony>/{level}-{seq}/``) so we can sidestep the
     colony.json deserialisation that ``process_queue`` would otherwise
-    require for ``find_eligible_nodes``.
+    require for ``find_eligible_cells``.
 
     Returned dict carries:
       petri_dir: the .petri root
-      node_ids:  ordered list of node IDs created
+      cell_ids:  ordered list of cell IDs created
       events_files: parallel list of events.jsonl paths
     """
     petri_dir = tmp_path / ".petri"
@@ -176,28 +176,28 @@ def _build_callback_dish(tmp_path: Path, seqs: list[int]) -> dict:
     defaults_dir.mkdir()
     (defaults_dir / "petri.yaml").write_text(f"name: {DISH_ID}\n")
 
-    node_ids: list[str] = []
+    cell_ids: list[str] = []
     events_files: list[Path] = []
     queue_entries: dict = {}
 
     for seq in seqs:
-        node_id = NODE_ID_TEMPLATE.format(seq=seq)
-        node_ids.append(node_id)
+        cell_id = CELL_ID_TEMPLATE.format(seq=seq)
+        cell_ids.append(cell_id)
 
-        node_dir = petri_dir / "petri-dishes" / COLONY_NAME / f"001-{seq:03d}"
-        node_dir.mkdir(parents=True)
+        cell_path = petri_dir / "petri-dishes" / COLONY_NAME / f"001-{seq:03d}"
+        cell_path.mkdir(parents=True)
 
-        events_file = node_dir / "events.jsonl"
+        events_file = cell_path / "events.jsonl"
         events_file.touch()
         events_files.append(events_file)
 
-        (node_dir / "evidence.md").write_text(
-            f"# {node_id}\n\n**Status:** pending\n\n"
+        (cell_path / "evidence.md").write_text(
+            f"# {cell_id}\n\n**Status:** pending\n\n"
         )
-        (node_dir / "metadata.json").write_text(
+        (cell_path / "metadata.json").write_text(
             json.dumps(
                 {
-                    "id": node_id,
+                    "id": cell_id,
                     "claim_text": f"test claim {seq}",
                     "level": 1,
                     "status": "NEW",
@@ -209,8 +209,8 @@ def _build_callback_dish(tmp_path: Path, seqs: list[int]) -> dict:
             + "\n"
         )
 
-        queue_entries[node_id] = {
-            "node_id": node_id,
+        queue_entries[cell_id] = {
+            "cell_id": cell_id,
             "queue_state": "queued",
             "iteration": 0,
             "entered_at": "2026-01-01T00:00:00+00:00",
@@ -232,57 +232,57 @@ def _build_callback_dish(tmp_path: Path, seqs: list[int]) -> dict:
 
     return {
         "petri_dir": petri_dir,
-        "node_ids": node_ids,
+        "cell_ids": cell_ids,
         "events_files": events_files,
     }
 
 
 @pytest.fixture
-def single_node_dish(tmp_path):
-    """A petri dish with exactly one node ready in the ``queued`` state."""
+def single_cell_dish(tmp_path):
+    """A petri dish with exactly one cell ready in the ``queued`` state."""
     return _build_callback_dish(tmp_path, seqs=[1])
 
 
 @pytest.fixture
-def multi_node_dish(tmp_path):
-    """A petri dish with three nodes ready in the ``queued`` state."""
+def multi_cell_dish(tmp_path):
+    """A petri dish with three cells ready in the ``queued`` state."""
     return _build_callback_dish(tmp_path, seqs=[1, 2, 3])
 
 
 # ── Tests ───────────────────────────────────────────────────────────────
 
 
-def test_no_event_callback_means_no_overhead(single_node_dish):
+def test_no_event_callback_means_no_overhead(single_cell_dish):
     """``on_event=None`` is the default and the existing path keeps working.
 
-    Calls ``process_node`` directly (rather than ``process_queue``) so the
+    Calls ``process_cell`` directly (rather than ``process_queue``) so the
     test doesn't depend on a fully serialised colony — the lifecycle
     callback wiring is what's under test, not eligibility discovery.
     """
     provider = CallbackTestProvider()
-    node_id = single_node_dish["node_ids"][0]
+    cell_id = single_cell_dish["cell_ids"][0]
 
-    result = process_node(
-        node_id=node_id,
-        petri_dir=single_node_dish["petri_dir"],
+    result = process_cell(
+        cell_id=cell_id,
+        petri_dir=single_cell_dish["petri_dir"],
         provider=provider,
     )
 
-    assert result.node_id == node_id
+    assert result.cell_id == cell_id
     assert result.error is None
     assert provider.assess_calls, "provider was never invoked"
 
 
-def test_callback_fires_started_and_finished_for_one_node(single_node_dish):
-    """Single node — the callback receives a started + finished event."""
-    captured: list[NodeProgressEvent] = []
+def test_callback_fires_started_and_finished_for_one_cell(single_cell_dish):
+    """Single cell — the callback receives a started + finished event."""
+    captured: list[CellProgressEvent] = []
 
     provider = CallbackTestProvider()
-    node_id = single_node_dish["node_ids"][0]
+    cell_id = single_cell_dish["cell_ids"][0]
 
-    process_node(
-        node_id=node_id,
-        petri_dir=single_node_dish["petri_dir"],
+    process_cell(
+        cell_id=cell_id,
+        petri_dir=single_cell_dish["petri_dir"],
         provider=provider,
         slot_idx=2,
         on_event=captured.append,
@@ -293,26 +293,26 @@ def test_callback_fires_started_and_finished_for_one_node(single_node_dish):
 
     assert len(started) == 1, f"expected exactly one started event, got {started}"
     assert len(finished) == 1, f"expected exactly one finished event, got {finished}"
-    assert started[0].node_id == node_id
-    assert finished[0].node_id == node_id
+    assert started[0].cell_id == cell_id
+    assert finished[0].cell_id == cell_id
     # slot_idx must round-trip back to the caller
     assert started[0].slot_idx == 2
     assert finished[0].slot_idx == 2
     assert finished[0].slot_idx >= 0
 
 
-def test_callback_fires_phase_events_in_order(single_node_dish):
+def test_callback_fires_phase_events_in_order(single_cell_dish):
     """Phase events appear in pipeline order: socratic → research → ... → evaluating.
 
     The fake provider drives a clean happy path so all six phases fire.
     """
-    captured: list[NodeProgressEvent] = []
+    captured: list[CellProgressEvent] = []
     provider = CallbackTestProvider()
-    node_id = single_node_dish["node_ids"][0]
+    cell_id = single_cell_dish["cell_ids"][0]
 
-    process_node(
-        node_id=node_id,
-        petri_dir=single_node_dish["petri_dir"],
+    process_cell(
+        cell_id=cell_id,
+        petri_dir=single_cell_dish["petri_dir"],
         provider=provider,
         slot_idx=0,
         on_event=captured.append,
@@ -338,15 +338,15 @@ def test_callback_fires_phase_events_in_order(single_node_dish):
     assert "socratic" in phase_events
 
 
-def test_callback_fires_agent_and_verdict_events(single_node_dish):
+def test_callback_fires_agent_and_verdict_events(single_cell_dish):
     """At least one agent + verdict event is captured with non-empty fields."""
-    captured: list[NodeProgressEvent] = []
+    captured: list[CellProgressEvent] = []
     provider = CallbackTestProvider()
-    node_id = single_node_dish["node_ids"][0]
+    cell_id = single_cell_dish["cell_ids"][0]
 
-    process_node(
-        node_id=node_id,
-        petri_dir=single_node_dish["petri_dir"],
+    process_cell(
+        cell_id=cell_id,
+        petri_dir=single_cell_dish["petri_dir"],
         provider=provider,
         slot_idx=0,
         on_event=captured.append,
@@ -368,51 +368,51 @@ def test_callback_fires_agent_and_verdict_events(single_node_dish):
         assert verdict_event.phase, f"phase field empty: {verdict_event}"
 
 
-def test_callback_exception_does_not_break_processing(single_node_dish):
-    """Callback raises on every call — the engine still completes the node."""
+def test_callback_exception_does_not_break_processing(single_cell_dish):
+    """Callback raises on every call — the engine still completes the cell."""
 
-    def raising_callback(event: NodeProgressEvent) -> None:
+    def raising_callback(event: CellProgressEvent) -> None:
         raise RuntimeError("intentional UI failure")
 
     provider = CallbackTestProvider()
-    node_id = single_node_dish["node_ids"][0]
+    cell_id = single_cell_dish["cell_ids"][0]
 
-    result = process_node(
-        node_id=node_id,
-        petri_dir=single_node_dish["petri_dir"],
+    result = process_cell(
+        cell_id=cell_id,
+        petri_dir=single_cell_dish["petri_dir"],
         provider=provider,
         slot_idx=0,
         on_event=raising_callback,
     )
 
-    assert result.node_id == node_id
+    assert result.cell_id == cell_id
     assert result.error is None, f"engine reported error: {result.error}"
-    # The node must have advanced past the initial 'queued' state — i.e.
+    # The cell must have advanced past the initial 'queued' state — i.e.
     # the loop ran and the callback exceptions were swallowed.
     queue_data = json.loads(
-        (single_node_dish["petri_dir"] / "queue.json").read_text()
+        (single_cell_dish["petri_dir"] / "queue.json").read_text()
     )
-    final_state = queue_data["entries"][node_id]["queue_state"]
+    final_state = queue_data["entries"][cell_id]["queue_state"]
     assert final_state in {
         "done", "deferred_open", "deferred_closed", "needs_human", "stalled",
-    }, f"node did not reach a terminal state: {final_state}"
+    }, f"cell did not reach a terminal state: {final_state}"
 
 
-def test_slot_idx_stable_for_one_node(single_node_dish):
-    """Every event for a given node carries the same slot_idx."""
-    captured: list[NodeProgressEvent] = []
+def test_slot_idx_stable_for_one_cell(single_cell_dish):
+    """Every event for a given cell carries the same slot_idx."""
+    captured: list[CellProgressEvent] = []
     provider = CallbackTestProvider()
-    node_id = single_node_dish["node_ids"][0]
+    cell_id = single_cell_dish["cell_ids"][0]
 
-    process_node(
-        node_id=node_id,
-        petri_dir=single_node_dish["petri_dir"],
+    process_cell(
+        cell_id=cell_id,
+        petri_dir=single_cell_dish["petri_dir"],
         provider=provider,
         slot_idx=7,
         on_event=captured.append,
     )
 
-    slot_indices = {event.slot_idx for event in captured if event.node_id == node_id}
+    slot_indices = {event.slot_idx for event in captured if event.cell_id == cell_id}
     assert slot_indices == {7}, f"slot_idx not stable: {slot_indices}"
 
 
@@ -424,7 +424,7 @@ class _ImmediateBalancer:
 
     The real balancer ramps from ``min_workers`` upward over multiple poll
     intervals; that's hostile to a unit test that wants to confirm three
-    nodes occupy three distinct slots.  This shim short-circuits the ramp.
+    cells occupy three distinct slots.  This shim short-circuits the ramp.
     """
 
     def __init__(self, max_workers: int = 1, min_workers: int = 1, **_kwargs):
@@ -442,11 +442,11 @@ class _ImmediateBalancer:
         pass
 
 
-def test_slot_idx_unique_for_concurrent_nodes(multi_node_dish, monkeypatch):
-    """Three nodes processed in parallel get three distinct slot indices.
+def test_slot_idx_unique_for_concurrent_cells(multi_cell_dish, monkeypatch):
+    """Three cells processed in parallel get three distinct slot indices.
 
     Uses ``process_queue`` so the slot pool wrapper is exercised end-to-
-    end.  ``find_eligible_nodes`` is fed an explicit ``node_ids`` list so
+    end.  ``find_eligible_cells`` is fed an explicit ``cell_ids`` list so
     we don't depend on colony.json deserialisation.
 
     The balancer is monkeypatched to immediately allow ``max_workers``
@@ -457,44 +457,44 @@ def test_slot_idx_unique_for_concurrent_nodes(multi_node_dish, monkeypatch):
         "petri.engine.load_balancer.AdaptiveLoadBalancer", _ImmediateBalancer
     )
 
-    captured: list[NodeProgressEvent] = []
+    captured: list[CellProgressEvent] = []
     captured_lock = threading.Lock()
 
-    def _record(event: NodeProgressEvent) -> None:
+    def _record(event: CellProgressEvent) -> None:
         with captured_lock:
             captured.append(event)
 
-    # A small per-call delay holds each node in flight long enough for
-    # the other two to be picked up — without this the first node would
+    # A small per-call delay holds each cell in flight long enough for
+    # the other two to be picked up — without this the first cell would
     # often complete before the second is even submitted.
     provider = CallbackTestProvider(call_delay=0.01)
 
     result = process_queue(
-        petri_dir=multi_node_dish["petri_dir"],
+        petri_dir=multi_cell_dish["petri_dir"],
         provider=provider,
         max_concurrent=3,
-        node_ids=multi_node_dish["node_ids"],
-        all_nodes=True,
+        cell_ids=multi_cell_dish["cell_ids"],
+        all_cells=True,
         on_event=_record,
     )
 
     assert result.processed == 3, f"expected 3 processed, got {result.processed}"
 
-    # Build {node_id: {slot_idx, ...}} from the captured events.
-    per_node_slots: dict[str, set[int]] = {}
+    # Build {cell_id: {slot_idx, ...}} from the captured events.
+    per_cell_slots: dict[str, set[int]] = {}
     for event in captured:
-        per_node_slots.setdefault(event.node_id, set()).add(event.slot_idx)
+        per_cell_slots.setdefault(event.cell_id, set()).add(event.slot_idx)
 
-    # Each node must have used exactly one slot index throughout its life.
-    for node_id, slots in per_node_slots.items():
+    # Each cell must have used exactly one slot index throughout its life.
+    for cell_id, slots in per_cell_slots.items():
         assert len(slots) == 1, (
-            f"{node_id} switched slots mid-flight: {slots}"
+            f"{cell_id} switched slots mid-flight: {slots}"
         )
 
-    # The three nodes occupied three DIFFERENT slot indices.
-    occupied = {next(iter(slots)) for slots in per_node_slots.values()}
+    # The three cells occupied three DIFFERENT slot indices.
+    occupied = {next(iter(slots)) for slots in per_cell_slots.values()}
     assert len(occupied) == 3, (
-        f"expected 3 distinct slot indices across 3 nodes, got {occupied}"
+        f"expected 3 distinct slot indices across 3 cells, got {occupied}"
     )
     # Sanity — every slot is in [0, max_concurrent).
     for slot_index in occupied:

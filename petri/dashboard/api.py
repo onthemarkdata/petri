@@ -217,20 +217,20 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         colony_id = f"{dish_id}-{colony_name}"
 
         graph = ColonyGraph(colony_id=colony_id)
-        nodes = result.nodes
+        cells = result.cells
         edges = result.edges
 
-        for node in nodes:
-            graph.add_node(node)
+        for cell in cells:
+            graph.add_cell(cell)
         for edge in edges:
             graph.add_edge(edge)
 
-        center_node_id = nodes[0].id if nodes else ""
+        center_cell_id = cells[0].id if cells else ""
         colony_model = Colony(
             id=colony_id,
             dish=dish_id,
             center_claim=claim,
-            center_node_id=center_node_id,
+            center_cell_id=center_cell_id,
             clarifications=[],
             created_at=now,
         )
@@ -238,29 +238,29 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         colony_path = petri_dir / "petri-dishes" / colony_name
         serialize_colony(graph, colony_model, colony_path)
 
-        for node in nodes:
-            child_ids = [e.from_node for e in edges if e.to_node == node.id]
-            node_rel_path = colony_model.node_paths.get(
-                node.id, f"{node.id.split('-')[-2]}-{node.id.split('-')[-1]}"
+        for cell in cells:
+            child_ids = [e.from_cell for e in edges if e.to_cell == cell.id]
+            cell_rel_path = colony_model.cell_paths.get(
+                cell.id, f"{cell.id.split('-')[-2]}-{cell.id.split('-')[-1]}"
             )
-            events_path = colony_path / node_rel_path / "events.jsonl"
+            events_path = colony_path / cell_rel_path / "events.jsonl"
             append_event(
                 events_path=events_path,
-                node_id=node.id,
+                cell_id=cell.id,
                 event_type="decomposition_created",
                 agent="decomposition_lead",
                 iteration=0,
-                data={"parent_node_id": node.id, "child_node_ids": child_ids},
+                data={"parent_cell_id": cell.id, "child_cell_ids": child_ids},
             )
 
         return {
             "status": "ok",
             "colony_id": colony_id,
             "colony_name": colony_name,
-            "node_count": len(nodes),
-            "nodes": [
-                {"id": n.id, "claim_text": n.claim_text, "level": n.level}
-                for n in nodes
+            "cell_count": len(cells),
+            "cells": [
+                {"id": c.id, "claim_text": c.claim_text, "level": c.level}
+                for c in cells
             ],
         }
 
@@ -268,7 +268,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
 
     @app.get("/api/events")
     def get_events(
-        node_id: Optional[str] = None,
+        cell_id: Optional[str] = None,
         iteration: Optional[int] = None,
         event_type: Optional[str] = None,
         agent: Optional[str] = None,
@@ -277,9 +277,9 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         conditions: list[str] = []
         params: list[object] = []
 
-        if node_id:
-            conditions.append("node_id = ?")
-            params.append(node_id)
+        if cell_id:
+            conditions.append("cell_id = ?")
+            params.append(cell_id)
         if iteration is not None:
             conditions.append("iteration = ?")
             params.append(iteration)
@@ -292,7 +292,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
 
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = (
-            "SELECT id, node_id, timestamp, type, agent, iteration, data "
+            "SELECT id, cell_id, timestamp, type, agent, iteration, data "
             "FROM events" + where + " ORDER BY timestamp ASC LIMIT ?"
         )
         params.append(limit)
@@ -307,7 +307,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         return [
             {
                 "id": r["id"],
-                "node_id": r["node_id"],
+                "cell_id": r["cell_id"],
                 "timestamp": r["timestamp"],
                 "type": r["type"],
                 "agent": r["agent"],
@@ -324,11 +324,11 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         queue_path = petri_dir / "queue.json"
         return list_queue(queue_path)
 
-    # ── Nodes ─────────────────────────────────────────────────────────
+    # ── Cells ─────────────────────────────────────────────────────────
 
-    @app.get("/api/nodes")
-    def get_nodes():
-        """Return all nodes with colony graph data."""
+    @app.get("/api/cells")
+    def get_cells():
+        """Return all cells with colony graph data."""
         from petri.graph.colony import deserialize_colony
 
         dishes_dir = petri_dir / "petri-dishes"
@@ -338,7 +338,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         # Derive dish_id from petri.yaml or parent directory name
         dish_id = _get_dish_id(petri_dir)
 
-        all_nodes: list[dict] = []
+        all_cells: list[dict] = []
         for colony_dir in sorted(dishes_dir.iterdir()):
             if not colony_dir.is_dir():
                 continue
@@ -347,39 +347,39 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
             except Exception:
                 continue
 
-            for node in graph.get_nodes():
-                all_nodes.append(
+            for cell in graph.get_all_cells():
+                all_cells.append(
                     {
-                        "node_id": node.id,
-                        "colony_id": node.colony_id,
-                        "claim_text": node.claim_text,
-                        "level": node.level,
-                        "status": node.status.value,
-                        "dependencies": node.dependencies,
-                        "dependents": node.dependents,
+                        "cell_id": cell.id,
+                        "colony_id": cell.colony_id,
+                        "claim_text": cell.claim_text,
+                        "level": cell.level,
+                        "status": cell.status.value,
+                        "dependencies": cell.dependencies,
+                        "dependents": cell.dependents,
                     }
                 )
 
-        return all_nodes
+        return all_cells
 
-    # ── Single node detail ────────────────────────────────────────────
+    # ── Single cell detail ────────────────────────────────────────────
 
-    @app.get("/api/node/{node_id}")
-    def get_node_detail(node_id: str):
-        """Full detail for one node: metadata + events."""
+    @app.get("/api/cell/{cell_id}")
+    def get_cell_detail(cell_id: str):
+        """Full detail for one cell: metadata + events."""
         from petri.graph.colony import deserialize_colony
 
         dishes_dir = petri_dir / "petri-dishes"
         dish_id = _get_dish_id(petri_dir)
 
-        # Find the node across all colonies
+        # Find the cell across all colonies
         if dishes_dir.is_dir():
             for colony_dir in sorted(dishes_dir.iterdir()):
                 if not colony_dir.is_dir():
                     continue
                 try:
                     graph, colony = deserialize_colony(colony_dir, dish_id)
-                    node = graph.get_node(node_id)
+                    cell = graph.get_cell(cell_id)
                 except (Exception, KeyError):
                     continue
 
@@ -387,9 +387,9 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 conn = get_db(db_path)
                 try:
                     rows = conn.execute(
-                        "SELECT id, node_id, timestamp, type, agent, iteration, data "
-                        "FROM events WHERE node_id = ? ORDER BY timestamp ASC",
-                        [node_id],
+                        "SELECT id, cell_id, timestamp, type, agent, iteration, data "
+                        "FROM events WHERE cell_id = ? ORDER BY timestamp ASC",
+                        [cell_id],
                     ).fetchall()
                 except sqlite3.OperationalError:
                     rows = []
@@ -398,7 +398,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 events = [
                     {
                         "id": r["id"],
-                        "node_id": r["node_id"],
+                        "cell_id": r["cell_id"],
                         "timestamp": r["timestamp"],
                         "type": r["type"],
                         "agent": r["agent"],
@@ -409,17 +409,17 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 ]
 
                 return {
-                    "node_id": node.id,
-                    "colony_id": node.colony_id,
-                    "claim_text": node.claim_text,
-                    "level": node.level,
-                    "status": node.status.value,
-                    "dependencies": node.dependencies,
-                    "dependents": node.dependents,
+                    "cell_id": cell.id,
+                    "colony_id": cell.colony_id,
+                    "claim_text": cell.claim_text,
+                    "level": cell.level,
+                    "status": cell.status.value,
+                    "dependencies": cell.dependencies,
+                    "dependents": cell.dependents,
                     "events": events,
                 }
 
-        raise HTTPException(404, "Node %s not found" % node_id)
+        raise HTTPException(404, "Cell %s not found" % cell_id)
 
     # ── Stats ─────────────────────────────────────────────────────────
 
@@ -428,21 +428,21 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         conn = get_db(db_path)
         try:
             total_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-            nodes_with_events = conn.execute(
-                "SELECT COUNT(DISTINCT node_id) FROM events"
+            cells_with_events = conn.execute(
+                "SELECT COUNT(DISTINCT cell_id) FROM events"
             ).fetchone()[0]
             type_rows = conn.execute(
                 "SELECT type, COUNT(*) as cnt FROM events GROUP BY type ORDER BY cnt DESC"
             ).fetchall()
-            top_nodes = conn.execute(
-                "SELECT node_id, COUNT(*) as cnt FROM events "
-                "GROUP BY node_id ORDER BY cnt DESC LIMIT 10"
+            top_cells = conn.execute(
+                "SELECT cell_id, COUNT(*) as cnt FROM events "
+                "GROUP BY cell_id ORDER BY cnt DESC LIMIT 10"
             ).fetchall()
         except sqlite3.OperationalError:
             total_events = 0
-            nodes_with_events = 0
+            cells_with_events = 0
             type_rows = []
-            top_nodes = []
+            top_cells = []
         conn.close()
 
         # Queue stats
@@ -453,22 +453,22 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
             queue = {"entries": {}}
         entries = queue.get("entries", {})
 
-        nodes_by_state: dict[str, int] = {}
+        cells_by_state: dict[str, int] = {}
         for entry in entries.values():
             state = entry.get("queue_state", "unknown")
-            nodes_by_state[state] = nodes_by_state.get(state, 0) + 1
+            cells_by_state[state] = cells_by_state.get(state, 0) + 1
 
         return {
             "total_events": total_events,
-            "nodes_with_events": nodes_with_events,
+            "cells_with_events": cells_with_events,
             "queue_size": len(entries),
-            "nodes_by_state": nodes_by_state,
+            "cells_by_state": cells_by_state,
             "events_by_type": [
                 {"type": r["type"], "count": r["cnt"]} for r in type_rows
             ],
-            "top_nodes": [
-                {"node_id": r["node_id"], "event_count": r["cnt"]}
-                for r in top_nodes
+            "top_cells": [
+                {"cell_id": r["cell_id"], "event_count": r["cnt"]}
+                for r in top_cells
             ],
         }
 
@@ -497,7 +497,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 try:
                     conn = get_db(db_path)
                     new_rows = conn.execute(
-                        "SELECT rowid, id, node_id, type, agent, iteration "
+                        "SELECT rowid, id, cell_id, type, agent, iteration "
                         "FROM events WHERE rowid > ? "
                         "ORDER BY rowid ASC LIMIT 50",
                         [last_rowid],
@@ -511,7 +511,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                             "data": json.dumps(
                                 {
                                     "id": evt["id"],
-                                    "node_id": evt["node_id"],
+                                    "cell_id": evt["cell_id"],
                                     "type": evt["type"],
                                     "agent": evt["agent"],
                                     "iteration": evt["iteration"],

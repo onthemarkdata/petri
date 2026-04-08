@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from string import Template
 
-from petri.models import AgentRole, EventType, NodeStatus, QueueState
+from petri.models import AgentRole, EventType, QueueState
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -124,17 +124,17 @@ def generate_research_methodology_rule() -> str:
 _AGENT_DESCRIPTIONS: dict[str, str] = {
     "decomposition_lead": (
         "You orchestrate the decomposition phase. You generate clarifying "
-        "questions, decompose claims into logical sub-nodes, and manage the "
+        "questions, decompose claims into logical sub-cells, and manage the "
         "colony graph structure."
     ),
-    "node_lead": (
-        "You orchestrate the validation pipeline for each node. You mediate "
+    "cell_lead": (
+        "You orchestrate the validation pipeline for each cell. You mediate "
         "debates, write convergence checks, and manage the transition through "
         "pipeline phases."
     ),
     "red_team_lead": (
         "You orchestrate the Red Team phase. You build the strongest possible "
-        "case against each node, independent of the original research."
+        "case against each cell, independent of the original research."
     ),
     "investigator": (
         "You gather evidence for the claim under review. Search for primary "
@@ -146,7 +146,7 @@ _AGENT_DESCRIPTIONS: dict[str, str] = {
         "for superseding information, and flag materially stale sources."
     ),
     "dependency_auditor": (
-        "You verify that all dependencies of the current node are properly "
+        "You verify that all dependencies of the current cell are properly "
         "validated. Check for unvalidated dependencies and circular reasoning."
     ),
     "skeptic": (
@@ -167,11 +167,11 @@ _AGENT_DESCRIPTIONS: dict[str, str] = {
         "appropriately scoped or overcomplicated."
     ),
     "triage": (
-        "You assess value and priority. Determine whether this node is high "
+        "You assess value and priority. Determine whether this cell is high "
         "value, moderate value, or should be deferred."
     ),
     "impact_assessor": (
-        "You assess the impact of this node on the broader colony. Determine "
+        "You assess the impact of this cell on the broader colony. Determine "
         "if it's on the critical path, supporting, or isolated."
     ),
     "evidence_evaluator": (
@@ -244,7 +244,7 @@ def generate_skill(name: str, petri_dir: str, config: dict | None = None) -> str
     ----------
     name:
         One of: event_log_write, event_log_read, queue_update,
-        convergence_check, read_node.
+        convergence_check, read_cell.
     petri_dir:
         The ``.petri/`` directory path (for template substitution).
     config:
@@ -280,7 +280,7 @@ def generate_skill(name: str, petri_dir: str, config: dict | None = None) -> str
 _COMMAND_DEFS: dict[str, dict[str, str]] = {
     "seed": {
         "description": "Seed a new colony from a claim",
-        "help": "Decompose a thesis into a colony of logical sub-nodes.",
+        "help": "Decompose a thesis into a colony of logical sub-cells.",
         "usage": "petri seed \"<claim>\" [--colony NAME] [--no-questions]",
         "implementation": (
             "from petri.cli import app\n"
@@ -289,9 +289,9 @@ _COMMAND_DEFS: dict[str, dict[str, str]] = {
         ),
     },
     "grow": {
-        "description": "Grow nodes through adversarial validation",
-        "help": "Enqueue nodes and process through the validation pipeline.",
-        "usage": "petri grow [NODE_IDS...] [--colony NAME] [--all] [--dry-run]",
+        "description": "Grow cells through adversarial validation",
+        "help": "Enqueue cells and process through the validation pipeline.",
+        "usage": "petri grow [CELL_IDS...] [--colony NAME] [--all] [--dry-run]",
         "implementation": (
             "from petri.cli import app\n"
             "# Runs: petri grow\n"
@@ -300,8 +300,8 @@ _COMMAND_DEFS: dict[str, dict[str, str]] = {
     },
     "check": {
         "description": "Show current state of the petri dish",
-        "help": "Display nodes grouped by level with status and queue state.",
-        "usage": "petri check [--colony NAME] [--node ID] [--json]",
+        "help": "Display cells grouped by level with status and queue state.",
+        "usage": "petri check [--colony NAME] [--cell ID] [--json]",
         "implementation": (
             "from petri.cli import app\n"
             "# Runs: petri check\n"
@@ -310,7 +310,7 @@ _COMMAND_DEFS: dict[str, dict[str, str]] = {
     },
     "feed": {
         "description": "Provide new evidence to the colony",
-        "help": "Ingest new evidence, match to nodes, re-open and propagate.",
+        "help": "Ingest new evidence, match to cells, re-open and propagate.",
         "usage": "petri feed <source> [--colony NAME] [--auto-reopen]",
         "implementation": (
             "from petri.cli import app\n"

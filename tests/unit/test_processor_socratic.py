@@ -20,13 +20,13 @@ from petri.storage.queue import update_state
 
 DISH_ID = "test-dish"
 COLONY_NAME = "mycolony"
-NODE_ID = f"{DISH_ID}-{COLONY_NAME}-001-001"
+CELL_ID = f"{DISH_ID}-{COLONY_NAME}-001-001"
 
 
 class RecordingSocraticProvider:
     """Minimal InferenceProvider stub for Socratic phase tests.
 
-    Records every ``assess_node`` call so tests can assert that a skipped
+    Records every ``assess_cell`` call so tests can assert that a skipped
     phase made zero provider calls.  Returns a deterministic
     AssessmentResult-shaped dict per step.
     """
@@ -34,16 +34,16 @@ class RecordingSocraticProvider:
     def __init__(self) -> None:
         self.assess_calls: list[dict] = []
 
-    def assess_node(
+    def assess_cell(
         self,
-        node_id: str,
+        cell_id: str,
         claim_text: str,
         context: dict,
         agent_role: str,
     ) -> dict:
         self.assess_calls.append(
             {
-                "node_id": node_id,
+                "cell_id": cell_id,
                 "agent_role": agent_role,
                 "phase": context.get("phase", ""),
             }
@@ -84,30 +84,30 @@ class RecordingSocraticProvider:
     ) -> list[dict]:
         return []
 
-    def match_evidence(self, content: str, nodes: list[dict]) -> list[dict]:
+    def match_evidence(self, content: str, cells: list[dict]) -> list[dict]:
         return []
 
 
 @pytest.fixture
 def socratic_dish(tmp_path):
-    """Build a minimal .petri/ layout for a single node ready for Socratic phase.
+    """Build a minimal .petri/ layout for a single cell ready for Socratic phase.
 
     Creates:
-      - petri_dir/queue.json with NODE_ID in socratic_active state
+      - petri_dir/queue.json with CELL_ID in socratic_active state
       - petri_dir/petri-dishes/<colony>/001-001/events.jsonl (empty)
       - petri_dir/petri-dishes/<colony>/001-001/evidence.md (with Status)
     """
     petri_dir = tmp_path / ".petri"
     petri_dir.mkdir()
 
-    # Queue with the node pre-seeded in socratic_active so the transition
+    # Queue with the cell pre-seeded in socratic_active so the transition
     # to research_active is valid.
     queue_data = {
         "version": 1,
         "last_updated": "2026-01-01T00:00:00+00:00",
         "entries": {
-            NODE_ID: {
-                "node_id": NODE_ID,
+            CELL_ID: {
+                "cell_id": CELL_ID,
                 "queue_state": "socratic_active",
                 "iteration": 0,
                 "entered_at": "2026-01-01T00:00:00+00:00",
@@ -117,19 +117,19 @@ def socratic_dish(tmp_path):
     }
     (petri_dir / "queue.json").write_text(json.dumps(queue_data, indent=2) + "\n")
 
-    # Fallback node layout: petri-dishes/<colony>/{level}-{seq}/
-    node_dir = petri_dir / "petri-dishes" / COLONY_NAME / "001-001"
-    node_dir.mkdir(parents=True)
-    events_file = node_dir / "events.jsonl"
+    # Fallback cell layout: petri-dishes/<colony>/{level}-{seq}/
+    cell_path = petri_dir / "petri-dishes" / COLONY_NAME / "001-001"
+    cell_path.mkdir(parents=True)
+    events_file = cell_path / "events.jsonl"
     events_file.touch()
-    evidence_file = node_dir / "evidence.md"
+    evidence_file = cell_path / "evidence.md"
     evidence_file.write_text(
-        "# Node evidence\n\n**Status:** pending\n\n"
+        "# Cell evidence\n\n**Status:** pending\n\n"
     )
 
     return {
         "petri_dir": petri_dir,
-        "node_dir": node_dir,
+        "cell_dir": cell_path,
         "events_file": events_file,
         "evidence_file": evidence_file,
     }
@@ -137,7 +137,7 @@ def socratic_dish(tmp_path):
 
 def _read_queue_state(petri_dir: Path) -> str:
     queue = json.loads((petri_dir / "queue.json").read_text())
-    return queue["entries"][NODE_ID]["queue_state"]
+    return queue["entries"][CELL_ID]["queue_state"]
 
 
 def test_socratic_phase_runs_when_no_prior_events(socratic_dish):
@@ -146,7 +146,7 @@ def test_socratic_phase_runs_when_no_prior_events(socratic_dish):
 
     provider = RecordingSocraticProvider()
     _run_socratic_phase(
-        node_id=NODE_ID,
+        cell_id=CELL_ID,
         claim_text="claim under test",
         petri_dir=socratic_dish["petri_dir"],
         dish_id=DISH_ID,
@@ -154,7 +154,7 @@ def test_socratic_phase_runs_when_no_prior_events(socratic_dish):
         provider=provider,
     )
 
-    # 3 socratic steps + 1 verification = 4 assess_node calls.
+    # 3 socratic steps + 1 verification = 4 assess_cell calls.
     assert len(provider.assess_calls) == 4
 
     # At least one verdict_issued event per step now lives in the log.
@@ -185,7 +185,7 @@ def test_socratic_phase_skips_when_prior_socratic_events_exist(socratic_dish):
     # Seed a prior socratic_clarify verdict so the idempotency guard fires.
     append_event(
         events_path=socratic_dish["events_file"],
-        node_id=NODE_ID,
+        cell_id=CELL_ID,
         event_type="verdict_issued",
         agent="socratic_clarify",
         iteration=0,
@@ -201,7 +201,7 @@ def test_socratic_phase_skips_when_prior_socratic_events_exist(socratic_dish):
 
     provider = RecordingSocraticProvider()
     _run_socratic_phase(
-        node_id=NODE_ID,
+        cell_id=CELL_ID,
         claim_text="claim under test",
         petri_dir=socratic_dish["petri_dir"],
         dish_id=DISH_ID,
@@ -228,7 +228,7 @@ def test_evidence_md_does_not_duplicate_socratic_block(socratic_dish):
 
     # First run — writes the block and advances state to research_active.
     _run_socratic_phase(
-        node_id=NODE_ID,
+        cell_id=CELL_ID,
         claim_text="claim under test",
         petri_dir=socratic_dish["petri_dir"],
         dish_id=DISH_ID,
@@ -241,19 +241,19 @@ def test_evidence_md_does_not_duplicate_socratic_block(socratic_dish):
     # doesn't reject the call; the guard still sees the prior verdicts.
     update_state(
         socratic_dish["petri_dir"] / "queue.json",
-        NODE_ID,
+        CELL_ID,
         "critique_active",
     )
     # Walk back to socratic_active via stalled -> queued -> socratic_active
     # using direct JSON edit (only needed for this test setup).
     queue_path = socratic_dish["petri_dir"] / "queue.json"
     queue_data = json.loads(queue_path.read_text())
-    queue_data["entries"][NODE_ID]["queue_state"] = "socratic_active"
+    queue_data["entries"][CELL_ID]["queue_state"] = "socratic_active"
     queue_path.write_text(json.dumps(queue_data, indent=2) + "\n")
 
     first_run_call_count = len(provider.assess_calls)
     _run_socratic_phase(
-        node_id=NODE_ID,
+        cell_id=CELL_ID,
         claim_text="claim under test",
         petri_dir=socratic_dish["petri_dir"],
         dish_id=DISH_ID,

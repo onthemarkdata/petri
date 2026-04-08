@@ -1,13 +1,13 @@
 """Unit tests for ``petri.reasoning.claude_code_provider``.
 
-Focus: verdict parsing and ``assess_node`` error-handling semantics. The
+Focus: verdict parsing and ``assess_cell`` error-handling semantics. The
 critical invariants tested here are:
 
   1. ``_parse_verdict`` raises ``ValueError`` on no-match (it must NOT
      silently return the first pass verdict — that was the old bug).
-  2. ``assess_node`` surfaces ``EXECUTION_ERROR`` when the model output
+  2. ``assess_cell`` surfaces ``EXECUTION_ERROR`` when the model output
      is unparseable or returns an unknown verdict value.
-  3. ``assess_node`` raises ``ValueError`` for undeclared agent roles
+  3. ``assess_cell`` raises ``ValueError`` for undeclared agent roles
      rather than falling back to a default ``["PASS"]`` verdict list.
 
 These tests stub out ``_ask`` so they never touch the real ``claude``
@@ -67,18 +67,18 @@ def test_parse_verdict_raises_when_no_match():
     assert "EVIDENCE_SUFFICIENT" in error_message
 
 
-# ── assess_node error handling ────────────────────────────────────────────
+# ── assess_cell error handling ────────────────────────────────────────────
 
 
-def test_assess_node_returns_execution_error_on_unparseable_output():
+def test_assess_cell_returns_execution_error_on_unparseable_output():
     """When ``_ask`` returns unparseable text, verdict must be EXECUTION_ERROR.
 
     Regression guard against the old silent-PASS bug where failing calls
     became the strongest PASS verdict.
     """
     provider = StubProvider("Execution error")
-    result = provider.assess_node(
-        node_id="test-dish-colony-001-001",
+    result = provider.assess_cell(
+        cell_id="test-dish-colony-001-001",
         claim_text="A sample claim",
         context={},
         agent_role="investigator",
@@ -91,11 +91,11 @@ def test_assess_node_returns_execution_error_on_unparseable_output():
     assert result.verdict != "EVIDENCE_SUFFICIENT"
 
 
-def test_assess_node_returns_execution_error_on_invalid_verdict_field():
+def test_assess_cell_returns_execution_error_on_invalid_verdict_field():
     """When JSON has a verdict field with a bogus value, surface EXECUTION_ERROR."""
     provider = StubProvider('{"verdict": "MAYBE", "summary": "x"}')
-    result = provider.assess_node(
-        node_id="test-dish-colony-001-001",
+    result = provider.assess_cell(
+        cell_id="test-dish-colony-001-001",
         claim_text="A sample claim",
         context={},
         agent_role="investigator",
@@ -104,12 +104,12 @@ def test_assess_node_returns_execution_error_on_invalid_verdict_field():
     assert "MAYBE" in result.summary
 
 
-def test_assess_node_raises_on_unknown_agent_role():
+def test_assess_cell_raises_on_unknown_agent_role():
     """Unknown agent roles must raise, not fall back to a PASS sentinel."""
     provider = StubProvider('{"verdict": "EVIDENCE_SUFFICIENT", "summary": "ok"}')
     with pytest.raises(ValueError) as exception_info:
-        provider.assess_node(
-            node_id="test-dish-colony-001-001",
+        provider.assess_cell(
+            cell_id="test-dish-colony-001-001",
             claim_text="A sample claim",
             context={},
             agent_role="not_a_real_agent",
@@ -119,7 +119,7 @@ def test_assess_node_raises_on_unknown_agent_role():
     assert "agents.yaml" in error_message
 
 
-def test_assess_node_returns_first_pass_verdict_when_model_says_so():
+def test_assess_cell_returns_first_pass_verdict_when_model_says_so():
     """Positive control: the refactor didn't break the happy path."""
     provider = StubProvider(
         '{"verdict": "EVIDENCE_SUFFICIENT", '
@@ -127,8 +127,8 @@ def test_assess_node_returns_first_pass_verdict_when_model_says_so():
         '"confidence": "HIGH", '
         '"sources_cited": []}'
     )
-    result = provider.assess_node(
-        node_id="test-dish-colony-001-001",
+    result = provider.assess_cell(
+        cell_id="test-dish-colony-001-001",
         claim_text="A sample claim",
         context={},
         agent_role="investigator",
@@ -138,7 +138,7 @@ def test_assess_node_returns_first_pass_verdict_when_model_says_so():
     assert result.confidence == "HIGH"
 
 
-def test_assess_node_recovers_from_invalid_json_verdict_via_raw_text():
+def test_assess_cell_recovers_from_invalid_json_verdict_via_raw_text():
     """If JSON verdict is bogus but raw text still contains a valid verdict,
     the raw-text salvage path should succeed (no EXECUTION_ERROR).
     """
@@ -146,8 +146,8 @@ def test_assess_node_recovers_from_invalid_json_verdict_via_raw_text():
         '{"verdict": "MAYBE", "summary": "x"} '
         "Final decision: EVIDENCE_SUFFICIENT based on three primary sources."
     )
-    result = provider.assess_node(
-        node_id="test-dish-colony-001-001",
+    result = provider.assess_cell(
+        cell_id="test-dish-colony-001-001",
         claim_text="A sample claim",
         context={},
         agent_role="investigator",
@@ -155,7 +155,7 @@ def test_assess_node_recovers_from_invalid_json_verdict_via_raw_text():
     assert result.verdict == "EVIDENCE_SUFFICIENT"
 
 
-def test_assess_node_accepts_socratic_questioner_role():
+def test_assess_cell_accepts_socratic_questioner_role():
     """``socratic_questioner`` was added to defaults/petri.yaml; verify the
     config loader sees it so the Socratic phase doesn't trip the new
     "unknown agent" error.
@@ -163,8 +163,8 @@ def test_assess_node_accepts_socratic_questioner_role():
     provider = StubProvider(
         '{"verdict": "CLARIFIED", "summary": "terms defined"}'
     )
-    result = provider.assess_node(
-        node_id="test-dish-colony-001-001",
+    result = provider.assess_cell(
+        cell_id="test-dish-colony-001-001",
         claim_text="A sample claim",
         context={"phase": "socratic_clarify"},
         agent_role="socratic_questioner",
@@ -499,16 +499,16 @@ class _RaisingStubProvider(ClaudeCodeProvider):
         )
 
 
-def test_assess_node_returns_execution_error_with_stderr_on_cli_failure():
-    """When the claude subprocess fails, assess_node must surface the
+def test_assess_cell_returns_execution_error_with_stderr_on_cli_failure():
+    """When the claude subprocess fails, assess_cell must surface the
     actual stderr in the AssessmentResult.summary so users can see WHY
     (rate limit, auth, model name, etc.) instead of generic 'execution
     error'."""
     provider = _RaisingStubProvider(
         exit_code=1, stderr="Error: rate limit exceeded (HTTP 429)"
     )
-    result = provider.assess_node(
-        node_id="test-dish-colony-001-001",
+    result = provider.assess_cell(
+        cell_id="test-dish-colony-001-001",
         claim_text="A sample claim",
         context={"phase": "research"},
         agent_role="investigator",
@@ -518,13 +518,13 @@ def test_assess_node_returns_execution_error_with_stderr_on_cli_failure():
     assert "rate limit" in result.summary.lower()
 
 
-def test_assess_node_returns_execution_error_with_empty_stderr():
+def test_assess_cell_returns_execution_error_with_empty_stderr():
     """Empty stderr (which is what the user actually saw — exit 1 with
     no diagnostic) must produce a result that flags the empty case
     rather than a confusing blank summary."""
     provider = _RaisingStubProvider(exit_code=1, stderr="")
-    result = provider.assess_node(
-        node_id="test-dish-colony-001-001",
+    result = provider.assess_cell(
+        cell_id="test-dish-colony-001-001",
         claim_text="A claim",
         context={"phase": "research"},
         agent_role="investigator",

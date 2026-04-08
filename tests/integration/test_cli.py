@@ -71,13 +71,13 @@ class TestInit:
 #
 # These tests use the canonical ``seeded_petri_dir`` fixture from
 # tests/conftest.py — a real .petri/ directory laid out on disk with the
-# canonical 5-node diamond colony pre-serialized. They never call
+# canonical 5-cell diamond colony pre-serialized. They never call
 # ``petri seed`` (which now requires the real Claude Code CLI) and never
 # monkeypatch the inference provider.
 
 
 class TestCheck:
-    def test_check_shows_nodes(self, seeded_petri_dir):
+    def test_check_shows_cells(self, seeded_petri_dir):
         result = runner.invoke(app, ["check"])
         assert result.exit_code == 0, result.output
 
@@ -93,7 +93,7 @@ class TestCheck:
 
         data = json.loads(result.output)
         assert isinstance(data, list)
-        # Canonical diamond has 5 nodes
+        # Canonical diamond has 5 cells
         assert len(data) == 5
 
 
@@ -137,8 +137,8 @@ class TestFullFlow:
         r = runner.invoke(app, ["graph"])
         assert r.exit_code == 0, r.output
 
-        # Node count consistency: check should report the same number
-        # of nodes as live in the colony directory.
+        # Cell count consistency: check should report the same number
+        # of cells as live in the colony directory.
         dishes_dir = seeded_petri_dir["petri_dir"] / "petri-dishes"
         colony_dirs = [d for d in dishes_dir.iterdir() if d.is_dir()]
         assert len(colony_dirs) == 1
@@ -166,18 +166,18 @@ class TestColonyOnDiskIntegrity:
         colony_dir = seeded_petri_dir["colony_path"]
 
         metadata_files = sorted(colony_dir.rglob("metadata.json"))
-        node_dirs = [mf.parent for mf in metadata_files]
-        # Canonical diamond has 5 nodes
-        assert len(node_dirs) == 5
+        cell_dirs = [mf.parent for mf in metadata_files]
+        # Canonical diamond has 5 cells
+        assert len(cell_dirs) == 5
 
-        for node_dir in node_dirs:
-            meta_path = node_dir / "metadata.json"
-            assert meta_path.is_file(), f"Missing metadata: {node_dir.name}"
+        for cell_path in cell_dirs:
+            meta_path = cell_path / "metadata.json"
+            assert meta_path.is_file(), f"Missing metadata: {cell_path.name}"
 
             meta = json.loads(meta_path.read_text())
-            assert "id" in meta, f"metadata missing 'id' in {node_dir.name}"
+            assert "id" in meta, f"metadata missing 'id' in {cell_path.name}"
 
-        # queue.json must be present, valid JSON, and have an entry per node
+        # queue.json must be present, valid JSON, and have an entry per cell
         queue_path = petri_dir / "queue.json"
         queue = json.loads(queue_path.read_text())
         assert "entries" in queue

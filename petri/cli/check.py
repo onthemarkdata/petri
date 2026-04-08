@@ -10,10 +10,10 @@ import typer
 from petri.cli._bootstrap import find_petri_dir, get_dish_id, load_colonies
 from petri.cli_ui import print_error_and_exit
 from petri.storage.paths import (
+    cell_dir as cell_dir_for,
     colony_dir as colony_dir_for,
     events_path as events_file_path,
-    node_dir as node_dir_for,
-    parse_node_id,
+    parse_cell_id,
 )
 
 
@@ -23,8 +23,8 @@ def register(app: typer.Typer) -> None:
         colony_name: Optional[str] = typer.Option(
             None, "--colony", help="Filter to one colony"
         ),
-        node: Optional[str] = typer.Option(
-            None, "--node", help="Detailed view of a single node"
+        cell: Optional[str] = typer.Option(
+            None, "--cell", help="Detailed view of a single cell"
         ),
         json_output: bool = typer.Option(False, "--json", help="JSON output"),
     ) -> None:
@@ -50,41 +50,41 @@ def register(app: typer.Typer) -> None:
         queue = load_queue(queue_path)
         queue_entries = queue.get("entries", {})
 
-        # Detailed node view
-        if node:
+        # Detailed cell view
+        if cell:
             found = False
             for graph, col in colonies:
                 try:
-                    node_obj = graph.get_node(node)
+                    cell_obj = graph.get_cell(cell)
                 except KeyError:
                     continue
                 found = True
-                queue_entry = queue_entries.get(node, {})
+                queue_entry = queue_entries.get(cell, {})
 
                 if json_output:
                     detail = {
-                        "node_id": node_obj.id,
-                        "colony_id": node_obj.colony_id,
-                        "claim_text": node_obj.claim_text,
-                        "level": node_obj.level,
-                        "status": node_obj.status.value,
-                        "dependencies": node_obj.dependencies,
-                        "dependents": node_obj.dependents,
+                        "cell_id": cell_obj.id,
+                        "colony_id": cell_obj.colony_id,
+                        "claim_text": cell_obj.claim_text,
+                        "level": cell_obj.level,
+                        "status": cell_obj.status.value,
+                        "dependencies": cell_obj.dependencies,
+                        "dependents": cell_obj.dependents,
                         "queue_state": queue_entry.get("queue_state", ""),
                         "iteration": queue_entry.get("iteration", 0),
                     }
                     typer.echo(json.dumps(detail, indent=2))
                 else:
-                    typer.echo(f"Node: {node_obj.id}")
-                    typer.echo(f"  Colony:       {node_obj.colony_id}")
-                    typer.echo(f"  Claim:        {node_obj.claim_text}")
-                    typer.echo(f"  Level:        {node_obj.level}")
-                    typer.echo(f"  Status:       {node_obj.status.value}")
+                    typer.echo(f"Cell: {cell_obj.id}")
+                    typer.echo(f"  Colony:       {cell_obj.colony_id}")
+                    typer.echo(f"  Claim:        {cell_obj.claim_text}")
+                    typer.echo(f"  Level:        {cell_obj.level}")
+                    typer.echo(f"  Status:       {cell_obj.status.value}")
                     typer.echo(
-                        f"  Dependencies: {', '.join(node_obj.dependencies) or '(none)'}"
+                        f"  Dependencies: {', '.join(cell_obj.dependencies) or '(none)'}"
                     )
                     typer.echo(
-                        f"  Dependents:   {', '.join(node_obj.dependents) or '(none)'}"
+                        f"  Dependents:   {', '.join(cell_obj.dependents) or '(none)'}"
                     )
                     if queue_entry:
                         typer.echo(
@@ -97,18 +97,18 @@ def register(app: typer.Typer) -> None:
                     # Show events
                     from petri.storage.event_log import load_events
 
-                    colony_base = colony_dir_for(petri_dir, dish_id, node_obj.colony_id)
+                    colony_base = colony_dir_for(petri_dir, dish_id, cell_obj.colony_id)
                     # Look up path from colony.json first, fall back to the
-                    # zero-padded convention based on the parsed node ID.
-                    node_rel = col.node_paths.get(node_obj.id)
-                    if node_rel:
-                        node_events_path = colony_base / node_rel / "events.jsonl"
+                    # zero-padded convention based on the parsed cell ID.
+                    cell_rel = col.cell_paths.get(cell_obj.id)
+                    if cell_rel:
+                        cell_events_path = colony_base / cell_rel / "events.jsonl"
                     else:
-                        _, _, level_int, seq_int = parse_node_id(node_obj.id)
-                        node_events_path = events_file_path(
-                            node_dir_for(colony_base, level_int, seq_int)
+                        _, _, level_int, seq_int = parse_cell_id(cell_obj.id)
+                        cell_events_path = events_file_path(
+                            cell_dir_for(colony_base, level_int, seq_int)
                         )
-                    events = load_events(node_events_path)
+                    events = load_events(cell_events_path)
                     if events:
                         typer.echo(f"  Events:       {len(events)}")
                         for evt in events[-5:]:
@@ -120,21 +120,21 @@ def register(app: typer.Typer) -> None:
                 break
 
             if not found:
-                print_error_and_exit(f"Node '{node}' not found.", code=0)
+                print_error_and_exit(f"Cell '{cell}' not found.", code=0)
             return
 
         # Table output
         all_data: list[dict] = []
         for graph, col in colonies:
-            for node_obj in graph.get_nodes():
-                queue_entry = queue_entries.get(node_obj.id, {})
+            for cell_obj in graph.get_all_cells():
+                queue_entry = queue_entries.get(cell_obj.id, {})
                 all_data.append(
                     {
                         "colony": col.id,
-                        "level": node_obj.level,
-                        "node_id": node_obj.id,
-                        "claim": node_obj.claim_text,
-                        "status": node_obj.status.value,
+                        "level": cell_obj.level,
+                        "cell_id": cell_obj.id,
+                        "claim": cell_obj.claim_text,
+                        "status": cell_obj.status.value,
                         "queue_state": queue_entry.get("queue_state", ""),
                     }
                 )
@@ -150,11 +150,11 @@ def register(app: typer.Typer) -> None:
 
         for level in sorted(levels.keys()):
             typer.echo(f"\nLevel {level}:")
-            typer.echo(f"  {'Node ID':<40} {'Status':<16} {'Queue State':<16}")
+            typer.echo(f"  {'Cell ID':<40} {'Status':<16} {'Queue State':<16}")
             typer.echo(f"  {'-' * 40} {'-' * 16} {'-' * 16}")
             for item in levels[level]:
                 typer.echo(
-                    f"  {item['node_id']:<40} {item['status']:<16} "
+                    f"  {item['cell_id']:<40} {item['status']:<16} "
                     f"{item['queue_state'] or '-':<16}"
                 )
         typer.echo("")

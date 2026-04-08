@@ -4,12 +4,12 @@ Petri is a colony-based research orchestration framework. It decomposes claims i
 
 ## Colony DAG
 
-A **colony** is a DAG of **nodes**, each representing a sub-claim derived from a root claim. Nodes are identified by composite keys: `{dish}-{colony}-{level}-{seq}`.
+A **colony** is a DAG of **cells**, each representing a sub-claim derived from a root claim. The hierarchy is **petri dish → colony(s) → cell(s)**. Cells are identified by composite keys: `{dish}-{colony}-{level}-{seq}`.
 
 - **Level 0** is the center (root claim)
 - Levels increase outward as claims decompose into more fundamental sub-claims
-- **Cell nodes** (leaves with no dependencies) are validated first
-- Parent nodes unlock for validation only after all their dependencies pass
+- **Leaf cells** (with no dependencies) are validated first
+- Parent cells unlock for validation only after all their dependencies pass
 
 Cycle detection (Kahn's algorithm) ensures the graph remains a valid DAG. Cross-colony edges are supported for shared dependencies.
 
@@ -22,7 +22,7 @@ Petri uses 13 agents organized into leads and specialists:
 | Agent | Role |
 |-------|------|
 | `decomposition_lead` | Manages claim decomposition into DAG |
-| `node_lead` | Orchestrates node through validation phases |
+| `cell_lead` | Orchestrates cell through validation phases |
 | `red_team_lead` | Leads adversarial disproval attempt |
 
 ### Specialists
@@ -40,11 +40,11 @@ Petri uses 13 agents organized into leads and specialists:
 | `impact_assessor` | Critique | No | CRITICAL_PATH, SUPPORTING_NOT_BLOCKING, ISOLATED_LOW_IMPACT | -- |
 | `evidence_evaluator` | Evaluation | No | EVIDENCE_CONFIRMS, EVIDENCE_REFUTES, EVIDENCE_INCONCLUSIVE | -- |
 
-**6 blocking agents** must all pass for convergence. The `triage` agent is conditionally blocking -- a LOW_VALUE_DEFER verdict short-circuits the node to deferred status. Advisory agents (`simplifier`, `impact_assessor`) inform but do not gate.
+**6 blocking agents** must all pass for convergence. The `triage` agent is conditionally blocking -- a LOW_VALUE_DEFER verdict short-circuits the cell to deferred status. Advisory agents (`simplifier`, `impact_assessor`) inform but do not gate.
 
 ## Pipeline Flow
 
-Each node passes through six phases:
+Each cell passes through six phases:
 
 ```
 1. Socratic Questioning
@@ -61,18 +61,18 @@ Each node passes through six phases:
    Fail → iterate with weakest-link feedback (max 3 iterations)
 
 5. Red Team
-   Dedicated adversarial phase builds strongest case against the node
+   Dedicated adversarial phase builds strongest case against the cell
 
 6. Evidence Evaluation
    Final verdict: VALIDATED, DISPROVEN, or DEFER
    Terminal verdicts require Level 1-4 sources
 ```
 
-Within each phase, agents run concurrently (ThreadPoolExecutor, default 4 workers). Phases execute sequentially per node.
+Within each phase, agents run concurrently (ThreadPoolExecutor, default 4 workers). Phases execute sequentially per cell.
 
 ## State Machine
 
-Nodes move through 14 queue states. The `mediating` state is the convergence decision point -- it either advances to red team, iterates back to research with feedback, or triggers the circuit breaker.
+Cells move through 14 queue states. The `mediating` state is the convergence decision point -- it either advances to red team, iterates back to research with feedback, or triggers the circuit breaker.
 
 ```mermaid
 graph TD
@@ -149,7 +149,7 @@ After critique, four structured debates sharpen the analysis:
 |---------|--------|---------|
 | skeptic vs champion | 1.5 | Adversarial challenge -- can the claim survive its strongest critic? |
 | skeptic vs pragmatist | 1.0 | Practical relevance -- does the critique matter in practice? |
-| simplifier vs impact_assessor | 1.0 | Scope safety -- is simplification safe given the node's impact? |
+| simplifier vs impact_assessor | 1.0 | Scope safety -- is simplification safe given the cell's impact? |
 | triage vs impact_assessor | 1.0 | Effort alignment -- is the effort justified by criticality? |
 
 A 1.5-round debate: Agent A opens, Agent B responds, Agent A rebuts. A 1.0-round debate omits the rebuttal.
@@ -167,11 +167,11 @@ Convergence is a mechanical check (no LLM involvement):
 
 ## Event Sourcing
 
-Every action is recorded as an immutable event in per-node JSONL files (`.petri/petri-dishes/{colony}/{node}/events.jsonl`).
+Every action is recorded as an immutable event in per-cell JSONL files (`.petri/petri-dishes/{colony}/{cell}/events.jsonl`).
 
-**11 event types:** search_executed, source_reviewed, freshness_checked, verdict_issued, evidence_appended, debate_mediated, convergence_checked, node_reopened, propagation_triggered, decomposition_created, decomposition_audit
+**11 event types:** search_executed, source_reviewed, freshness_checked, verdict_issued, evidence_appended, debate_mediated, convergence_checked, cell_reopened, propagation_triggered, decomposition_created, decomposition_audit
 
-Events are identified by `{node_key}-{8hex}` and timestamped in UTC. The event log is the source of truth -- the queue and metadata files are derived state.
+Events are identified by `{cell_key}-{8hex}` and timestamped in UTC. The event log is the source of truth -- the queue and metadata files are derived state.
 
 ## Citation-First Evidence Model
 
@@ -201,13 +201,13 @@ Evidence is ranked by a six-level credibility hierarchy:
 | 5 | Single Expert Opinion |
 | 6 | Community Report |
 
-Terminal verdicts (VALIDATED, DISPROVEN) require at least one source at Level 4 or higher. Nodes with only Level 5-6 evidence cannot reach terminal status.
+Terminal verdicts (VALIDATED, DISPROVEN) require at least one source at Level 4 or higher. Cells with only Level 5-6 evidence cannot reach terminal status.
 
 ## Storage
 
 Petri uses a two-store separation:
 
-- **Event logs** (JSONL, append-only) -- immutable audit trail per node
+- **Event logs** (JSONL, append-only) -- immutable audit trail per cell
 - **Queue** (JSON, file-locked with `fcntl`) -- mutable state machine, atomic transitions
 - **SQLite** (disposable) -- dashboard index, rebuilt from event logs on demand
 
@@ -217,7 +217,7 @@ No data is duplicated between event logs and queue. The event log is authoritati
 
 When new evidence arrives (`petri feed`):
 
-1. Affected nodes are **re-opened** (status reset to NEW, preserving all prior evidence)
+1. Affected cells are **re-opened** (status reset to NEW, preserving all prior evidence)
 2. Dependents are **flagged** via BFS upward through the DAG
 3. Flagged dependents are not automatically re-opened (conservative approach -- requires explicit re-queueing)
-4. `node_reopened` and `propagation_triggered` events are logged for audit
+4. `cell_reopened` and `propagation_triggered` events are logged for audit

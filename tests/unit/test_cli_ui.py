@@ -197,34 +197,37 @@ class TestPrintErrorAndExit:
 # ── render_text_tree / render_dot fixtures ──────────────────────────────
 
 
-class _FakeNode:
-    def __init__(self, node_id: str, level: int, claim_text: str) -> None:
-        self.id = node_id
+class _FakeCell:
+    def __init__(self, cell_id: str, level: int, claim_text: str) -> None:
+        self.id = cell_id
         self.level = level
         self.claim_text = claim_text
 
 
 class _FakeEdge:
-    def __init__(self, from_node: str, to_node: str, edge_type: str = "intra_colony") -> None:
-        self.from_node = from_node
-        self.to_node = to_node
+    def __init__(self, from_cell: str, to_cell: str, edge_type: str = "intra_colony") -> None:
+        self.from_cell = from_cell
+        self.to_cell = to_cell
         self.edge_type = edge_type
 
 
 class _FakeGraph:
-    def __init__(self, nodes: list[_FakeNode], edges: list[_FakeEdge], deps: dict[str, list[str]] | None = None) -> None:
-        self._nodes = nodes
+    def __init__(self, cells: list[_FakeCell], edges: list[_FakeEdge], deps: dict[str, list[str]] | None = None) -> None:
+        self._cells = cells
         self._edges = edges
         self._deps = deps or {}
 
-    def get_nodes(self) -> list[_FakeNode]:
-        return list(self._nodes)
+    def get_cells(self) -> list[_FakeCell]:
+        return list(self._cells)
+
+    def get_all_cells(self) -> list[_FakeCell]:
+        return list(self._cells)
 
     def get_edges(self) -> list[_FakeEdge]:
         return list(self._edges)
 
-    def get_dependencies(self, node_id: str) -> list[str]:
-        return list(self._deps.get(node_id, []))
+    def get_dependencies(self, cell_id: str) -> list[str]:
+        return list(self._deps.get(cell_id, []))
 
 
 class _FakeColony:
@@ -238,10 +241,10 @@ class _FakeColony:
 
 class TestRenderTextTree:
     def test_outputs_levels_in_order(self, capsys):
-        root_node = _FakeNode("dish-col-0-0", level=0, claim_text="root claim")
-        child_node = _FakeNode("dish-col-1-0", level=1, claim_text="child claim")
+        root_cell = _FakeCell("dish-col-0-0", level=0, claim_text="root claim")
+        child_cell = _FakeCell("dish-col-1-0", level=1, claim_text="child claim")
         graph = _FakeGraph(
-            nodes=[root_node, child_node],
+            cells=[root_cell, child_cell],
             edges=[],
             deps={"dish-col-1-0": ["dish-col-0-0"]},
         )
@@ -266,7 +269,7 @@ class TestRenderTextTree:
         assert "-> [dish-col-0-0]" in output
 
     def test_empty_graph_emits_empty_marker(self, capsys):
-        graph = _FakeGraph(nodes=[], edges=[])
+        graph = _FakeGraph(cells=[], edges=[])
         colony = _FakeColony("dish-empty", "nothing here")
         render_text_tree(graph, colony)
         captured = capsys.readouterr()
@@ -278,10 +281,10 @@ class TestRenderTextTree:
 
 class TestRenderDot:
     def test_outputs_valid_dot_syntax(self, capsys):
-        first_node = _FakeNode("dish-col-0-0", level=0, claim_text="first")
-        second_node = _FakeNode("dish-col-1-0", level=1, claim_text="second")
+        first_cell = _FakeCell("dish-col-0-0", level=0, claim_text="first")
+        second_cell = _FakeCell("dish-col-1-0", level=1, claim_text="second")
         edge = _FakeEdge("dish-col-0-0", "dish-col-1-0")
-        graph = _FakeGraph(nodes=[first_node, second_node], edges=[edge])
+        graph = _FakeGraph(cells=[first_cell, second_cell], edges=[edge])
         colony = _FakeColony("dish-col", "root claim")
 
         render_dot(graph, colony)
@@ -294,10 +297,10 @@ class TestRenderDot:
         assert '"dish-col-0-0" -> "dish-col-1-0"' in output
 
     def test_cross_colony_edge_is_dashed_blue(self, capsys):
-        first_node = _FakeNode("dish-a-0-0", level=0, claim_text="a")
-        second_node = _FakeNode("dish-b-0-0", level=0, claim_text="b")
+        first_cell = _FakeCell("dish-a-0-0", level=0, claim_text="a")
+        second_cell = _FakeCell("dish-b-0-0", level=0, claim_text="b")
         edge = _FakeEdge("dish-a-0-0", "dish-b-0-0", edge_type="cross_colony")
-        graph = _FakeGraph(nodes=[first_node, second_node], edges=[edge])
+        graph = _FakeGraph(cells=[first_cell, second_cell], edges=[edge])
         colony = _FakeColony("dish-a", "claim")
 
         render_dot(graph, colony)
@@ -307,8 +310,8 @@ class TestRenderDot:
 
     def test_long_label_is_truncated(self, capsys):
         long_text = "x" * 80
-        node = _FakeNode("dish-col-0-0", level=0, claim_text=long_text)
-        graph = _FakeGraph(nodes=[node], edges=[])
+        cell = _FakeCell("dish-col-0-0", level=0, claim_text=long_text)
+        graph = _FakeGraph(cells=[cell], edges=[])
         colony = _FakeColony("dish-col", "claim")
         render_dot(graph, colony)
         captured = capsys.readouterr()
@@ -518,7 +521,7 @@ class TestGrowStatusLoop:
         long_summary = "The claim rests on at least seven hidden assumptions, " * 30
         event = {
             "type": "verdict_issued",
-            "node_id": "petri-ai-considered-commodity-12-001-002",
+            "cell_id": "petri-ai-considered-commodity-12-001-002",
             "agent": "socratic_challenge_assumptions",
             "data": {
                 "verdict": "ASSUMPTIONS_CHALLENGED",
@@ -526,7 +529,7 @@ class TestGrowStatusLoop:
             },
         }
         line = _format_status_event(event)
-        # Compact node id (last two segments only).
+        # Compact cell id (last two segments only).
         assert "001-002" in line
         assert "petri-ai-considered" not in line
         # Verdict surfaced.
@@ -534,16 +537,16 @@ class TestGrowStatusLoop:
         # Summary truncated with ellipsis.
         assert "…" in line
         # Whole line is reasonable for one terminal row (~250 char ceiling
-        # to give some headroom for prefix + verdict + node id).
+        # to give some headroom for prefix + verdict + cell id).
         assert len(line) < 250
 
-    def test_format_status_event_short_node_id_handles_simple_ids(self):
-        from petri.cli_ui import short_node_id
+    def test_format_status_event_short_cell_id_handles_simple_ids(self):
+        from petri.cli_ui import short_cell_id
 
-        assert short_node_id("dish-colony-001-002") == "001-002"
-        assert short_node_id("petri-ai-considered-12-003-004") == "003-004"
+        assert short_cell_id("dish-colony-001-002") == "001-002"
+        assert short_cell_id("petri-ai-considered-12-003-004") == "003-004"
         # Short input falls through unchanged.
-        assert short_node_id("foo") == "foo"
+        assert short_cell_id("foo") == "foo"
 
 
 # ── MultiSpinner ─────────────────────────────────────────────────────────
@@ -565,11 +568,11 @@ class TestMultiSpinner:
         with MultiSpinner(
             "growing", slot_count=4, stream=buf, force_plain=True
         ) as multi:
-            multi.update_slot(0, "node-001-002 socratic")
-            multi.update_slot(1, "node-001-003 research")
+            multi.update_slot(0, "cell-001-002 socratic")
+            multi.update_slot(1, "cell-001-003 research")
         output = buf.getvalue()
-        assert "[slot 0] node-001-002 socratic" in output
-        assert "[slot 1] node-001-003 research" in output
+        assert "[cell lead a] cell-001-002 socratic" in output
+        assert "[cell lead b] cell-001-003 research" in output
 
     def test_update_slot_silently_ignores_invalid_index(self):
         buf = io.StringIO()

@@ -686,8 +686,8 @@ class ClaudeCodeProvider:
             return parsed["sub_premises"]
         return []
 
-    def assess_node(
-        self, node_id: str, claim_text: str, context: dict, agent_role: str
+    def assess_cell(
+        self, cell_id: str, claim_text: str, context: dict, agent_role: str
     ) -> "AssessmentResult":
         from petri.config import get_agent_verdicts, get_agent_instruction
         from petri.models import AssessmentResult, SourceCitation
@@ -726,7 +726,7 @@ class ClaudeCodeProvider:
         prompt = (
             f"You are the {agent_role} agent in a research validation pipeline.\n\n"
             f"{role_instruction}\n\n"
-            f"Node: {node_id}\n"
+            f"Cell: {cell_id}\n"
             f"Claim: \"{claim_text}\"\n"
             f"Context: {context_str}\n"
             f"{evidence_section}\n"

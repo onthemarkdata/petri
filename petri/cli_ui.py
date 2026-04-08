@@ -37,7 +37,7 @@ class Spinner:
     The live spinner content itself comes from ``update()`` and is meant
     to be the model's streaming output.
 
-    Permanent lines (e.g. each new node's claim text) can be written via
+    Permanent lines (e.g. each new cell's claim text) can be written via
     ``print_line(text)`` — they appear as ``  • <text>`` above the live
     spinner without disrupting the animation.
 
@@ -154,9 +154,22 @@ class Spinner:
 # ── multi-row spinner ────────────────────────────────────────────────────
 
 
-# Prefix length reserved for ``"  ⠋ slot N  "`` before the slot text starts.
-# Used to compute how much of each row text is visible on narrow terminals.
-_MULTI_SLOT_PREFIX_WIDTH = 14
+# Prefix length reserved for ``"  ⠋ cell lead a  "`` before the slot text
+# starts. Used to compute how much of each row text is visible on narrow
+# terminals. ``"  ⠋ cell lead a  "`` is ~20 chars; 22 gives a little headroom.
+_MULTI_CELL_LEAD_PREFIX_WIDTH = 22
+
+
+def _cell_lead_label(slot_index: int) -> str:
+    """Return the user-visible cell-lead identifier for a slot.
+
+    Slots 0..25 map to letters ``a``..``z``. Anything beyond 25 falls
+    back to the numeric index — concurrency settings above 26 are
+    exceptional and deserve an ugly-but-unambiguous label.
+    """
+    if 0 <= slot_index < 26:
+        return chr(ord("a") + slot_index)
+    return str(slot_index)
 
 
 class MultiSpinner:
@@ -174,7 +187,7 @@ class MultiSpinner:
     below the row block between frames.
 
     Plain mode: each :meth:`update_slot` call writes a single
-    ``[slot N] <text>`` line; no animation thread is spawned.
+    ``[cell lead {letter}] <text>`` line; no animation thread is spawned.
 
     ``MultiSpinner`` and the single-line :class:`Spinner` are
     intentionally independent classes — the seed wizard relies on
@@ -219,7 +232,7 @@ class MultiSpinner:
             with self._lock:
                 self._slot_texts[slot_idx] = flat
             return
-        self._stream.write(f"[slot {slot_idx}] {flat}\n")
+        self._stream.write(f"[cell lead {_cell_lead_label(slot_idx)}] {flat}\n")
         try:
             self._stream.flush()
         except (ValueError, OSError):
@@ -324,14 +337,15 @@ class MultiSpinner:
         """Render one slot row including the trailing newline.
 
         Truncates with an ellipsis to fit the cached terminal width,
-        leaving room for the ``"  ⠋ slot N  "`` prefix.
+        leaving room for the ``"  ⠋ cell lead a  "`` prefix.
         """
         raw_text = self._slot_texts[slot_idx] if slot_idx < len(self._slot_texts) else ""
-        budget = max(10, self._terminal_width_cached - _MULTI_SLOT_PREFIX_WIDTH)
+        budget = max(10, self._terminal_width_cached - _MULTI_CELL_LEAD_PREFIX_WIDTH)
         visible_text = raw_text
         if len(visible_text) > budget:
             visible_text = visible_text[: budget - 1] + "…"
-        return f"  {frame_char} slot {slot_idx}  {visible_text}\n"
+        cell_lead_letter = _cell_lead_label(slot_idx)
+        return f"  {frame_char} cell lead {cell_lead_letter}  {visible_text}\n"
 
     def _animate(self) -> None:
         while True:
@@ -381,18 +395,18 @@ def render_text_tree(graph, colony) -> None:
     typer.echo(f"Center: {colony.center_claim}")
     typer.echo("")
 
-    nodes = graph.get_nodes()
-    if not nodes:
+    cells = graph.get_all_cells()
+    if not cells:
         typer.echo("  (empty)")
         return
 
-    for node in nodes:
-        indent = "  " * (node.level + 1)
-        deps = graph.get_dependencies(node.id)
+    for cell in cells:
+        indent = "  " * (cell.level + 1)
+        deps = graph.get_dependencies(cell.id)
         dep_arrow = ""
         if deps:
             dep_arrow = f" -> [{', '.join(deps)}]"
-        typer.echo(f"{indent}[L{node.level}] {node.id}: {node.claim_text}{dep_arrow}")
+        typer.echo(f"{indent}[L{cell.level}] {cell.id}: {cell.claim_text}{dep_arrow}")
 
     typer.echo("")
 
@@ -404,11 +418,11 @@ def render_dot(graph, colony) -> None:
     typer.echo(f'  label="{colony.center_claim}";')
     typer.echo("")
 
-    for node in graph.get_nodes():
-        label = node.claim_text.replace('"', '\\"')
+    for cell in graph.get_all_cells():
+        label = cell.claim_text.replace('"', '\\"')
         if len(label) > 50:
             label = label[:47] + "..."
-        typer.echo(f'  "{node.id}" [label="{label}\\nL{node.level}"];')
+        typer.echo(f'  "{cell.id}" [label="{label}\\nL{cell.level}"];')
 
     typer.echo("")
 
@@ -416,7 +430,7 @@ def render_dot(graph, colony) -> None:
         style = ""
         if edge.edge_type == "cross_colony":
             style = ' [style=dashed, color=blue]'
-        typer.echo(f'  "{edge.from_node}" -> "{edge.to_node}"{style};')
+        typer.echo(f'  "{edge.from_cell}" -> "{edge.to_cell}"{style};')
 
     typer.echo("}")
 
@@ -440,7 +454,7 @@ def grow_status_loop(
     * print a single ``status: <state_summary>`` line above the spinner
       via ``spinner.print_line``
 
-    Per-node lifecycle activity is already rendered in real time on the
+    Per-cell lifecycle activity is already rendered in real time on the
     :class:`MultiSpinner` per-slot rows, so this loop no longer walks
     event logs for recent verdicts. Shuts down promptly when
     ``stop_event`` is set.
@@ -474,15 +488,15 @@ def grow_status_loop(
 _STATUS_SUMMARY_MAX_CHARS = 100
 
 
-def short_node_id(node_id: str) -> str:
-    """Return the trailing ``level-seq`` portion of a composite node id.
+def short_cell_id(cell_id: str) -> str:
+    """Return the trailing ``level-seq`` portion of a composite cell id.
 
     ``"petri-ai-considered-commodity-12-001-002"`` -> ``"001-002"``.
     Falls back to the original string if it has fewer than 2 hyphens.
     """
-    parts = node_id.rsplit("-", 2)
+    parts = cell_id.rsplit("-", 2)
     if len(parts) < 3:
-        return node_id
+        return cell_id
     return f"{parts[-2]}-{parts[-1]}"
 
 
@@ -496,20 +510,20 @@ def _truncate_summary(summary_text: str, max_chars: int = _STATUS_SUMMARY_MAX_CH
 
 def _format_status_event(event: dict) -> str:
     """Render a verdict_issued or convergence_checked event as a one-line
-    status entry: ``<short_node> <agent>: <verdict> — <truncated summary>``.
+    status entry: ``<short_cell> <agent>: <verdict> — <truncated summary>``.
 
     Drops the redundant event_type prefix and dish/colony portion of the
-    node id since both are obvious from context. Truncates the summary so
+    cell id since both are obvious from context. Truncates the summary so
     one event fits on one terminal line — the full text lives in
     evidence.md.
     """
-    node_id = short_node_id(event.get("node_id", ""))
+    cell_id = short_cell_id(event.get("cell_id", ""))
     agent = event.get("agent", "")
     data = event.get("data", {}) or {}
     verdict = data.get("verdict") or data.get("status") or ""
     summary_text = data.get("summary", "")
 
-    head = f"{node_id} {agent}: {verdict}".strip()
+    head = f"{cell_id} {agent}: {verdict}".strip()
     if summary_text:
         return f"{head} — {_truncate_summary(summary_text)}"
     return head

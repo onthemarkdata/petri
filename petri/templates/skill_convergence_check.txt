@@ -1,10 +1,10 @@
 ---
-description: "Check convergence status for a node"
+description: "Check convergence status for a cell"
 ---
 
 # Convergence Check
 
-Determine whether all blocking agents have passed for a given node and iteration.
+Determine whether all blocking agents have passed for a given cell and iteration.
 
 ## Usage
 

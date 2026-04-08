@@ -8,7 +8,7 @@ description: "Data model rules — composite keys, event types, verdict vocabula
 
 - Dish: `{dish}`
 - Colony: `{dish}-{colony}`
-- Node: `{dish}-{colony}-{level}-{seq}` (level/seq are 3-digit zero-padded)
+- Cell: `{dish}-{colony}-{level}-{seq}` (level/seq are 3-digit zero-padded)
 - Event: `{dish}-{colony}-{level}-{seq}-{8hex}`
 
 ## Event Types

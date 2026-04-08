@@ -34,10 +34,12 @@ _SKILL_NAMES = [
     "event_log_read",
     "queue_update",
     "convergence_check",
-    "read_node",
+    "read_cell",
 ]
 
-# Commands to generate
+# Commands to generate. Note: "analyze" is the historical name of the
+# combined analyze command, preserved here because the adapter generates
+# command skeletons that may still predate the CLI split.
 _COMMAND_NAMES = ["seed", "grow", "check", "feed", "analyze", "stop"]
 
 
