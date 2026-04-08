@@ -12,8 +12,10 @@ import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 from petri.analysis.convergence import (
@@ -47,6 +49,30 @@ from petri.storage.queue import (
 from petri.analysis.validators import validate_terminal_sources
 
 logger = logging.getLogger(__name__)
+
+
+# ── Lifecycle Callback Types ────────────────────────────────────────────
+
+
+@dataclass
+class NodeProgressEvent:
+    """Lifecycle event fired by process_node at every state transition.
+
+    Consumed by the CLI's MultiSpinner to update per-slot rows in real time.
+    The engine itself never reads these events — they're a write-only signal.
+    """
+    slot_idx: int               # which worker slot owns this node (-1 if unassigned)
+    node_id: str
+    kind: str                   # "started" | "phase" | "agent" | "verdict" | "finished"
+    phase: str | None = None    # set when kind in {"phase", "agent", "verdict"}
+    agent: str | None = None    # set when kind in {"agent", "verdict"}
+    verdict: str | None = None  # set when kind == "verdict"
+    iteration: int | None = None
+    error: str | None = None    # set when kind == "finished" with failure
+
+
+NodeProgressCallback = Callable[[NodeProgressEvent], None]
+
 
 # ── Graceful Stop ────────────────────────────────────────────────────────
 
@@ -583,6 +609,7 @@ def _run_socratic_phase(
     dish_id: str,
     iteration: int,
     provider: InferenceProvider,
+    fire: Callable[..., None] | None = None,
 ) -> None:
     """Phase 0: Socratic questioning — clarify, challenge assumptions, identify evidence needed.
 
@@ -620,9 +647,20 @@ def _run_socratic_phase(
             "phase": f"socratic_{step_name}",
             "focused_directive": prompt_text,
         }
+        step_agent_name = f"socratic_{step_name}"
+        if fire is not None:
+            fire("agent", phase="socratic", agent=step_agent_name, iteration=iteration)
         result = provider.assess_node(
             node_id, claim_text, context, "socratic_questioner"
         )
+        if fire is not None:
+            fire(
+                "verdict",
+                phase="socratic",
+                agent=step_agent_name,
+                verdict=str(_get(result, "verdict", "")),
+                iteration=iteration,
+            )
 
         # Log as verdict_issued
         append_event(
@@ -667,10 +705,25 @@ def _run_socratic_phase(
             "to exactly \"VERIFIED\"."
         ),
     }
+    if fire is not None:
+        fire(
+            "agent",
+            phase="socratic",
+            agent="socratic_verifier",
+            iteration=iteration,
+        )
     verification = provider.assess_node(
         node_id, claim_text, verification_context, "socratic_questioner"
     )
     verification_verdict = _get(verification, "verdict", "VERIFIED")
+    if fire is not None:
+        fire(
+            "verdict",
+            phase="socratic",
+            agent="socratic_verifier",
+            verdict=str(verification_verdict),
+            iteration=iteration,
+        )
 
     append_event(
         events_path=events_file,
@@ -771,6 +824,7 @@ def _run_phase1(
     provider: InferenceProvider,
     agent_roles: dict,
     queue_entry: dict,
+    fire: Callable[..., None] | None = None,
 ) -> list[dict]:
     """Phase 1: Research -- agents assigned to the research phase in config."""
     from petri.config import get_research_agents
@@ -789,9 +843,24 @@ def _run_phase1(
     }
 
     for agent_name in phase1_agents:
+        if fire is not None:
+            fire(
+                "agent",
+                phase="research",
+                agent=agent_name,
+                iteration=iteration,
+            )
         result = provider.assess_node(
             node_id, claim_text, context, agent_name
         )
+        if fire is not None:
+            fire(
+                "verdict",
+                phase="research",
+                agent=agent_name,
+                verdict=str(_get(result, "verdict", "")),
+                iteration=iteration,
+            )
 
         # Log verdict_issued event
         append_event(
@@ -824,6 +893,7 @@ def _run_phase2(
     agent_roles: dict,
     debate_pairings: list | None,
     queue_entry: dict,
+    fire: Callable[..., None] | None = None,
 ) -> list[dict]:
     """Phase 2: Critique -- agents assigned to the critique phase in config."""
     from petri.config import get_critique_agents
@@ -843,9 +913,24 @@ def _run_phase2(
     }
 
     for agent_name in phase2_agents:
+        if fire is not None:
+            fire(
+                "agent",
+                phase="critique",
+                agent=agent_name,
+                iteration=iteration,
+            )
         result = provider.assess_node(
             node_id, claim_text, context, agent_name
         )
+        if fire is not None:
+            fire(
+                "verdict",
+                phase="critique",
+                agent=agent_name,
+                verdict=str(_get(result, "verdict", "")),
+                iteration=iteration,
+            )
 
         # Log verdict_issued event
         append_event(
@@ -901,6 +986,7 @@ def _run_convergence(
     provider: InferenceProvider,
     agent_roles: dict,
     queue_entry: dict,
+    fire: Callable[..., None] | None = None,
 ) -> ConvergenceOutcome:
     """Convergence check -- determines converged, iterate, or stalled."""
     events_file = _events_path(petri_dir, node_id, dish_id)
@@ -999,6 +1085,7 @@ def _run_red_team(
     iteration: int,
     provider: InferenceProvider,
     agent_roles: dict,
+    fire: Callable[..., None] | None = None,
 ) -> dict:
     """Red Team phase -- red_team_lead attempts disproval."""
     events_file = _events_path(petri_dir, node_id, dish_id)
@@ -1007,7 +1094,22 @@ def _run_red_team(
     update_state(queue_file, node_id, QueueState.red_team_active.value)
 
     context = {"iteration": iteration, "phase": "red_team"}
+    if fire is not None:
+        fire(
+            "agent",
+            phase="red_team",
+            agent="red_team_lead",
+            iteration=iteration,
+        )
     result = provider.assess_node(node_id, claim_text, context, "red_team_lead")
+    if fire is not None:
+        fire(
+            "verdict",
+            phase="red_team",
+            agent="red_team_lead",
+            verdict=str(_get(result, "verdict", "")),
+            iteration=iteration,
+        )
 
     append_event(
         events_path=events_file,
@@ -1035,6 +1137,7 @@ def _run_evaluation(
     iteration: int,
     provider: InferenceProvider,
     agent_roles: dict,
+    fire: Callable[..., None] | None = None,
 ) -> EvaluationResult:
     """Evidence Evaluation -- final verdict based on source hierarchy."""
     events_file = _events_path(petri_dir, node_id, dish_id)
@@ -1048,9 +1151,24 @@ def _run_evaluation(
         "phase": "evaluation",
         "source_validation": source_validation,
     }
+    if fire is not None:
+        fire(
+            "agent",
+            phase="evaluating",
+            agent="evidence_evaluator",
+            iteration=iteration,
+        )
     result = provider.assess_node(
         node_id, claim_text, context, "evidence_evaluator"
     )
+    if fire is not None:
+        fire(
+            "verdict",
+            phase="evaluating",
+            agent="evidence_evaluator",
+            verdict=str(_get(result, "verdict", "")),
+            iteration=iteration,
+        )
 
     append_event(
         events_path=events_file,
@@ -1092,6 +1210,8 @@ def process_node(
     provider: InferenceProvider,
     agent_roles: dict | None = None,
     debate_pairings: list | None = None,
+    slot_idx: int | None = None,
+    on_event: NodeProgressCallback | None = None,
 ) -> ProcessNodeResult:
     """Process a single node through the validation pipeline.
 
@@ -1105,6 +1225,29 @@ def process_node(
     dish_id = _get_dish_id(petri_dir)
     queue_file = _queue_path(petri_dir)
     events_file = _events_path(petri_dir, node_id, dish_id)
+
+    # Resolve slot index used in emitted lifecycle events.  ``-1`` means the
+    # caller did not participate in slot pooling (e.g. a direct
+    # ``process_node`` call from a unit test).
+    resolved_slot_idx = slot_idx if slot_idx is not None else -1
+
+    def fire(kind: str, **fields: object) -> None:
+        """Emit a lifecycle event.  UI callbacks MUST NOT break the engine."""
+        if on_event is None:
+            return
+        try:
+            on_event(
+                NodeProgressEvent(
+                    slot_idx=resolved_slot_idx,
+                    node_id=node_id,
+                    kind=kind,
+                    **fields,  # type: ignore[arg-type]
+                )
+            )
+        except Exception:
+            # Swallow UI callback errors silently — the engine must never
+            # fail because of a spinner bug.
+            pass
 
     # Load agent roles if not provided
     if agent_roles is None:
@@ -1123,6 +1266,7 @@ def process_node(
 
     queue = load_queue(queue_file)
     if node_id not in queue.get("entries", {}):
+        fire("finished", error=f"Node {node_id} not found in queue")
         return ProcessNodeResult(
             node_id=node_id,
             final_state="not_in_queue",
@@ -1130,6 +1274,9 @@ def process_node(
             events_logged=0,
             error=f"Node {node_id} not found in queue",
         )
+
+    initial_entry = queue["entries"].get(node_id, {})
+    fire("started", iteration=initial_entry.get("iteration", 0))
 
     # Drive the state machine until we reach a terminal state
     max_loops = 50  # safety limit to prevent infinite loops
@@ -1164,44 +1311,56 @@ def process_node(
             update_state(queue_file, node_id, QueueState.socratic_active.value)
 
         elif current_state == QueueState.socratic_active.value:
+            fire("phase", phase="socratic", iteration=iteration)
             _run_socratic_phase(
                 node_id, claim_text, petri_dir, dish_id,
                 iteration, provider,
+                fire=fire,
             )
 
         elif current_state == QueueState.research_active.value:
+            fire("phase", phase="research", iteration=iteration)
             _run_phase1(
                 node_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, entry,
+                fire=fire,
             )
             iterations_run += 1
 
         elif current_state == QueueState.critique_active.value:
+            fire("phase", phase="critique", iteration=iteration)
             _run_phase2(
                 node_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, debate_pairings, entry,
+                fire=fire,
             )
 
         elif current_state == QueueState.mediating.value:
+            fire("phase", phase="mediating", iteration=iteration)
             convergence_outcome = _run_convergence(
                 node_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, entry,
+                fire=fire,
             )
             if convergence_outcome.outcome == "iterate":
                 iterations_run += 1
 
         elif current_state == QueueState.converged.value:
             _update_node_status(petri_dir, node_id, NodeStatus.RED_TEAM.value)
+            fire("phase", phase="red_team", iteration=iteration)
             _run_red_team(
                 node_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles,
+                fire=fire,
             )
 
         elif current_state == QueueState.evaluating.value:
             _update_node_status(petri_dir, node_id, NodeStatus.EVALUATE.value)
+            fire("phase", phase="evaluating", iteration=iteration)
             _run_evaluation(
                 node_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles,
+                fire=fire,
             )
 
         elif current_state == QueueState.stalled.value:
@@ -1219,6 +1378,11 @@ def process_node(
 
     events_after = len(get_verdicts(events_file, node_id=node_id))
     events_logged = events_after - events_before
+
+    fire(
+        "finished",
+        iteration=final_entry.get("iteration", 0),
+    )
 
     return ProcessNodeResult(
         node_id=node_id,
@@ -1300,6 +1464,7 @@ def process_queue(
     colony_filter: str | None = None,
     all_nodes: bool = False,
     dry_run: bool = False,
+    on_event: NodeProgressCallback | None = None,
 ) -> QueueProcessingResult:
     """Process the queue, running eligible nodes through the pipeline.
 
@@ -1362,16 +1527,45 @@ def process_queue(
     failed = 0
     stalled = 0
 
+    # Slot pool — a bounded FIFO of slot indices, one per worker.  Each
+    # submission pulls an index before calling ``process_node`` and returns
+    # it after.  This gives every in-flight node a stable slot identity
+    # which the CLI's MultiSpinner uses to pick the row to update.
+    #
+    # NOTE: the stdlib module is aliased to ``_stdlib_queue`` because
+    # ``petri.storage.queue`` is already imported at module scope above and
+    # the bare name ``queue`` would collide.
+    import queue as _stdlib_queue
+
+    slot_pool: _stdlib_queue.Queue[int] = _stdlib_queue.Queue()
+    for slot_index in range(max_concurrent):
+        slot_pool.put(slot_index)
+
     def _process_one(nid: str) -> ProcessNodeResult:
+        slot_index = slot_pool.get()
         try:
             return process_node(
                 nid, petri_dir,
                 provider=provider,
                 agent_roles=agent_roles,
                 debate_pairings=debate_pairings,
+                slot_idx=slot_index,
+                on_event=on_event,
             )
         except Exception as exc:
             logger.exception("Error processing node %s", nid)
+            if on_event is not None:
+                try:
+                    on_event(
+                        NodeProgressEvent(
+                            slot_idx=slot_index,
+                            node_id=nid,
+                            kind="finished",
+                            error=str(exc),
+                        )
+                    )
+                except Exception:
+                    pass
             return ProcessNodeResult(
                 node_id=nid,
                 final_state="error",
@@ -1379,6 +1573,8 @@ def process_queue(
                 events_logged=0,
                 error=str(exc),
             )
+        finally:
+            slot_pool.put(slot_index)
 
     from petri.engine.load_balancer import AdaptiveLoadBalancer
 

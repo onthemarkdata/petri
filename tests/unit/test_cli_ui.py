@@ -19,6 +19,7 @@ import pytest
 import typer
 
 from petri.cli_ui import (
+    MultiSpinner,
     Spinner,
     grow_status_loop,
     print_error_and_exit,
@@ -506,10 +507,8 @@ class TestGrowStatusLoop:
         # Returned in well under one full interval — proving the loop
         # printed first and then exited via the stop signal during wait.
         assert elapsed < interval_seconds
-        # And actually printed something meaningful.
+        # And actually printed something meaningful via print_line.
         assert any("socratic_active=4" in line for line in spinner.lines)
-        # Spinner bottom line was also updated with the state summary.
-        assert any("socratic_active=4" in update for update in spinner.updates)
 
     def test_format_status_event_truncates_long_summary(self):
         """Verdict summaries can be hundreds of words; the CLI must keep
@@ -539,9 +538,114 @@ class TestGrowStatusLoop:
         assert len(line) < 250
 
     def test_format_status_event_short_node_id_handles_simple_ids(self):
-        from petri.cli_ui import _short_node_id
+        from petri.cli_ui import short_node_id
 
-        assert _short_node_id("dish-colony-001-002") == "001-002"
-        assert _short_node_id("petri-ai-considered-12-003-004") == "003-004"
+        assert short_node_id("dish-colony-001-002") == "001-002"
+        assert short_node_id("petri-ai-considered-12-003-004") == "003-004"
         # Short input falls through unchanged.
-        assert _short_node_id("foo") == "foo"
+        assert short_node_id("foo") == "foo"
+
+
+# ── MultiSpinner ─────────────────────────────────────────────────────────
+
+
+class TestMultiSpinner:
+    def test_construction_with_slot_count(self):
+        # Should not raise with either a plain-forced or default stream.
+        multi = MultiSpinner(
+            "growing",
+            slot_count=4,
+            stream=io.StringIO(),
+            force_plain=True,
+        )
+        assert multi is not None
+
+    def test_update_slot_round_trip_in_plain_mode(self):
+        buf = io.StringIO()
+        with MultiSpinner(
+            "growing", slot_count=4, stream=buf, force_plain=True
+        ) as multi:
+            multi.update_slot(0, "node-001-002 socratic")
+            multi.update_slot(1, "node-001-003 research")
+        output = buf.getvalue()
+        assert "[slot 0] node-001-002 socratic" in output
+        assert "[slot 1] node-001-003 research" in output
+
+    def test_update_slot_silently_ignores_invalid_index(self):
+        buf = io.StringIO()
+        with MultiSpinner(
+            "growing", slot_count=4, stream=buf, force_plain=True
+        ) as multi:
+            # Neither of these should raise.
+            multi.update_slot(-1, "x")
+            multi.update_slot(99, "x")
+        output = buf.getvalue()
+        # The payload "x" must not have leaked into the stream — neither
+        # call mapped to a real slot so they should be silent no-ops.
+        assert "x" not in output
+
+    def test_print_line_in_plain_mode(self):
+        buf = io.StringIO()
+        with MultiSpinner(
+            "growing", slot_count=2, stream=buf, force_plain=True
+        ) as multi:
+            multi.print_line("hello")
+        output = buf.getvalue()
+        assert "hello\n" in output
+
+    def test_exit_writes_summary_line_with_check(self):
+        buf = io.StringIO()
+        with MultiSpinner(
+            "growing", slot_count=2, stream=buf, force_plain=True
+        ) as multi:
+            multi.update_slot(0, "warming up")
+        output = buf.getvalue()
+        assert "✓ growing" in output
+        # Elapsed-time marker is always ``(X.Ys)``; check the suffix only.
+        assert "s)" in output
+
+    def test_exit_writes_summary_line_with_cross_on_exception(self):
+        buf = io.StringIO()
+        with pytest.raises(RuntimeError, match="boom"):
+            with MultiSpinner(
+                "growing", slot_count=2, stream=buf, force_plain=True
+            ) as multi:
+                multi.update_slot(0, "about to fail")
+                raise RuntimeError("boom")
+        output = buf.getvalue()
+        assert "✗ growing" in output
+        assert "✓ growing" not in output
+
+    def test_thread_safe_smoke(self):
+        buf = _FakeTtyBuffer()
+        slot_count = 4
+
+        # TTY mode: animation thread + worker threads contend on the lock.
+        # We only assert no exception and that the summary line lands —
+        # the byte-level output is timing-dependent.
+        def worker(multi: MultiSpinner, thread_index: int) -> None:
+            for iteration in range(50):
+                multi.update_slot(
+                    thread_index % slot_count,
+                    f"thread {thread_index} iter {iteration}",
+                )
+
+        with MultiSpinner(
+            "growing", slot_count=slot_count, stream=buf
+        ) as multi:
+            worker_threads = [
+                threading.Thread(target=worker, args=(multi, thread_index))
+                for thread_index in range(10)
+            ]
+            for worker_thread in worker_threads:
+                worker_thread.start()
+            for worker_thread in worker_threads:
+                worker_thread.join(timeout=2.0)
+            # Give the animation thread a beat to render at least one
+            # frame after the last update.
+            time.sleep(0.05)
+
+        for worker_thread in worker_threads:
+            assert not worker_thread.is_alive()
+        output = buf.getvalue()
+        assert "✓ growing" in output

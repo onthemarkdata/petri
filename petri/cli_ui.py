@@ -11,7 +11,6 @@ import shutil
 import sys
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn, Optional, TextIO
 
@@ -152,6 +151,210 @@ class Spinner:
                 return
 
 
+# ── multi-row spinner ────────────────────────────────────────────────────
+
+
+# Prefix length reserved for ``"  ⠋ slot N  "`` before the slot text starts.
+# Used to compute how much of each row text is visible on narrow terminals.
+_MULTI_SLOT_PREFIX_WIDTH = 14
+
+
+class MultiSpinner:
+    """N stacked status rows, one per concurrent worker slot.
+
+    Each row is identified by a stable integer index in
+    ``0..slot_count-1``. Rows update independently via
+    :meth:`update_slot`. Permanent lines (e.g. a periodic aggregate
+    state line) can be written above all rows via :meth:`print_line`
+    without disturbing the row block.
+
+    TTY mode: a daemon animation thread redraws all N rows on every
+    frame using ``\\033[{slot_count}F`` (cursor-up) + ``\\033[2K``
+    (clear-line) + the per-slot payload. The cursor is kept just
+    below the row block between frames.
+
+    Plain mode: each :meth:`update_slot` call writes a single
+    ``[slot N] <text>`` line; no animation thread is spawned.
+
+    ``MultiSpinner`` and the single-line :class:`Spinner` are
+    intentionally independent classes — the seed wizard relies on
+    the exact sequential behaviour of ``Spinner``, so this is a
+    parallel primitive built for the concurrent ``petri grow`` path.
+    """
+
+    def __init__(
+        self,
+        label: str,
+        slot_count: int,
+        *,
+        stream: Optional[TextIO] = None,
+        force_plain: bool = False,
+    ) -> None:
+        self._label = label.strip()
+        self._slot_count = max(0, int(slot_count))
+        self._stream = stream or sys.stdout
+        self._is_tty = (not force_plain) and self._stream_isatty()
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._animation_thread: Optional[threading.Thread] = None
+        self._start_time: float = 0.0
+        self._slot_texts: list[str] = [""] * self._slot_count
+        self._frame_iterator = itertools.cycle(_FRAMES)
+        self._current_frame: str = _FRAMES[0]
+        self._terminal_width_cached: int = _terminal_width()
+
+    def update_slot(self, slot_idx: int, text: str) -> None:
+        """Set the live text for a single worker slot.
+
+        Invalid indices are silently dropped — the engine's slot pool
+        is the source of truth and a stale callback must never crash
+        the UI. Safe from any thread.
+        """
+        if slot_idx < 0 or slot_idx >= self._slot_count:
+            return
+        if text is None:
+            return
+        flat = text.replace("\n", " ").strip()
+        if self._is_tty:
+            with self._lock:
+                self._slot_texts[slot_idx] = flat
+            return
+        self._stream.write(f"[slot {slot_idx}] {flat}\n")
+        try:
+            self._stream.flush()
+        except (ValueError, OSError):
+            pass
+
+    def print_line(self, text: str) -> None:
+        """Write a permanent line above the row block.
+
+        TTY mode: clears the row block, writes the permanent line,
+        then redraws all N rows below it. Plain mode: writes the
+        line verbatim. Safe from any thread.
+        """
+        if text is None:
+            return
+        flat = text.replace("\n", " ").strip()
+        if not flat:
+            return
+        if not self._is_tty:
+            self._stream.write(flat + "\n")
+            try:
+                self._stream.flush()
+            except (ValueError, OSError):
+                pass
+            return
+        with self._lock:
+            try:
+                # Move up to the top of the row block, write the
+                # permanent line in place, then redraw every row
+                # beneath it so the cursor ends one line below the
+                # block — ready for the next animation frame.
+                self._stream.write(f"\033[{self._slot_count}F")
+                self._stream.write("\033[2K")
+                self._stream.write(flat + "\n")
+                frame_char = self._current_frame
+                for slot_idx in range(self._slot_count):
+                    self._stream.write("\033[2K")
+                    self._stream.write(self._format_row(slot_idx, frame_char))
+                self._stream.flush()
+            except (ValueError, OSError):
+                return
+
+    def __enter__(self) -> "MultiSpinner":
+        self._start_time = time.monotonic()
+        self._stream.write(f"\n─ {self._label}\n")
+        if self._is_tty and self._slot_count > 0:
+            # Reserve vertical real estate for the row block so the
+            # animation thread can immediately do ``\033[NF`` and land
+            # at the top of the block without stomping whatever was on
+            # the current line.
+            self._stream.write("\n" * self._slot_count)
+        try:
+            self._stream.flush()
+        except (ValueError, OSError):
+            pass
+        if self._is_tty and self._slot_count > 0:
+            self._animation_thread = threading.Thread(
+                target=self._animate, daemon=True
+            )
+            self._animation_thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        elapsed = time.monotonic() - self._start_time
+        self._stop_event.set()
+        if self._animation_thread is not None:
+            self._animation_thread.join(timeout=1.0)
+        mark = "✗" if exc_type is not None else "✓"
+        summary_line = f"{mark} {self._label} ({elapsed:.1f}s)\n"
+        with self._lock:
+            if self._is_tty and self._slot_count > 0:
+                try:
+                    # Rewind to the top of the row block and blank out
+                    # every row so the summary line replaces the block
+                    # entirely.
+                    self._stream.write(f"\033[{self._slot_count}F")
+                    for _row_index in range(self._slot_count):
+                        self._stream.write("\033[2K\n")
+                    # Now move back up to the start of the cleared
+                    # block and write the summary in its place.
+                    self._stream.write(f"\033[{self._slot_count}F")
+                    self._stream.write(summary_line)
+                    self._stream.flush()
+                except (ValueError, OSError):
+                    pass
+            else:
+                self._stream.write(summary_line)
+                try:
+                    self._stream.flush()
+                except (ValueError, OSError):
+                    pass
+        return None
+
+    # ── internal ─────────────────────────────────────────────────────
+
+    def _stream_isatty(self) -> bool:
+        try:
+            return bool(self._stream.isatty())
+        except (AttributeError, ValueError):
+            return False
+
+    def _format_row(self, slot_idx: int, frame_char: str) -> str:
+        """Render one slot row including the trailing newline.
+
+        Truncates with an ellipsis to fit the cached terminal width,
+        leaving room for the ``"  ⠋ slot N  "`` prefix.
+        """
+        raw_text = self._slot_texts[slot_idx] if slot_idx < len(self._slot_texts) else ""
+        budget = max(10, self._terminal_width_cached - _MULTI_SLOT_PREFIX_WIDTH)
+        visible_text = raw_text
+        if len(visible_text) > budget:
+            visible_text = visible_text[: budget - 1] + "…"
+        return f"  {frame_char} slot {slot_idx}  {visible_text}\n"
+
+    def _animate(self) -> None:
+        while True:
+            if self._stop_event.is_set():
+                return
+            frame_char = next(self._frame_iterator)
+            self._current_frame = frame_char
+            with self._lock:
+                try:
+                    # Step to the top of the row block and redraw
+                    # every row; the trailing newline on the last row
+                    # leaves the cursor one line below the block.
+                    self._stream.write(f"\033[{self._slot_count}F")
+                    for slot_idx in range(self._slot_count):
+                        self._stream.write("\033[2K")
+                        self._stream.write(self._format_row(slot_idx, frame_char))
+                    self._stream.flush()
+                except (ValueError, OSError):
+                    return
+            if self._stop_event.wait(_FRAME_INTERVAL):
+                return
+
+
 # ── error helper ─────────────────────────────────────────────────────────
 
 
@@ -229,24 +432,24 @@ def grow_status_loop(
     stop_event,
     interval_seconds: float,
 ) -> None:
-    """Daemon-thread body that prints periodic progress lines.
+    """Daemon-thread body that prints periodic aggregate progress lines.
 
     Each tick (``interval_seconds``):
 
     * snapshot queue state via ``get_state_summary``
-    * walk every ``events.jsonl`` under ``petri-dishes/`` and pull recent
-      ``verdict_issued`` and ``convergence_checked`` events written since
-      the previous tick (newest-first, top 5)
-    * print all of that as permanent lines above the live spinner
+    * print a single ``status: <state_summary>`` line above the spinner
+      via ``spinner.print_line``
 
-    Shuts down promptly when ``stop_event`` is set.
+    Per-node lifecycle activity is already rendered in real time on the
+    :class:`MultiSpinner` per-slot rows, so this loop no longer walks
+    event logs for recent verdicts. Shuts down promptly when
+    ``stop_event`` is set.
+
+    ``spinner`` can be either a :class:`Spinner` or a
+    :class:`MultiSpinner` — both expose ``print_line``.
     """
     from petri.engine.grow_loop import format_state_summary
-    from petri.storage.event_log import query_events
-    from petri.storage.paths import iter_events_files
     from petri.storage.queue import get_state_summary
-
-    cutoff_iso = datetime.now(timezone.utc).isoformat()
 
     while True:
         if stop_event.is_set():
@@ -259,31 +462,6 @@ def grow_status_loop(
 
         state_summary = format_state_summary(state_counts)
         spinner.print_line(f"status: {state_summary}")
-        spinner.update(f"growing — {state_summary}")
-
-        recent_events: list[dict] = []
-        for events_file in iter_events_files(petri_dir):
-            try:
-                for event_type in ("verdict_issued", "convergence_checked"):
-                    recent_events.extend(
-                        query_events(
-                            events_file,
-                            event_type=event_type,
-                            since=cutoff_iso,
-                        )
-                    )
-            except Exception:
-                continue
-
-        recent_events.sort(
-            key=lambda evt: evt.get("timestamp", ""), reverse=True
-        )
-
-        for event in recent_events[:5]:
-            spinner.print_line(_format_status_event(event))
-
-        # Advance cutoff so the next tick only fetches truly new events
-        cutoff_iso = datetime.now(timezone.utc).isoformat()
 
         # Sleep until next tick OR until stop_event is set
         if stop_event.wait(timeout=interval_seconds):
@@ -296,7 +474,7 @@ def grow_status_loop(
 _STATUS_SUMMARY_MAX_CHARS = 100
 
 
-def _short_node_id(node_id: str) -> str:
+def short_node_id(node_id: str) -> str:
     """Return the trailing ``level-seq`` portion of a composite node id.
 
     ``"petri-ai-considered-commodity-12-001-002"`` -> ``"001-002"``.
@@ -325,7 +503,7 @@ def _format_status_event(event: dict) -> str:
     one event fits on one terminal line — the full text lives in
     evidence.md.
     """
-    node_id = _short_node_id(event.get("node_id", ""))
+    node_id = short_node_id(event.get("node_id", ""))
     agent = event.get("agent", "")
     data = event.get("data", {}) or {}
     verdict = data.get("verdict") or data.get("status") or ""

@@ -7,7 +7,12 @@ from typing import Optional
 import typer
 
 from petri.cli._bootstrap import find_petri_dir, resolve_provider
-from petri.cli_ui import grow_status_loop, print_error_and_exit
+from petri.cli_ui import (
+    MultiSpinner,
+    grow_status_loop,
+    print_error_and_exit,
+    short_node_id,
+)
 from petri.config import MAX_CONCURRENT
 from petri.engine.grow_loop import (
     GROW_STATUS_INTERVAL_SECONDS,
@@ -53,9 +58,9 @@ def register(app: typer.Typer) -> None:
                 "Run 'petri inspect' to check all prerequisites.",
             )
 
-        from petri.cli_ui import Spinner
         from petri.engine.processor import (
             NoProviderError,
+            NodeProgressEvent,
             clear_stop_file,
             is_stop_file_present,
             process_queue,
@@ -98,17 +103,6 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(code=0)
 
         # ── live path: loop until terminal/stopped/no-progress ──
-        def _run_one_pass():
-            return process_queue(
-                petri_dir=petri_dir,
-                provider=provider,
-                max_concurrent=max_concurrent,
-                node_ids=nodes,
-                colony_filter=colony_name,
-                all_nodes=all_nodes,
-                dry_run=False,
-            )
-
         def _get_states() -> dict[str, int]:
             try:
                 return get_state_summary(queue_path)
@@ -125,14 +119,55 @@ def register(app: typer.Typer) -> None:
         status_thread: threading.Thread | None = None
 
         try:
-            with Spinner("growing") as spinner:
-                # Surface the starting queue state immediately so the user
-                # sees something other than a static "growing" label while
-                # the first pass spins up.
-                initial_states = _get_states()
-                if initial_states:
-                    spinner.update(
-                        f"growing — {format_state_summary(initial_states)}"
+            with MultiSpinner("growing", slot_count=max_concurrent) as multi:
+                # Render every row up-front with an "idle" label so all
+                # N slots are visible from t=0 — before any worker has
+                # actually picked up a node.
+                for slot_index in range(max_concurrent):
+                    multi.update_slot(slot_index, "idle")
+
+                def _on_event(event: NodeProgressEvent) -> None:
+                    """Translate a processor lifecycle event into a row update."""
+                    if event.slot_idx < 0 or event.slot_idx >= max_concurrent:
+                        return
+                    node_label = short_node_id(event.node_id)
+                    if event.kind == "started":
+                        row_text = f"{node_label} starting"
+                    elif event.kind == "phase":
+                        row_text = f"{node_label} {event.phase}"
+                    elif event.kind == "agent":
+                        row_text = f"{node_label} {event.phase} · {event.agent}"
+                    elif event.kind == "verdict":
+                        verdict_short = (event.verdict or "")[:24]
+                        row_text = (
+                            f"{node_label} {event.phase} · "
+                            f"{event.agent}: {verdict_short}"
+                        )
+                    elif event.kind == "finished":
+                        if event.error:
+                            error_short = (event.error or "")[:60]
+                            row_text = f"{node_label} ✗ {error_short}"
+                        else:
+                            row_text = f"{node_label} ✓"
+                        # Do NOT sleep here — blocking the worker thread
+                        # delays slot release. Let the next "started"
+                        # event for this slot overwrite the result.
+                        multi.update_slot(event.slot_idx, row_text)
+                        return
+                    else:
+                        return
+                    multi.update_slot(event.slot_idx, row_text)
+
+                def _run_one_pass():
+                    return process_queue(
+                        petri_dir=petri_dir,
+                        provider=provider,
+                        max_concurrent=max_concurrent,
+                        node_ids=nodes,
+                        colony_filter=colony_name,
+                        all_nodes=all_nodes,
+                        dry_run=False,
+                        on_event=_on_event,
                     )
 
                 status_thread = threading.Thread(
@@ -140,7 +175,7 @@ def register(app: typer.Typer) -> None:
                     kwargs={
                         "petri_dir": petri_dir,
                         "queue_path": queue_path,
-                        "spinner": spinner,
+                        "spinner": multi,
                         "stop_event": status_stop_event,
                         "interval_seconds": GROW_STATUS_INTERVAL_SECONDS,
                     },
@@ -148,17 +183,11 @@ def register(app: typer.Typer) -> None:
                 )
                 status_thread.start()
 
-                def _on_pass_complete(state_counts: dict[str, int], pass_result) -> None:
-                    spinner.update(
-                        f"pass complete — {format_state_summary(state_counts)}"
-                    )
-
                 try:
                     outcome = grow_loop(
                         run_one_pass=_run_one_pass,
                         get_states=_get_states,
                         is_stopped=_is_stopped,
-                        on_pass_complete=_on_pass_complete,
                     )
                 except NoProviderError:
                     no_provider = True
