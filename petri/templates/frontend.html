@@ -49,27 +49,67 @@ body {
 .screen.active { display: flex; flex-direction: column; }
 
 /* ── Mute Button (global, always visible) ─────────────────────────── */
+/* Matches the shared HUD chrome: cut-corner cyan panel, no rounded
+   corners, no blur. The note glyph (♫) stays the same in both states;
+   a ::after pseudo-element draws a diagonal strike-through line across
+   the button when muted, and the color flips to the red-danger palette
+   to match .hud-btn.danger. */
 #mute-btn {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  top: 14px;
+  right: 14px;
   z-index: 9999;
-  background: rgba(10, 15, 24, 0.85);
-  border: 1px solid var(--border-bright);
-  color: var(--green);
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  background: #001018;
+  border: 1px solid #00ccff;
+  color: #00ff88;
+  width: 38px;
+  height: 38px;
+  padding: 0;
   cursor: pointer;
   font-size: 18px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
-  backdrop-filter: blur(8px);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  clip-path: polygon(
+    6px 0, 100% 0, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 0 100%, 0 6px
+  );
 }
-#mute-btn:hover { border-color: var(--green); background: rgba(0,255,136,0.08); }
-#mute-btn.muted { color: #555; }
+#mute-btn:hover {
+  background: #002838;
+  color: #ffcc00;
+  border-color: #ffcc00;
+}
+#mute-btn.muted {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+#mute-btn.muted:hover {
+  color: #ffcc00;
+  border-color: #ffcc00;
+  background: #3a1a1a;
+}
+/* Diagonal strike-through rendered via ::after so we don't need SVG
+   or an icon asset. The line is ~26px long, centered on the 38px
+   button, rotated -24deg — short enough to sit entirely inside the
+   cut-corner clip-path. currentColor tracks the .muted red tint. */
+#mute-btn::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: calc(50% - 1px);
+  height: 2px;
+  background: currentColor;
+  transform: rotate(-24deg);
+  transform-origin: center;
+  pointer-events: none;
+  display: none;
+}
+#mute-btn.muted::after { display: block; }
 
 /* ── Title Screen ─────────────────────────────────────────────────── */
 #screen-title {
@@ -283,15 +323,29 @@ body {
   z-index: 10;
 }
 .header-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--green);
-  letter-spacing: 2px;
   flex-shrink: 0;
   cursor: pointer;
-  transition: color 0.15s;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0;
+  transition: filter 0.15s;
 }
-.header-title:hover { color: #ffcc00; }
+.header-title img,
+.header-title canvas {
+  height: 100%;
+  width: auto;
+  display: block;
+  image-rendering: pixelated;
+  pointer-events: none;  /* click target is the wrapper, not the image */
+  /* Subtle glow on the pixel-art chrome so it reads against the HUD
+     grid background. */
+  filter: drop-shadow(0 0 3px rgba(60, 140, 255, 0.45));
+}
+.header-title:hover img,
+.header-title:hover canvas {
+  filter: drop-shadow(0 0 5px rgba(255, 204, 0, 0.6));
+}
 .header-nav { display: flex; gap: 2px; margin-left: 24px; }
 .nav-tab {
   padding: 6px 16px;
@@ -1284,7 +1338,7 @@ body {
 <!-- Computer / CRT terminal (also hosts onboarding when .petri is missing) -->
 <div id="screen-computer" class="screen hud-screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
     <div class="header-nav">
       <button class="nav-tab" data-view="lab">Lab</button>
       <button class="nav-tab" data-view="logs">Logs</button>
@@ -1312,7 +1366,7 @@ body {
 <!-- Lab Overview -->
 <div id="screen-lab" class="screen hud-screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
     <div class="header-nav">
       <button class="nav-tab active" data-view="lab">Lab</button>
       <button class="nav-tab" data-view="logs">Logs</button>
@@ -1330,7 +1384,7 @@ body {
 <!-- Colony DAG -->
 <div id="screen-colony" class="screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
     <div class="header-nav">
       <button class="nav-tab" data-view="lab">Lab</button>
       <button class="nav-tab" data-view="logs">Logs</button>
@@ -1363,7 +1417,7 @@ body {
 <!-- Research Logs -->
 <div id="screen-logs" class="screen hud-screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
     <div class="header-nav">
       <button class="nav-tab" data-view="lab">Lab</button>
       <button class="nav-tab active" data-view="logs">Logs</button>
@@ -1399,7 +1453,7 @@ body {
 <!-- Cell Detail -->
 <div id="screen-cell" class="screen hud-screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')"><canvas class="petri-logo-canvas" aria-label="PETRI"></canvas></div>
     <div class="header-nav">
       <button class="nav-tab" data-view="lab">Lab</button>
       <button class="nav-tab" data-view="logs">Logs</button>
@@ -1490,7 +1544,9 @@ var muted = localStorage.getItem('petri-muted') === 'true';
 
 function updateMuteUI() {
   bgm.muted = muted;
-  muteBtn.textContent = muted ? 'M' : '\u266B';
+  // Glyph stays ♫ in both states; the .muted class drives color +
+  // the diagonal strike-through pseudo-element.
+  muteBtn.textContent = '\u266B';
   muteBtn.classList.toggle('muted', muted);
 }
 updateMuteUI();
@@ -1500,7 +1556,11 @@ muteBtn.addEventListener('click', function(evt) {
   muted = !muted;
   localStorage.setItem('petri-muted', String(muted));
   updateMuteUI();
-  if (!audioStarted) startAudio();
+  // Do NOT auto-start audio here. The mute button only flips the
+  // muted state — audio playback begins the first time the user
+  // actively presses Enter (or clicks) on the title screen via
+  // handleTitleActivation(). This keeps the landing experience
+  // silent until the user has intentionally chosen to enter.
 });
 
 function startAudio() {
@@ -2317,20 +2377,41 @@ function renderCellDetail(cell) {
 
   container.appendChild(metaGrid);
 
-  // ── 4. Verdicts ──
-  var verdicts = events.filter(function(evt) { return evt.type === 'verdict_issued'; });
+  // ── 4. Verdicts (latest per agent only) ──
+  // Dedupe by agent so the table shows one row per verdict-issuing
+  // agent: the most recent verdict wins (higher iteration beats older;
+  // equal iteration falls back to latest timestamp). The Cell Logs
+  // section below still shows the full verdict history.
+  var latestVerdictByAgent = {};
+  events.forEach(function(evt) {
+    if (evt.type !== 'verdict_issued') return;
+    var agent = evt.agent || 'unknown';
+    var prior = latestVerdictByAgent[agent];
+    var iter = evt.iteration || 0;
+    var ts = evt.timestamp || '';
+    if (!prior) { latestVerdictByAgent[agent] = evt; return; }
+    var priorIter = prior.iteration || 0;
+    var priorTs = prior.timestamp || '';
+    if (iter > priorIter || (iter === priorIter && ts > priorTs)) {
+      latestVerdictByAgent[agent] = evt;
+    }
+  });
+  var latestVerdicts = Object.keys(latestVerdictByAgent)
+    .sort()
+    .map(function(agent) { return latestVerdictByAgent[agent]; });
+
   container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Verdicts'));
   var verdictSection = buildEl('div', { className: 'verdict-section' });
-  if (verdicts.length > 0) {
+  if (latestVerdicts.length > 0) {
     var table = buildEl('table', { className: 'verdict-table' });
     var thead = buildEl('thead');
     var headRow = buildEl('tr');
-    ['Agent', 'Verdict', 'Confidence', 'Iteration'].forEach(function(h) { headRow.appendChild(buildEl('th', {}, h)); });
+    ['Agent', 'Latest Verdict', 'Confidence', 'Iteration'].forEach(function(h) { headRow.appendChild(buildEl('th', {}, h)); });
     thead.appendChild(headRow);
     table.appendChild(thead);
 
     var tbody = buildEl('tbody');
-    verdicts.forEach(function(evt) {
+    latestVerdicts.forEach(function(evt) {
       var verdict = (evt.data && evt.data.verdict) || '';
       var isPass = PASS_VERDICTS.has(verdict);
       var row = buildEl('tr');
@@ -2347,11 +2428,14 @@ function renderCellDetail(cell) {
   }
   container.appendChild(verdictSection);
 
-  // ── 5. Evidence (markdown rendered) ──
-  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Evidence'));
+  // ── 5. Evidence Summary (cell_lead's digest of evidence.md) ──
+  // The raw evidence.md is kept in the API response for debugging but
+  // the UI renders summary.md — a concise cell_lead digest regenerated
+  // at the end of every iteration and once more after final evaluation.
+  container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Evidence Summary'));
   var evidenceSection = buildEl('div', { className: 'evidence-section' });
-  var evidenceMd = cell.evidence_md || '';
-  if (evidenceMd.trim().length > 0 && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+  var summaryMd = cell.summary_md || '';
+  if (summaryMd.trim().length > 0 && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
     var mdPanel = buildEl('div', { className: 'hud-panel' });
     var mdBody = buildEl('div', { className: 'evidence-markdown' });
     // Render markdown → HTML → sanitize via DOMPurify before touching
@@ -2359,20 +2443,20 @@ function renderCellDetail(cell) {
     // anything else that could execute; this is the only place we set
     // innerHTML in the whole SPA.
     try {
-      var rawHtml = marked.parse(evidenceMd, { breaks: true, gfm: true });
+      var rawHtml = marked.parse(summaryMd, { breaks: true, gfm: true });
       mdBody.innerHTML = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
     } catch (err) {
-      mdBody.textContent = evidenceMd;
+      mdBody.textContent = summaryMd;
     }
     mdPanel.appendChild(mdBody);
     evidenceSection.appendChild(mdPanel);
-  } else if (evidenceMd.trim().length > 0) {
+  } else if (summaryMd.trim().length > 0) {
     // Fallback: renderer libs failed to load — display raw markdown as
     // preformatted text so the user still sees the content.
-    var pre = buildEl('pre', { className: 'expand-content', style: { display: 'block' } }, evidenceMd);
+    var pre = buildEl('pre', { className: 'expand-content', style: { display: 'block' } }, summaryMd);
     evidenceSection.appendChild(pre);
   } else {
-    evidenceSection.appendChild(buildEl('div', { className: 'evidence-empty' }, 'No evidence recorded for this cell yet.'));
+    evidenceSection.appendChild(buildEl('div', { className: 'evidence-empty' }, 'Summary not generated yet. cell_lead writes one at the end of each iteration.'));
   }
   container.appendChild(evidenceSection);
 
@@ -2700,27 +2784,83 @@ function startOnboarding() {
     await addLine('This may take a moment (LLM inference)...', 'dim');
     addLineInstant('');
 
-    try {
-      var seedRes = await fetch(API + '/api/seed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ claim: starterClaim }),
-      });
-      var seedData = await seedRes.json();
-      if (seedData.status === 'ok') {
-        addLineInstant('[OK] Colony "' + seedData.colony_name + '" created with ' + seedData.cell_count + ' cells', 'bright');
-        addLineInstant('');
-        if (seedData.cells) {
-          seedData.cells.forEach(function(nd) {
-            addLineInstant('  L' + nd.level + '  ' + (nd.claim_text || '').substring(0, 60), 'dim');
-          });
+    // Stream the decomposition via SSE so the user sees live progress
+    // instead of a frozen spinner. /api/seed/stream pipes the
+    // decomposer's on_progress and on_cell_created callbacks through
+    // as 'progress' and 'cell_created' SSE events, then a final 'done'
+    // (or 'error') event once the colony has been serialized.
+    await new Promise(function(resolve) {
+      var url = API + '/api/seed/stream?claim=' + encodeURIComponent(starterClaim);
+      var source = new EventSource(url);
+
+      // The decomposer's on_progress fires with incremental LLM text
+      // chunks. To avoid spamming a new line per token we buffer chunks
+      // into a single "live" line and flush on newlines / bursts.
+      var liveLine = null;
+      function appendProgress(text) {
+        if (!text) return;
+        if (liveLine === null) {
+          liveLine = buildEl('div', { className: 'term-line dim' });
+          document.getElementById('crt-output').appendChild(liveLine);
         }
-      } else {
-        addLineInstant('[WARN] Seed returned: ' + JSON.stringify(seedData), 'error');
+        // Truncate a single line to ~300 chars so long paragraphs
+        // don't blow out the CRT width.
+        var next = (liveLine.textContent + text).slice(-300);
+        liveLine.textContent = next;
+        var out = document.getElementById('crt-output');
+        out.scrollTop = out.scrollHeight;
+        // If the chunk ended a paragraph, seal the current line so
+        // the next progress event starts fresh.
+        if (/\n\s*$/.test(text)) liveLine = null;
       }
-    } catch (err) {
-      addLineInstant('[WARN] Seed failed: ' + err.message + '. You can seed later via CLI.', 'error');
-    }
+
+      source.addEventListener('progress', function(evt) {
+        try { appendProgress(JSON.parse(evt.data).text || ''); } catch (e) {}
+      });
+
+      source.addEventListener('cell_created', function(evt) {
+        try {
+          var cell = JSON.parse(evt.data);
+          // Seal any in-progress live line so cells list cleanly.
+          liveLine = null;
+          var prefix = '[+] L' + cell.level + ' ';
+          var claim = (cell.claim_text || '').substring(0, 72);
+          addLineInstant(prefix + claim, 'bright');
+        } catch (e) {}
+      });
+
+      source.addEventListener('done', function(evt) {
+        try {
+          var payload = JSON.parse(evt.data);
+          liveLine = null;
+          addLineInstant('');
+          addLineInstant('[OK] Colony "' + payload.colony_name + '" created with ' + payload.cell_count + ' cells', 'bright');
+        } catch (e) {
+          addLineInstant('[OK] Colony created', 'bright');
+        }
+        source.close();
+        resolve();
+      });
+
+      source.addEventListener('error', function(evt) {
+        liveLine = null;
+        // SSE 'error' comes both from the server (via yield event: error)
+        // and from the browser on connection drop. Only the former has
+        // JSON data. If the stream closed before 'done', surface it.
+        if (evt && evt.data) {
+          try {
+            var errPayload = JSON.parse(evt.data);
+            addLineInstant('[ERROR] ' + (errPayload.message || 'seed failed'), 'error');
+          } catch (e) {
+            addLineInstant('[ERROR] seed failed', 'error');
+          }
+        } else if (source.readyState === EventSource.CLOSED) {
+          addLineInstant('[WARN] Seed stream closed unexpectedly. You can seed later via CLI.', 'error');
+        }
+        source.close();
+        resolve();
+      });
+    });
 
     addLineInstant('');
     await waitFor(800);
@@ -3158,8 +3298,147 @@ function loadComputer() {
   });
 }
 
+// ── Petri logo sprite (pixel-art P E T R I) ────────────────────────────
+//
+// Ported from petri/assets/petri-sprites/01-title.html. Each letter is a
+// 1/0 grid of pixel-font rows; we draw them with a 15-color blue-chrome
+// palette plus an edge-highlighted 3D look. Used for the small logo in
+// every screen's header bar. The title screen's own centered splash
+// still uses petri-title-screen.svg.
+
+var PETRI_LOGO_LETTERS = {
+  P: [
+    "111111111111111100","111111111111111110","111100000000011111",
+    "111100000000001111","111100000000001111","111100000000001111",
+    "111100000000011111","111111111111111110","111111111111111100",
+    "111111111111110000","111100000000000000","111100000000000000",
+    "111100000000000000","111100000000000000","111100000000000000",
+    "111100000000000000","111100000000000000","111100000000000000",
+  ],
+  E: [
+    "111111111111111111","111111111111111111","111100000000000000",
+    "111100000000000000","111100000000000000","111100000000000000",
+    "111111111111111100","111111111111111100","111111111111111100",
+    "111100000000000000","111100000000000000","111100000000000000",
+    "111100000000000000","111100000000000000","111100000000000000",
+    "111100000000000000","111111111111111111","111111111111111111",
+  ],
+  T: [
+    "111111111111111111","111111111111111111","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+    "000000011110000000","000000011110000000","000000011110000000",
+  ],
+  R: [
+    "111111111111111100","111111111111111110","111100000000011111",
+    "111100000000001111","111100000000001111","111100000000001111",
+    "111100000000011111","111111111111111110","111111111111111100",
+    "111111111110000000","111100011111000000","111100001111100000",
+    "111100000111110000","111100000011111000","111100000001111100",
+    "111100000000111110","111100000000011111","111100000000001111",
+  ],
+  I: [
+    "111111111111","111111111111","000011110000","000011110000",
+    "000011110000","000011110000","000011110000","000011110000",
+    "000011110000","000011110000","000011110000","000011110000",
+    "000011110000","000011110000","000011110000","000011110000",
+    "111111111111","111111111111",
+  ],
+};
+
+var PETRI_LOGO_CHROME = [
+  '#e8f0ff','#d0e4ff','#b4dcff','#9ccfff','#84c0f0',
+  '#6caee4','#5898d0','#4682c8','#3870b8','#2e5ca0',
+  '#1e4888','#1a3c78','#142850','#0f1e3c','#0a1428',
+];
+
+// Render the pixel-art PETRI logo into a target canvas. Scale is the
+// per-pixel size in screen pixels — 2 gives a nice crisp 216×52-ish
+// canvas that CSS then fits to the header height with pixelated
+// downscaling. Height matches the sprite's native 26 rows.
+function drawPetriLogo(canvas, scale) {
+  var ctx = canvas.getContext('2d');
+  var word = 'PETRI';
+  var letterSpacing = 4;
+  var totalWidth = 0;
+  for (var i = 0; i < word.length; i++) {
+    totalWidth += PETRI_LOGO_LETTERS[word[i]][0].length;
+  }
+  totalWidth += (word.length - 1) * letterSpacing;
+  var totalHeight = 18;
+  canvas.width = (totalWidth + 8) * scale;
+  canvas.height = (totalHeight + 8) * scale;
+  ctx.imageSmoothingEnabled = false;
+
+  // Glow layer: draw the word onto a tiny offscreen canvas, then blit it
+  // back with a blur filter so the letters have a soft blue halo.
+  var glow = document.createElement('canvas');
+  glow.width = totalWidth + 8;
+  glow.height = totalHeight + 8;
+  var gctx = glow.getContext('2d');
+  var gx = 4;
+  for (var gi = 0; gi < word.length; gi++) {
+    var ggrid = PETRI_LOGO_LETTERS[word[gi]];
+    for (var gr = 0; gr < ggrid.length; gr++) {
+      for (var gc = 0; gc < ggrid[gr].length; gc++) {
+        if (ggrid[gr][gc] === '1') {
+          gctx.fillStyle = '#3c8cff';
+          gctx.fillRect(gx + gc, 4 + gr, 1, 1);
+        }
+      }
+    }
+    gx += ggrid[0].length + letterSpacing;
+  }
+  ctx.save();
+  ctx.filter = 'blur(' + (5 * scale) + 'px)';
+  ctx.globalAlpha = 0.55;
+  ctx.drawImage(glow, 0, 0, glow.width, glow.height, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // Main letters with per-row / per-column palette variation and edge
+  // highlights so each pixel gets a chrome 3D look.
+  var xOff = 4;
+  for (var li = 0; li < word.length; li++) {
+    var grid = PETRI_LOGO_LETTERS[word[li]];
+    var gridWidth = grid[0].length;
+    for (var row = 0; row < grid.length; row++) {
+      for (var col = 0; col < grid[row].length; col++) {
+        if (grid[row][col] !== '1') continue;
+        var isTop    = row === 0 || grid[row - 1][col] !== '1';
+        var isBottom = row === grid.length - 1 || grid[row + 1][col] !== '1';
+        var isLeft   = col === 0 || grid[row][col - 1] !== '1';
+        var isRight  = col === grid[row].length - 1 || grid[row][col + 1] !== '1';
+
+        var rowIndex = Math.floor((row / grid.length) * PETRI_LOGO_CHROME.length);
+        var colBias = Math.floor((col / gridWidth) * 3) - 1;
+        var idx = Math.max(0, Math.min(PETRI_LOGO_CHROME.length - 1, rowIndex + colBias));
+
+        if (isTop) {
+          idx = Math.max(0, rowIndex - 2);
+        } else if (isLeft) {
+          idx = Math.max(0, rowIndex - 1);
+        } else if (isRight || isBottom) {
+          idx = Math.min(PETRI_LOGO_CHROME.length - 1, rowIndex + 1);
+        }
+        ctx.fillStyle = PETRI_LOGO_CHROME[idx];
+        ctx.fillRect((xOff + col) * scale, (4 + row) * scale, scale, scale);
+      }
+    }
+    xOff += grid[0].length + letterSpacing;
+  }
+}
+
+function renderAllPetriLogos() {
+  document.querySelectorAll('.petri-logo-canvas').forEach(function(canvas) {
+    drawPetriLogo(canvas, 2);
+  });
+}
+
 // ── Initialize ──────────────────────────────────────────────────────────
 
+renderAllPetriLogos();
 handleRoute();
 connectSSE();
 </script>

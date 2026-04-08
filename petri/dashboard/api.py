@@ -462,10 +462,21 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
 
         dish_id = _get_dish_id(petri_dir)
 
+        from petri.cli._bootstrap import resolve_provider
         from petri.reasoning.decomposer import (
             decompose_claim,
             generate_colony_name,
         )
+
+        # decompose_claim requires an InferenceProvider. Reuse the same
+        # factory the CLI commands use so model + allowed_tools come
+        # from the dish's petri.yaml.
+        provider = resolve_provider(petri_dir)
+        if provider is None:
+            raise HTTPException(
+                500,
+                "Could not resolve inference provider: petri.yaml is missing a model entry.",
+            )
 
         colony_name = colony_name_input or generate_colony_name(claim)
 
@@ -475,6 +486,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 clarifications=[],
                 dish_id=dish_id,
                 colony_name=colony_name,
+                provider=provider,
             )
         except Exception as exc:
             raise HTTPException(500, f"Decomposition failed: {exc}")
@@ -533,6 +545,161 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 for c in cells
             ],
         }
+
+    # ── Seed (streaming) ─────────────────────────────────────────────
+    #
+    # The onboarding wizard (Computer tab, CRT view) opens an EventSource
+    # against this endpoint so the user sees live progress while the
+    # decomposer runs instead of staring at a frozen spinner for ~30 s.
+    # Mirrors the CLI seed's on_progress + on_cell_created callback UX.
+
+    @app.get("/api/seed/stream")
+    async def seed_stream(
+        claim: str,
+        colony: Optional[str] = None,
+    ):
+        if not claim.strip():
+            raise HTTPException(400, "claim is required")
+
+        from datetime import datetime, timezone
+
+        from petri.cli._bootstrap import resolve_provider
+        from petri.graph.colony import ColonyGraph, serialize_colony
+        from petri.models import Colony
+        from petri.reasoning.decomposer import (
+            decompose_claim,
+            generate_colony_name,
+        )
+        from petri.storage.event_log import append_event
+
+        dish_id = _get_dish_id(petri_dir)
+        provider = resolve_provider(petri_dir)
+        if provider is None:
+            raise HTTPException(
+                500,
+                "Could not resolve inference provider: petri.yaml is missing a model entry.",
+            )
+
+        colony_name = colony or generate_colony_name(claim)
+
+        # The decomposer runs in a worker thread (it makes blocking LLM
+        # calls). Its callbacks fire on that worker thread, so we
+        # marshal every event back onto the asyncio loop via
+        # loop.call_soon_threadsafe before putting it on the async
+        # queue the SSE generator drains.
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def on_progress(text: str) -> None:
+            loop.call_soon_threadsafe(
+                queue.put_nowait, ("progress", {"text": text})
+            )
+
+        def on_cell_created(cell, new_edges) -> None:
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                (
+                    "cell_created",
+                    {
+                        "id": cell.id,
+                        "claim_text": cell.claim_text,
+                        "level": cell.level,
+                        "parents": [edge.from_cell for edge in new_edges],
+                    },
+                ),
+            )
+
+        async def run_decompose() -> None:
+            try:
+                result = await asyncio.to_thread(
+                    decompose_claim,
+                    claim=claim,
+                    clarifications=[],
+                    dish_id=dish_id,
+                    colony_name=colony_name,
+                    provider=provider,
+                    on_progress=on_progress,
+                    on_cell_created=on_cell_created,
+                )
+
+                # Mirror the serialization logic from POST /api/seed.
+                now = datetime.now(timezone.utc).isoformat()
+                colony_id = f"{dish_id}-{colony_name}"
+
+                graph = ColonyGraph(colony_id=colony_id)
+                for cell in result.cells:
+                    graph.add_cell(cell)
+                for edge in result.edges:
+                    graph.add_edge(edge)
+
+                center_cell_id = result.cells[0].id if result.cells else ""
+                colony_model = Colony(
+                    id=colony_id,
+                    dish=dish_id,
+                    center_claim=claim,
+                    center_cell_id=center_cell_id,
+                    clarifications=[],
+                    created_at=now,
+                )
+
+                colony_path = petri_dir / "petri-dishes" / colony_name
+                await asyncio.to_thread(
+                    serialize_colony, graph, colony_model, colony_path
+                )
+
+                for cell in result.cells:
+                    child_ids = [
+                        e.from_cell for e in result.edges if e.to_cell == cell.id
+                    ]
+                    cell_rel_path = colony_model.cell_paths.get(
+                        cell.id,
+                        f"{cell.id.split('-')[-2]}-{cell.id.split('-')[-1]}",
+                    )
+                    events_path = colony_path / cell_rel_path / "events.jsonl"
+                    append_event(
+                        events_path=events_path,
+                        cell_id=cell.id,
+                        event_type="decomposition_created",
+                        agent="decomposition_lead",
+                        iteration=0,
+                        data={
+                            "parent_cell_id": cell.id,
+                            "child_cell_ids": child_ids,
+                        },
+                    )
+
+                queue.put_nowait(
+                    (
+                        "done",
+                        {
+                            "status": "ok",
+                            "colony_id": colony_id,
+                            "colony_name": colony_name,
+                            "cell_count": len(result.cells),
+                            "cells": [
+                                {
+                                    "id": c.id,
+                                    "claim_text": c.claim_text,
+                                    "level": c.level,
+                                }
+                                for c in result.cells
+                            ],
+                        },
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - surface to client
+                queue.put_nowait(("error", {"message": str(exc)}))
+
+        asyncio.create_task(run_decompose())
+
+        async def generate():
+            while True:
+                kind, payload = await queue.get()
+                yield {"event": kind, "data": json.dumps(payload)}
+                if kind in ("done", "error"):
+                    return
+
+        return EventSourceResponse(generate())
 
     # ── Events ────────────────────────────────────────────────────────
 
@@ -678,20 +845,34 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                     for r in rows
                 ]
 
-                # Read evidence.md from the cell directory. The colony stores
-                # the per-cell relative path in cell_paths; fall back to the
-                # default {level}-{seq} slug used by serialize_colony.
-                evidence_md = ""
+                # Read evidence.md and summary.md from the cell directory.
+                # The colony stores the per-cell relative path in cell_paths;
+                # fall back to the default {level}-{seq} slug used by
+                # serialize_colony. evidence.md is the verbose append-only
+                # log (authoritative record). summary.md is a concise
+                # cell_lead digest regenerated each iteration and is what
+                # the dashboard's Evidence Summary section renders.
                 cell_rel_path = colony.cell_paths.get(
                     cell.id,
                     f"{cell.id.split('-')[-2]}-{cell.id.split('-')[-1]}",
                 )
-                evidence_file = colony_dir / cell_rel_path / "evidence.md"
+                cell_dir = colony_dir / cell_rel_path
+
+                evidence_md = ""
+                evidence_file = cell_dir / "evidence.md"
                 if evidence_file.is_file():
                     try:
                         evidence_md = evidence_file.read_text()
                     except OSError:
                         evidence_md = ""
+
+                summary_md = ""
+                summary_file = cell_dir / "summary.md"
+                if summary_file.is_file():
+                    try:
+                        summary_md = summary_file.read_text()
+                    except OSError:
+                        summary_md = ""
 
                 return {
                     "cell_id": cell.id,
@@ -702,6 +883,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                     "dependencies": cell.dependencies,
                     "dependents": cell.dependents,
                     "evidence_md": evidence_md,
+                    "summary_md": summary_md,
                     "events": events,
                 }
 

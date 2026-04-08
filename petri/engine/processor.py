@@ -458,6 +458,68 @@ def _update_evidence_status(
     evidence_path.write_text(updated)
 
 
+def _write_summary(
+    petri_dir: Path,
+    cell_id: str,
+    dish_id: str,
+    claim_text: str,
+    iteration: int,
+    provider: "InferenceProvider",
+) -> None:
+    """Regenerate ``summary.md`` for a cell from the current state of
+    ``evidence.md``. Called at the end of every iteration and once more
+    at the end of the final evaluation, so the file is always current.
+
+    Swallows errors instead of raising: a failed summary must never
+    break the main pipeline. The raw ``evidence.md`` is always
+    available as a fallback for debugging.
+    """
+    cell_path = _cell_dir(petri_dir, cell_id, dish_id)
+    evidence_path = cell_path / "evidence.md"
+    if not evidence_path.exists():
+        return
+    try:
+        evidence_md = evidence_path.read_text()
+    except OSError:
+        return
+    if not evidence_md.strip():
+        return
+
+    try:
+        summary_md = provider.summarize_evidence(
+            cell_id=cell_id,
+            claim_text=claim_text,
+            evidence_md=evidence_md,
+            iteration=iteration,
+        )
+    except Exception as exc:  # noqa: BLE001 - summary is best-effort
+        logger.warning(
+            "summary generation failed for cell %s iteration %d: %s",
+            cell_id, iteration, exc,
+        )
+        return
+
+    try:
+        (cell_path / "summary.md").write_text(summary_md)
+    except OSError as exc:
+        logger.warning(
+            "could not write summary.md for cell %s: %s", cell_id, exc,
+        )
+        return
+
+    append_event(
+        events_path=_events_path(petri_dir, cell_id, dish_id),
+        cell_id=cell_id,
+        event_type="evidence_summarized",
+        agent="cell_lead",
+        iteration=iteration,
+        data={
+            "summary_length": len(summary_md),
+            "evidence_length": len(evidence_md),
+        },
+    )
+
+
 def _format_phase1_evidence(verdicts: list, iteration: int) -> str:
     """Format Phase 1 (Research) findings as markdown — citation-first.
 
@@ -1211,6 +1273,13 @@ def _run_convergence(
         },
     )
 
+    # Regenerate summary.md now that phase 1 + phase 2 of this iteration
+    # have landed in evidence.md. This fires for every outcome path
+    # (converged, iterate, circuit_breaker) so the dashboard's Evidence
+    # Summary is always current. Best-effort — a failure here logs a
+    # warning and continues; it must never break the pipeline.
+    _write_summary(petri_dir, cell_id, dish_id, claim_text, iteration, provider)
+
     if convergence.converged:
         update_state(queue_file, cell_id, QueueState.converged.value)
         return ConvergenceOutcome(outcome="converged")
@@ -1374,6 +1443,11 @@ def _run_evaluation(
     content = _format_evaluation_evidence(result, source_validation, iteration)
     _append_evidence(petri_dir, cell_id, dish_id, "evaluation", iteration, content)
     _update_evidence_status(petri_dir, cell_id, dish_id, final_status)
+
+    # Regenerate summary.md one last time now that red team + final
+    # evaluation content is in evidence.md. This is the terminal
+    # summary the dashboard will show once the cell reaches done.
+    _write_summary(petri_dir, cell_id, dish_id, claim_text, iteration, provider)
 
     _update_cell_status(petri_dir, cell_id, final_status)
     update_state(queue_file, cell_id, QueueState.done.value)

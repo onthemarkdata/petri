@@ -832,3 +832,53 @@ class ClaudeCodeProvider:
             verdict=verdict,
             summary=raw[:500].strip(),
         )
+
+    def summarize_evidence(
+        self,
+        cell_id: str,
+        claim_text: str,
+        evidence_md: str,
+        iteration: int,
+    ) -> str:
+        """Ask cell_lead to produce a concise summary of the current state
+        of evidence.md for a cell.
+
+        Unlike ``assess_cell``, this does not validate verdicts or return an
+        ``AssessmentResult`` — it's a pure content generator that returns a
+        markdown string to be written straight to ``summary.md``. The agent
+        identity in event logs is still ``cell_lead`` so the audit trail is
+        consistent with the lifecycle events cell_lead already owns.
+
+        The prompt is intentionally hand-built inline (rather than going
+        through the agent-role + verdict-set machinery) because:
+        - There's no verdict to return — the output is free-form markdown.
+        - We want deterministic section headings in the result, not
+          whatever cell_lead's generic instruction would produce.
+        - Summaries are cheap and called frequently; bypassing the verdict
+          parser also avoids parse-error retry loops on what is purely
+          presentational output.
+        """
+        prompt = (
+            "You are cell_lead, the orchestrator for this research cell. "
+            "Your job right now is to read the accumulated evidence below "
+            "and produce a concise markdown summary (no more than ~400 "
+            "words) that a human can scan in 30 seconds.\n\n"
+            f"## Cell claim\n{claim_text}\n\n"
+            f"## Iteration\n{iteration}\n\n"
+            "## Accumulated evidence\n"
+            f"{evidence_md}\n\n"
+            "## Output format\n"
+            "Return ONLY markdown with these sections, in this order:\n"
+            "1. **Current state** — one sentence describing where the "
+            "cell stands right now.\n"
+            "2. **Key findings** — 3-6 bullet points, each anchored to a "
+            "specific source or agent verdict. Be concrete, not generic.\n"
+            "3. **Open questions** — 1-3 bullets of what is still "
+            "unresolved, or 'None' if the cell has converged.\n"
+            "4. **Confidence** — a short phrase (e.g. 'high, primary "
+            "sources agree', 'low, contradicting sources', "
+            "'medium, pending red team').\n\n"
+            "Do not repeat the phase-by-phase breakdown from evidence.md "
+            "— that's the raw log. Synthesize across phases."
+        )
+        return self._ask(prompt)
