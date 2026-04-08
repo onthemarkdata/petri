@@ -368,6 +368,101 @@ class TestStatsEndpoint:
 # ── SSE stream ──────────────────────────────────────────────────────────
 
 
+class TestRootEndpoint:
+    def test_root_returns_html(self, api_client):
+        """GET / serves the frontend HTML generated from template."""
+        client, _ = api_client
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "PETRI LAB" in resp.text
+
+    def test_root_html_has_substituted_config(self, api_client):
+        """Verify template variables were substituted."""
+        client, _ = api_client
+        resp = client.get("/")
+        # Should contain JSON-serialized status colors, not raw template vars
+        assert "STATUS_COLORS" in resp.text
+        assert "$status_colors_json" not in resp.text
+        assert "$event_colors_json" not in resp.text
+
+
+class TestDishesEndpoint:
+    def test_dishes_returns_list(self, api_client):
+        """GET /api/dishes returns colony directories."""
+        client, env = api_client
+        resp = client.get("/api/dishes")
+        assert resp.status_code == 200
+        dishes = resp.json()
+        assert isinstance(dishes, list)
+        # The test fixture creates a colony, so there should be one dish
+        assert len(dishes) >= 1
+
+    def test_dishes_empty_when_no_colonies(self, dashboard_env):
+        """GET /api/dishes returns [] when petri-dishes is empty."""
+        import shutil
+
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            pytest.skip("fastapi not installed")
+
+        env = dashboard_env
+        rebuild_sqlite(env["petri_dir"], env["db_path"])
+
+        # Remove all colony directories
+        dishes_dir = env["petri_dir"] / "petri-dishes"
+        if dishes_dir.exists():
+            shutil.rmtree(dishes_dir)
+            dishes_dir.mkdir()
+
+        from petri.dashboard.api import create_app
+
+        app = create_app(env["petri_dir"], env["db_path"])
+        client = TestClient(app, raise_server_exceptions=True)
+
+        resp = client.get("/api/dishes")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
+class TestFrontendBuilder:
+    def test_build_frontend_html_returns_string(self):
+        """build_frontend_html returns a non-empty HTML string."""
+        from petri.dashboard.frontend import build_frontend_html
+
+        html = build_frontend_html()
+        assert isinstance(html, str)
+        assert len(html) > 1000
+        assert html.startswith("<!DOCTYPE html>")
+
+    def test_build_frontend_html_substitutes_all_variables(self):
+        """No unresolved $variable placeholders remain."""
+        from petri.dashboard.frontend import build_frontend_html
+
+        html = build_frontend_html(version="1.2.3")
+        assert "$status_colors_json" not in html
+        assert "$event_colors_json" not in html
+        assert "$queue_active_states_json" not in html
+        assert "$pass_verdicts_json" not in html
+        assert "$petri_version" not in html
+        assert "$starter_claim" not in html
+        assert "v1.2.3" in html
+
+    def test_build_frontend_html_contains_config_data(self):
+        """Verify config-derived data appears in the output."""
+        from petri.dashboard.frontend import build_frontend_html
+
+        html = build_frontend_html()
+        # Status colors should be JSON-embedded
+        assert '"NEW"' in html
+        assert '"VALIDATED"' in html
+        assert "#22c55e" in html
+        # Event types
+        assert "search_executed" in html
+        assert "verdict_issued" in html
+
+
 class TestSSEStream:
     def test_stream_endpoint_registered(self, api_client):
         """Verify the SSE endpoint is registered in the app routes."""
