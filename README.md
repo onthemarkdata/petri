@@ -1,5 +1,4 @@
 ![](petri/assets/petri-title-screen.png)
-*Image Credit: Gemini Pro, April 2026*
 
 # Petri
 
@@ -179,3 +178,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, state machine diagra
 uv pip install -e ".[all]"
 uv run pytest tests/
 ```
+
+## Credit
+- Image Credits: Gemini Pro, April 2026
+- Music by [Karl Casey @ White Bat Audio](https://youtu.be/o9C-4Gln9Tc?si=7Hi3_ouxqvgd28eR)
