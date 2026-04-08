@@ -8,6 +8,9 @@
 
 An agent orchestration framework to grow your AI's context via Claude Code. Decomposes claims into DAGs of logical units and validates them bottom-up through a multi-agent adversarial review pipeline.
 
+## Demo
+https://github.com/user-attachments/assets/ef47dc07-741d-4ac5-9f35-2afb12fc9046
+
 ## Cost Warning
 
 **Petri uses Claude via Claude Code, which costs money.** Each cell goes through 13 agents across multiple iterations, generating significant token usage. A single colony with 10+ cells can produce **thousands of LLM calls** across Socratic analysis, research, critique, debate, red team, and evaluation phases.
