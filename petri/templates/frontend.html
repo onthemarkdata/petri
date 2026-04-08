@@ -96,11 +96,16 @@ body {
   50% { opacity: 0.2; }
 }
 
-/* ── CRT Onboarding ──────────────────────────────────────────────── */
-#screen-onboarding {
-  align-items: center;
-  justify-content: center;
+/* ── Computer / CRT Terminal (also hosts onboarding) ─────────────── */
+#screen-computer {
   background: #000;
+  flex-direction: column;
+}
+#screen-computer .crt-frame {
+  flex: 1;
+  margin: 14px auto 18px;
+  width: min(1100px, 94vw);
+  height: auto;
 }
 .crt-frame {
   position: relative;
@@ -125,6 +130,8 @@ body {
   color: var(--green);
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
+/* When the command input row is present the screen shrinks to leave room. */
+.crt-frame.has-input .crt-screen { bottom: 54px; }
 .crt-screen::-webkit-scrollbar { width: 4px; }
 .crt-screen::-webkit-scrollbar-track { background: transparent; }
 .crt-screen::-webkit-scrollbar-thumb { background: var(--green-dark); border-radius: 2px; }
@@ -144,10 +151,66 @@ body {
   box-shadow: inset 0 0 60px rgba(0,255,136,0.04);
   z-index: 3;
 }
+.crt-input-row {
+  position: absolute;
+  left: 12px; right: 12px; bottom: 12px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 10px;
+  background: rgba(0, 8, 0, 0.9);
+  border: 1px solid #116644;
+  border-radius: 8px;
+  z-index: 4;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.crt-input-row .crt-prompt {
+  color: var(--green);
+  font-weight: bold;
+  font-size: 13px;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+.crt-input-row .crt-cmd {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--green);
+  font-family: inherit;
+  font-size: 13px;
+  caret-color: var(--green);
+}
+.crt-input-row .crt-cmd::placeholder { color: #116644; font-style: italic; }
+.crt-input-row button {
+  background: transparent;
+  border: 1px solid #116644;
+  color: #33bb88;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.crt-input-row button:hover:not(:disabled) { color: var(--green); border-color: var(--green); }
+.crt-input-row button.active { background: rgba(0,255,136,0.15); color: #66ffbb; border-color: #66ffbb; }
+.crt-input-row button.stop { border-color: #663333; color: #ff6b6b; }
+.crt-input-row button.stop:hover:not(:disabled) { border-color: #ff6b6b; background: rgba(255,70,70,0.1); }
+.crt-input-row button:disabled { opacity: 0.35; cursor: not-allowed; }
 .term-line { margin-bottom: 2px; white-space: pre-wrap; word-break: break-word; }
-.term-line.dim { color: #116644; }
-.term-line.bright { color: #66ffbb; }
-.term-line.error { color: #ff4444; }
+.term-line.dim     { color: #116644; }
+.term-line.bright  { color: #66ffbb; }
+.term-line.error   { color: #ff4444; }
+.term-line.cmd     { color: #ffcc00; margin-top: 6px; }
+.term-line.stdout  { color: var(--green); }
+.term-line.stderr  { color: #ff6b6b; }
+.term-line.event   { color: #116644; opacity: 0.85; font-size: 12px; }
+.term-line.system  { color: #33bb88; font-style: italic; }
+.term-line.done    { color: #66ffbb; margin-bottom: 8px; }
+.term-line.done.fail { color: #ff6b6b; }
 .term-prompt { color: #33bb88; }
 .term-cursor {
   display: inline-block;
@@ -200,7 +263,9 @@ body {
   letter-spacing: 2px;
   flex-shrink: 0;
   cursor: pointer;
+  transition: color 0.15s;
 }
+.header-title:hover { color: #ffcc00; }
 .header-nav { display: flex; gap: 2px; margin-left: 24px; }
 .nav-tab {
   padding: 6px 16px;
@@ -440,7 +505,7 @@ body {
 .dag-cell { cursor: pointer; transition: filter 0.15s; }
 .dag-cell:hover { filter: brightness(1.4); }
 
-.dag-edge { fill: none; stroke-linejoin: miter; stroke-linecap: square; }
+.dag-edge { fill: none; stroke-linecap: butt; }
 .dag-edge.intra { stroke: #00ff88; stroke-width: 2; }
 .dag-edge.cross { stroke: #ff3399; stroke-width: 2; stroke-dasharray: 3 3; }
 
@@ -620,10 +685,28 @@ body {
   <div class="title-enter">ENTER PETRI LAB</div>
 </div>
 
-<!-- Onboarding -->
-<div id="screen-onboarding" class="screen">
-  <div class="crt-frame">
+<!-- Computer / CRT terminal (also hosts onboarding when .petri is missing) -->
+<div id="screen-computer" class="screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
+    <div class="header-nav">
+      <button class="nav-tab" data-view="lab">Lab</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+      <button class="nav-tab active" data-view="computer">Computer</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="crt-frame" id="crt-frame">
     <div class="crt-screen" id="crt-output"></div>
+    <div class="crt-input-row" id="crt-input-row" style="display:none">
+      <span class="crt-prompt">PETRI $</span>
+      <input type="text" class="crt-cmd" id="term-cmd"
+             placeholder='type: petri check  ·  petri seed "claim"  ·  petri grow --all'
+             autocomplete="off" spellcheck="false" />
+      <button id="term-detach-btn" title="Run detached (don't stream output)">DETACH</button>
+      <button id="term-stop-btn" class="stop" disabled>STOP</button>
+    </div>
     <div class="crt-scanlines"></div>
     <div class="crt-glow"></div>
   </div>
@@ -632,10 +715,11 @@ body {
 <!-- Lab Overview -->
 <div id="screen-lab" class="screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
     <div class="header-nav">
       <button class="nav-tab active" data-view="lab">Lab</button>
       <button class="nav-tab" data-view="logs">Logs</button>
+      <button class="nav-tab" data-view="computer">Computer</button>
     </div>
     <div class="header-spacer"></div>
     <div class="live-badge" id="live-badge"><div class="live-dot"></div>LIVE</div>
@@ -648,10 +732,11 @@ body {
 <!-- Colony DAG -->
 <div id="screen-colony" class="screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
     <div class="header-nav">
       <button class="nav-tab" data-view="lab">Lab</button>
       <button class="nav-tab" data-view="logs">Logs</button>
+      <button class="nav-tab" data-view="computer">Computer</button>
     </div>
     <div class="header-spacer"></div>
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
@@ -680,10 +765,11 @@ body {
 <!-- Research Logs -->
 <div id="screen-logs" class="screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
     <div class="header-nav">
       <button class="nav-tab" data-view="lab">Lab</button>
       <button class="nav-tab active" data-view="logs">Logs</button>
+      <button class="nav-tab" data-view="computer">Computer</button>
     </div>
     <div class="header-spacer"></div>
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
@@ -714,10 +800,11 @@ body {
 <!-- Cell Detail -->
 <div id="screen-cell" class="screen">
   <div class="header-bar">
-    <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
+    <div class="header-title" onclick="navigate('title')">PETRI LAB</div>
     <div class="header-nav">
       <button class="nav-tab" data-view="lab">Lab</button>
       <button class="nav-tab" data-view="logs">Logs</button>
+      <button class="nav-tab" data-view="computer">Computer</button>
     </div>
     <div class="header-spacer"></div>
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
@@ -846,9 +933,10 @@ function handleRoute() {
     case 'title':
       document.getElementById('screen-title').classList.add('active');
       break;
-    case 'onboarding':
-      document.getElementById('screen-onboarding').classList.add('active');
-      startOnboarding();
+    case 'computer':
+      document.getElementById('screen-computer').classList.add('active');
+      updateNavTabs('computer');
+      loadComputer();
       break;
     case 'lab':
       document.getElementById('screen-lab').classList.add('active');
@@ -893,19 +981,12 @@ document.getElementById('dag-back-btn').addEventListener('click', function() { n
 
 // ── Title Screen ────────────────────────────────────────────────────────
 
-var titleActivated = false;
-
 function handleTitleActivation() {
-  if (titleActivated) return;
-  titleActivated = true;
   startAudio();
-
-  fetch(API + '/api/dishes')
-    .then(function(res) { return res.json(); })
-    .then(function(dishes) {
-      navigate(dishes.length === 0 ? 'onboarding' : 'lab');
-    })
-    .catch(function() { navigate('lab'); });
+  // Every entry to the title screen is a fresh start. The Computer tab
+  // is the first stop — its own loadComputer() decides whether to run
+  // the onboarding wizard (if no .petri) or drop into command mode.
+  navigate('computer');
 }
 
 document.getElementById('screen-title').addEventListener('click', handleTitleActivation);
@@ -938,6 +1019,11 @@ function connectSSE() {
     if (State.currentView === 'lab') loadLabData();
     if (State.currentView === 'colony' && State.currentColony) loadColonyDAG(State.currentColony);
     if (State.currentView === 'cell' && State.currentCell === data.cell_id) loadCellDetail(State.currentCell);
+    // Interleave live events as dim lines in the Computer terminal when
+    // it's idle — same vibe as a background `tail -f` next to your shell.
+    if (State.currentView === 'computer' && TerminalState.mode === 'idle') {
+      termAppend('event', '[' + (data.type || '?') + '] ' + (data.cell_id || '') + ' · ' + (data.agent || ''));
+    }
   });
 
   eventSource.onerror = function() {
@@ -1268,35 +1354,44 @@ function renderDAG(colonyCells, allCells, colonyId, activeSet) {
     });
   }
 
-  // Two-segment elbow path from the source cell's border to the target
-  // cell's border. Horizontal-first if |dx| >= |dy|, else vertical-first.
-  // Result: "M sx,sy L bx,by L tx,ty" — a single right-angle bend.
-  function elbowPath(src, tgt) {
-    var dx = tgt.x - src.x;
-    var dy = tgt.y - src.y;
-    var sx, sy, bx, by, tx, ty;
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      // Exit source on its left/right border at the source's vertical center.
-      sx = src.x + (dx >= 0 ? 1 : -1) * src.width / 2;
-      sy = src.y;
-      // Enter target on its top/bottom border at the target's horizontal center.
-      tx = tgt.x;
-      ty = tgt.y + (dy >= 0 ? -1 : 1) * tgt.height / 2;
-      bx = tx;
-      by = sy;
-    } else {
-      // Exit source on its top/bottom border.
-      sx = src.x;
-      sy = src.y + (dy >= 0 ? 1 : -1) * src.height / 2;
-      // Enter target on its left/right border.
-      tx = tgt.x + (dx >= 0 ? -1 : 1) * tgt.width / 2;
-      ty = tgt.y;
-      bx = sx;
-      by = ty;
+  // Given a rectangle centered at (rect.x, rect.y) with rect.width /
+  // rect.height, return the point on its border that lies along the
+  // ray toward (towardsX, towardsY). Handles the degenerate cases
+  // (dx == 0 or dy == 0) explicitly. Used by straightPath to trim a
+  // center-to-center line so it touches the rectangle borders
+  // without crossing into them.
+  function rectBorderPoint(rect, towardsX, towardsY) {
+    var dx = towardsX - rect.x;
+    var dy = towardsY - rect.y;
+    if (dx === 0 && dy === 0) {
+      return { x: rect.x, y: rect.y };
     }
-    return 'M' + Math.round(sx) + ',' + Math.round(sy) +
-           ' L' + Math.round(bx) + ',' + Math.round(by) +
-           ' L' + Math.round(tx) + ',' + Math.round(ty);
+    var halfWidth = rect.width / 2;
+    var halfHeight = rect.height / 2;
+    var scale;
+    if (dx === 0) {
+      scale = halfHeight / Math.abs(dy);
+    } else if (dy === 0) {
+      scale = halfWidth / Math.abs(dx);
+    } else {
+      scale = Math.min(halfWidth / Math.abs(dx), halfHeight / Math.abs(dy));
+    }
+    return {
+      x: rect.x + dx * scale,
+      y: rect.y + dy * scale,
+    };
+  }
+
+  // Straight line from the source cell's border to the target cell's
+  // border. The line goes directly from src-center to tgt-center, but
+  // trimmed at each rectangle's border so the stroke doesn't cross
+  // into the cell interiors. Replaces the old two-segment elbow path
+  // — straight edges read cleaner on dense colony graphs.
+  function straightPath(src, tgt) {
+    var srcBorder = rectBorderPoint(src, tgt.x, tgt.y);
+    var tgtBorder = rectBorderPoint(tgt, src.x, src.y);
+    return 'M' + Math.round(srcBorder.x) + ',' + Math.round(srcBorder.y) +
+           ' L' + Math.round(tgtBorder.x) + ',' + Math.round(tgtBorder.y);
   }
 
   // Build a compact ID label: "<colony-slug> · L<level>.<seq>".
@@ -1327,13 +1422,15 @@ function renderDAG(colonyCells, allCells, colonyId, activeSet) {
   group.appendChild(edgeLayer);
   group.appendChild(cellLayer);
 
-  // Edges — elbow paths with a single right-angle bend, on the bottom layer.
+  // Edges — straight lines from source border to target border, on
+  // the bottom layer. Replaces the previous two-segment elbow paths,
+  // which looked noisy on dense colony graphs.
   simEdges.forEach(function(edge) {
     var src = simMap[edge.source];
     var tgt = simMap[edge.target];
     if (!src || !tgt) return;
     edgeLayer.appendChild(buildSVGEl('path', {
-      d: elbowPath(src, tgt),
+      d: straightPath(src, tgt),
       class: 'dag-edge ' + (edge.kind === 'cross' ? 'cross' : 'intra'),
     }));
   });
@@ -1702,12 +1799,7 @@ function renderCellDetail(cell) {
 
 // ── CRT Onboarding Terminal ─────────────────────────────────────────────
 
-var onboardingStarted = false;
-
 function startOnboarding() {
-  if (onboardingStarted) return;
-  onboardingStarted = true;
-
   var output = document.getElementById('crt-output');
   output.textContent = '';
 
@@ -1884,10 +1976,254 @@ function startOnboarding() {
 
     addLineInstant('');
     await waitFor(800);
-    await addLine('Initialization complete. Entering Petri Lab...', 'bright');
-    await waitFor(1200);
-    navigate('lab');
+    await addLine('Initialization complete. Switching to command mode.', 'bright');
+    await waitFor(800);
+    termEnterCommandMode();
   })();
+}
+
+// ── Computer Terminal (command mode) ────────────────────────────────────
+
+var TerminalState = {
+  mode: null,       // null | 'onboarding' | 'idle' | 'running'
+  sessionId: null,
+  eventSource: null,
+  history: [],
+  historyIndex: -1,
+  detachNext: false,
+  inputHandlerBound: false,
+};
+
+var PETRI_SUBCOMMANDS = [
+  'init', 'seed', 'grow', 'check', 'feed', 'stop',
+  'scan', 'graph', 'connect', 'inspect', 'launch',
+];
+
+function termOutput() { return document.getElementById('crt-output'); }
+
+function termAppend(kind, text) {
+  var output = termOutput();
+  if (!output) return;
+  var line = buildEl('div', { className: 'term-line ' + kind });
+  line.textContent = text;
+  output.appendChild(line);
+  var nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 120;
+  if (nearBottom) output.scrollTop = output.scrollHeight;
+  while (output.children.length > 2000) output.removeChild(output.firstChild);
+}
+
+function termSetRunning(running) {
+  TerminalState.mode = running ? 'running' : 'idle';
+  var stopBtn = document.getElementById('term-stop-btn');
+  if (stopBtn) stopBtn.disabled = !running;
+}
+
+function termTokenize(raw) {
+  var tokens = [];
+  var buf = '';
+  var inQuote = false;
+  for (var i = 0; i < raw.length; i++) {
+    var ch = raw[i];
+    if (ch === '"') { inQuote = !inQuote; continue; }
+    if (ch === ' ' && !inQuote) {
+      if (buf.length) { tokens.push(buf); buf = ''; }
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.length) tokens.push(buf);
+  return tokens;
+}
+
+function termBindInputHandlers() {
+  var input = document.getElementById('term-cmd');
+  var stopBtn = document.getElementById('term-stop-btn');
+  var detachBtn = document.getElementById('term-detach-btn');
+  if (!input || TerminalState.inputHandlerBound) return;
+  TerminalState.inputHandlerBound = true;
+
+  input.addEventListener('keydown', function(evt) {
+    if (evt.key === 'Enter') {
+      evt.preventDefault();
+      var raw = input.value.trim();
+      if (raw.length === 0) return;
+      TerminalState.history.push(raw);
+      TerminalState.historyIndex = -1;
+      input.value = '';
+      termRun(raw);
+    } else if (evt.key === 'ArrowUp') {
+      if (TerminalState.history.length === 0) return;
+      evt.preventDefault();
+      if (TerminalState.historyIndex === -1) {
+        TerminalState.historyIndex = TerminalState.history.length - 1;
+      } else if (TerminalState.historyIndex > 0) {
+        TerminalState.historyIndex--;
+      }
+      input.value = TerminalState.history[TerminalState.historyIndex];
+    } else if (evt.key === 'ArrowDown') {
+      if (TerminalState.historyIndex === -1) return;
+      evt.preventDefault();
+      if (TerminalState.historyIndex < TerminalState.history.length - 1) {
+        TerminalState.historyIndex++;
+        input.value = TerminalState.history[TerminalState.historyIndex];
+      } else {
+        TerminalState.historyIndex = -1;
+        input.value = '';
+      }
+    } else if ((evt.ctrlKey || evt.metaKey) && evt.key === 'c' && TerminalState.mode === 'running') {
+      evt.preventDefault();
+      termStop();
+    }
+  });
+
+  stopBtn.addEventListener('click', termStop);
+  detachBtn.addEventListener('click', function() {
+    TerminalState.detachNext = !TerminalState.detachNext;
+    detachBtn.classList.toggle('active', TerminalState.detachNext);
+  });
+}
+
+function termEnterCommandMode() {
+  TerminalState.mode = 'idle';
+  var frame = document.getElementById('crt-frame');
+  var inputRow = document.getElementById('crt-input-row');
+  if (frame) frame.classList.add('has-input');
+  if (inputRow) inputRow.style.display = 'flex';
+
+  termAppend('system', '');
+  termAppend('bright', '─── command mode ───');
+  termAppend('dim', 'type full commands like:  petri check   ·   petri seed "your claim"');
+  termAppend('dim', 'subcommands: ' + PETRI_SUBCOMMANDS.join(' '));
+  termAppend('dim', 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right');
+  termAppend('system', '');
+
+  termBindInputHandlers();
+  setTimeout(function() {
+    var input = document.getElementById('term-cmd');
+    if (input) input.focus();
+  }, 30);
+}
+
+function termRun(raw) {
+  if (TerminalState.mode === 'running') {
+    termAppend('system', '(a command is already running — press STOP first)');
+    return;
+  }
+  var tokens = termTokenize(raw);
+  if (tokens.length === 0) return;
+
+  // Enforce `petri <subcommand> [args]` so the UX matches the real CLI.
+  if (tokens[0] !== 'petri') {
+    termAppend('stderr', 'Commands must start with "petri". Try: petri ' + (tokens[0] || 'check'));
+    return;
+  }
+  if (tokens.length < 2) {
+    termAppend('stderr', 'Missing subcommand. Try: petri check');
+    return;
+  }
+  var command = tokens[1];
+  var args = tokens.slice(2);
+
+  if (PETRI_SUBCOMMANDS.indexOf(command) === -1) {
+    termAppend('stderr', 'Unknown petri subcommand: ' + command);
+    termAppend('dim', 'Allowed: ' + PETRI_SUBCOMMANDS.join(', '));
+    return;
+  }
+
+  termAppend('cmd', '$ ' + raw);
+  var detach = !!TerminalState.detachNext;
+
+  fetch(API + '/api/proc/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: command, args: args, detach: detach }),
+  }).then(function(res) {
+    return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+  }).then(function(wrap) {
+    if (!wrap.ok) {
+      termAppend('stderr', 'start failed: ' + ((wrap.data && wrap.data.detail) || 'unknown'));
+      return;
+    }
+    TerminalState.sessionId = wrap.data.stream_id;
+    termSetRunning(true);
+
+    if (detach) {
+      termAppend('dim', '[detached; running in background as PID ' + wrap.data.pid + ']');
+      TerminalState.sessionId = null;
+      termSetRunning(false);
+      return;
+    }
+    termStreamOutput(wrap.data.stream_id);
+  }).catch(function(err) {
+    termAppend('stderr', 'start failed: ' + err.message);
+  });
+}
+
+function termStreamOutput(streamId) {
+  if (TerminalState.eventSource) TerminalState.eventSource.close();
+  var source = new EventSource(API + '/api/proc/stream/' + encodeURIComponent(streamId));
+  TerminalState.eventSource = source;
+
+  source.addEventListener('stdout', function(evt) { termAppend('stdout', JSON.parse(evt.data).line); });
+  source.addEventListener('stderr', function(evt) { termAppend('stderr', JSON.parse(evt.data).line); });
+  source.addEventListener('system', function(evt) { termAppend('system', JSON.parse(evt.data).line); });
+  source.addEventListener('done', function(evt) {
+    var payload = JSON.parse(evt.data);
+    var line = buildEl('div', { className: 'term-line done' + (payload.code === 0 ? '' : ' fail') });
+    line.textContent = '[done ' + payload.code + ']';
+    termOutput().appendChild(line);
+    source.close();
+    TerminalState.eventSource = null;
+    TerminalState.sessionId = null;
+    termSetRunning(false);
+  });
+  source.onerror = function() {
+    source.close();
+    if (TerminalState.eventSource === source) {
+      TerminalState.eventSource = null;
+      termSetRunning(false);
+    }
+  };
+}
+
+function termStop() {
+  if (!TerminalState.sessionId) return;
+  fetch(API + '/api/proc/stop/' + encodeURIComponent(TerminalState.sessionId), { method: 'POST' })
+    .catch(function() {});  // done event will fire regardless
+}
+
+function loadComputer() {
+  // Re-entry to the Computer tab: if we were already in command mode,
+  // just refocus the input. Otherwise check for dishes and decide whether
+  // to run onboarding or drop straight into command mode.
+  if (TerminalState.mode === 'idle' || TerminalState.mode === 'running') {
+    setTimeout(function() {
+      var input = document.getElementById('term-cmd');
+      if (input) input.focus();
+    }, 30);
+    return;
+  }
+  if (TerminalState.mode === 'onboarding') {
+    // Wizard still running; don't restart.
+    return;
+  }
+
+  var output = termOutput();
+  if (output) output.textContent = '';
+
+  fetch(API + '/api/dishes').then(function(res) { return res.json(); }).then(function(dishes) {
+    if (Array.isArray(dishes) && dishes.length > 0) {
+      termAppend('bright', 'PETRI COMPUTER · localhost');
+      termAppend('dim', 'Dishes: ' + dishes.map(function(d) { return d.id; }).join(', '));
+      termEnterCommandMode();
+      return;
+    }
+    TerminalState.mode = 'onboarding';
+    startOnboarding();
+  }).catch(function(err) {
+    termAppend('error', 'Could not reach /api/dishes: ' + err.message);
+    termEnterCommandMode();
+  });
 }
 
 // ── Initialize ──────────────────────────────────────────────────────────
