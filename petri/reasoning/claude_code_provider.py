@@ -123,6 +123,49 @@ def _extract_text_delta(event: dict) -> str:
 
 
 
+def _process_stream_lines(
+    lines, on_progress: Callable[[str], None]
+) -> str:
+    """Process claude ``--output-format stream-json`` output lines.
+
+    Accumulates text deltas from JSON events into a single buffer and
+    feeds the most recent text line to ``on_progress`` after each delta.
+    Returns the full accumulated text.
+
+    Non-JSON lines are **dropped silently** rather than being treated
+    as model output. claude CLI in stream-json mode emits structured
+    JSON events for everything model-related; any plain-text line on
+    stdout is almost always error noise (auth banner, rate-limit
+    message, debug print) and should NOT pollute the response buffer
+    or the spinner. Dropped lines are logged at DEBUG level for
+    postmortem visibility.
+
+    ``lines`` is any iterable of strings — a real ``proc.stdout`` in
+    production, a list in tests.
+    """
+    buffer: list[str] = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            logger.debug(
+                "Discarding non-JSON stream line: %r", line[:200]
+            )
+            continue
+        chunk = _extract_text_delta(event)
+        if not chunk:
+            continue
+        buffer.append(chunk)
+        joined = "".join(buffer)
+        last_line = joined.rsplit("\n", 1)[-1]
+        if last_line:
+            on_progress(last_line)
+    return "".join(buffer)
+
+
 def _extract_json(text: str) -> dict | None:
     """Try to extract a JSON object from LLM output."""
     try:
@@ -415,28 +458,10 @@ class ClaudeCodeProvider:
                 "Install: https://docs.anthropic.com/en/docs/claude-code"
             ) from None
 
-        buffer: list[str] = []
+        accumulated_text = ""
         assert proc.stdout is not None
         try:
-            for raw_line in proc.stdout:
-                line = raw_line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    # Plain text fallback — treat the whole line as a chunk
-                    buffer.append(line)
-                    on_progress(line)
-                    continue
-                chunk = _extract_text_delta(event)
-                if not chunk:
-                    continue
-                buffer.append(chunk)
-                joined = "".join(buffer)
-                last_line = joined.rsplit("\n", 1)[-1]
-                if last_line:
-                    on_progress(last_line)
+            accumulated_text = _process_stream_lines(proc.stdout, on_progress)
         finally:
             try:
                 proc.wait(timeout=300)
@@ -451,7 +476,7 @@ class ClaudeCodeProvider:
                     stderr = proc.stderr.read() or ""
                 except Exception:
                     stderr = ""
-            partial_stdout = "".join(buffer).strip()
+            partial_stdout = accumulated_text.strip()
             logger.warning(
                 "claude CLI streaming error (exit %d). stderr=%r stdout=%r",
                 proc.returncode,
@@ -464,7 +489,7 @@ class ClaudeCodeProvider:
                 stdout=partial_stdout,
             )
 
-        return "".join(buffer).strip()
+        return accumulated_text.strip()
 
     def assess_claim_substance(
         self,

@@ -172,6 +172,131 @@ def test_assess_node_accepts_socratic_questioner_role():
     assert result.verdict == "CLARIFIED"
 
 
+# ── _process_stream_lines (stream-json line handling) ──────────────────
+
+
+def _make_text_delta_event(text: str) -> str:
+    """Build a stream-json text_delta event line as claude CLI emits it."""
+    import json as _json
+    return _json.dumps({
+        "type": "content_block_delta",
+        "delta": {"type": "text_delta", "text": text},
+    })
+
+
+def test_process_stream_lines_accumulates_text_deltas():
+    """Happy path: a sequence of text_delta events is concatenated into
+    the returned buffer and each chunk fires on_progress."""
+    from petri.reasoning.claude_code_provider import _process_stream_lines
+
+    progress_calls: list[str] = []
+    lines = [
+        _make_text_delta_event("Hello "),
+        _make_text_delta_event("world"),
+        _make_text_delta_event("!"),
+    ]
+    result = _process_stream_lines(lines, progress_calls.append)
+    assert result == "Hello world!"
+    # on_progress fires after each delta with the latest line.
+    assert progress_calls == ["Hello ", "Hello world", "Hello world!"]
+
+
+def test_process_stream_lines_drops_non_json_lines():
+    """Critical: non-JSON lines (error noise, debug prints) must NOT
+    appear in the response buffer or in on_progress calls. They are
+    dropped silently — the spinner is for model output only."""
+    from petri.reasoning.claude_code_provider import _process_stream_lines
+
+    progress_calls: list[str] = []
+    lines = [
+        "Error: rate limit exceeded",      # plain-text noise
+        _make_text_delta_event("real "),
+        "claude CLI debug: connecting...",  # plain-text noise
+        _make_text_delta_event("output"),
+        "Some other plain line",            # plain-text noise
+    ]
+    result = _process_stream_lines(lines, progress_calls.append)
+    # Buffer contains ONLY model text — no error noise.
+    assert result == "real output"
+    # on_progress NEVER receives the noise lines.
+    assert "Error: rate limit exceeded" not in progress_calls
+    assert "claude CLI debug: connecting..." not in progress_calls
+    assert "Some other plain line" not in progress_calls
+    # And it DOES receive the real chunks.
+    assert progress_calls == ["real ", "real output"]
+
+
+def test_process_stream_lines_skips_empty_lines():
+    """Whitespace-only lines are silently skipped before JSON parsing."""
+    from petri.reasoning.claude_code_provider import _process_stream_lines
+
+    progress_calls: list[str] = []
+    lines = [
+        "",
+        "   ",
+        "\n",
+        _make_text_delta_event("hello"),
+        "",
+    ]
+    result = _process_stream_lines(lines, progress_calls.append)
+    assert result == "hello"
+    assert progress_calls == ["hello"]
+
+
+def test_process_stream_lines_handles_events_without_text():
+    """Events that aren't text_delta (e.g. message_start, ping) yield no
+    text and don't fire on_progress."""
+    from petri.reasoning.claude_code_provider import _process_stream_lines
+    import json as _json
+
+    progress_calls: list[str] = []
+    lines = [
+        _json.dumps({"type": "message_start"}),
+        _make_text_delta_event("real text"),
+        _json.dumps({"type": "ping"}),
+    ]
+    result = _process_stream_lines(lines, progress_calls.append)
+    assert result == "real text"
+    assert progress_calls == ["real text"]
+
+
+def test_process_stream_lines_uses_last_line_for_progress():
+    """When a delta contains a newline, on_progress receives only the
+    text after the most recent newline (the 'last visible line')."""
+    from petri.reasoning.claude_code_provider import _process_stream_lines
+
+    progress_calls: list[str] = []
+    lines = [
+        _make_text_delta_event("first line\nsecond line"),
+        _make_text_delta_event(" continued"),
+    ]
+    result = _process_stream_lines(lines, progress_calls.append)
+    assert result == "first line\nsecond line continued"
+    # First call: only "second line" (after the newline).
+    # Second call: "second line continued" (still after the newline).
+    assert progress_calls == ["second line", "second line continued"]
+
+
+def test_process_stream_lines_does_not_pollute_buffer_on_noise():
+    """Regression for the bug that surfaced 'claude CLI error (exit 1):'
+    on the spinner: even if the noise line happens to look like a
+    sentence the model might have produced, it must not end up in the
+    response buffer that downstream parsers see."""
+    from petri.reasoning.claude_code_provider import _process_stream_lines
+
+    progress_calls: list[str] = []
+    lines = [
+        "claude CLI error (exit 1):",  # the exact string the user saw
+        _make_text_delta_event('{"verdict": "EVIDENCE_SUFFICIENT"}'),
+    ]
+    result = _process_stream_lines(lines, progress_calls.append)
+    # The noise is dropped; only the real model output remains.
+    assert result == '{"verdict": "EVIDENCE_SUFFICIENT"}'
+    assert "claude CLI error" not in result
+    # And the spinner never sees the noise either.
+    assert all("claude CLI error" not in call for call in progress_calls)
+
+
 # ── _is_transient_failure classification ────────────────────────────────
 
 
