@@ -97,12 +97,12 @@ class TestCheck:
         assert len(data) == 5
 
 
-# ── analyze ──────────────────────────────────────────────────────────────
+# ── graph ────────────────────────────────────────────────────────────────
 
 
-class TestAnalyze:
-    def test_analyze_graph(self, seeded_petri_dir):
-        result = runner.invoke(app, ["analyze", "--graph"])
+class TestGraph:
+    def test_graph(self, seeded_petri_dir):
+        result = runner.invoke(app, ["graph"])
         assert result.exit_code == 0, result.output
 
         out = result.output
@@ -113,9 +113,9 @@ class TestAnalyze:
         # Level markers
         assert "L0" in out or "L1" in out or "L2" in out
 
-    def test_analyze_graph_dot_format(self, seeded_petri_dir):
+    def test_graph_dot_format(self, seeded_petri_dir):
         result = runner.invoke(
-            app, ["analyze", "--graph", "--format", "dot"]
+            app, ["graph", "--format", "dot"]
         )
         assert result.exit_code == 0, result.output
         assert "digraph" in result.output
@@ -133,8 +133,8 @@ class TestFullFlow:
         check_count = len(check_data)
         assert check_count == 5  # canonical diamond
 
-        # analyze --graph
-        r = runner.invoke(app, ["analyze", "--graph"])
+        # graph
+        r = runner.invoke(app, ["graph"])
         assert r.exit_code == 0, r.output
 
         # Node count consistency: check should report the same number

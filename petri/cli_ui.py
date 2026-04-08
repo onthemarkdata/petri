@@ -11,7 +11,11 @@ import shutil
 import sys
 import threading
 import time
-from typing import Optional, TextIO
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import NoReturn, Optional, TextIO
+
+import typer
 
 
 _FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
@@ -146,3 +150,146 @@ class Spinner:
                 return
             if self._stop_event.wait(_FRAME_INTERVAL):
                 return
+
+
+# ── error helper ─────────────────────────────────────────────────────────
+
+
+def print_error_and_exit(message: str, *, code: int = 1) -> NoReturn:
+    """Print an error message to stderr and exit with the given code.
+
+    Replaces the 40+ inlined copies of::
+
+        typer.echo(f"Error: ...", err=True)
+        raise typer.Exit(code=1)
+
+    in ``petri/cli.py``.
+    """
+    typer.echo(message, err=True)
+    raise typer.Exit(code=code)
+
+
+# ── colony visualization renderers ───────────────────────────────────────
+
+
+def render_text_tree(graph, colony) -> None:
+    """Render a colony as an indented text tree."""
+    typer.echo(f"\nColony: {colony.id}")
+    typer.echo(f"Center: {colony.center_claim}")
+    typer.echo("")
+
+    nodes = graph.get_nodes()
+    if not nodes:
+        typer.echo("  (empty)")
+        return
+
+    for node in nodes:
+        indent = "  " * (node.level + 1)
+        deps = graph.get_dependencies(node.id)
+        dep_arrow = ""
+        if deps:
+            dep_arrow = f" -> [{', '.join(deps)}]"
+        typer.echo(f"{indent}[L{node.level}] {node.id}: {node.claim_text}{dep_arrow}")
+
+    typer.echo("")
+
+
+def render_dot(graph, colony) -> None:
+    """Render a colony as Graphviz DOT format."""
+    typer.echo(f'digraph "{colony.id}" {{')
+    typer.echo("  rankdir=TB;")
+    typer.echo(f'  label="{colony.center_claim}";')
+    typer.echo("")
+
+    for node in graph.get_nodes():
+        label = node.claim_text.replace('"', '\\"')
+        if len(label) > 50:
+            label = label[:47] + "..."
+        typer.echo(f'  "{node.id}" [label="{label}\\nL{node.level}"];')
+
+    typer.echo("")
+
+    for edge in graph.get_edges():
+        style = ""
+        if edge.edge_type == "cross_colony":
+            style = ' [style=dashed, color=blue]'
+        typer.echo(f'  "{edge.from_node}" -> "{edge.to_node}"{style};')
+
+    typer.echo("}")
+
+
+# ── grow status loop ─────────────────────────────────────────────────────
+
+
+def grow_status_loop(
+    *,
+    petri_dir: Path,
+    queue_path: Path,
+    spinner,
+    stop_event,
+    interval_seconds: float,
+) -> None:
+    """Daemon-thread body that prints periodic progress lines.
+
+    Each tick (``interval_seconds``):
+
+    * snapshot queue state via ``get_state_summary``
+    * walk every ``events.jsonl`` under ``petri-dishes/`` and pull recent
+      ``verdict_issued`` and ``convergence_checked`` events written since
+      the previous tick (newest-first, top 5)
+    * print all of that as permanent lines above the live spinner
+
+    Shuts down promptly when ``stop_event`` is set.
+    """
+    from petri.engine.grow_loop import format_state_summary
+    from petri.storage.event_log import query_events
+    from petri.storage.paths import iter_events_files
+    from petri.storage.queue import get_state_summary
+
+    cutoff_iso = datetime.now(timezone.utc).isoformat()
+
+    while not stop_event.is_set():
+        # Wait first so the very first status line lands one interval in,
+        # not at t=0 (which would race with the loop's own startup output).
+        if stop_event.wait(timeout=interval_seconds):
+            return
+
+        try:
+            state_counts = get_state_summary(queue_path)
+        except Exception:
+            state_counts = {}
+
+        spinner.print_line(f"status: {format_state_summary(state_counts)}")
+
+        recent_events: list[dict] = []
+        for events_file in iter_events_files(petri_dir):
+            try:
+                for event_type in ("verdict_issued", "convergence_checked"):
+                    recent_events.extend(
+                        query_events(
+                            events_file,
+                            event_type=event_type,
+                            since=cutoff_iso,
+                        )
+                    )
+            except Exception:
+                continue
+
+        recent_events.sort(
+            key=lambda evt: evt.get("timestamp", ""), reverse=True
+        )
+
+        for event in recent_events[:5]:
+            event_type = event.get("type", "")
+            node_id = event.get("node_id", "")
+            agent = event.get("agent", "")
+            data = event.get("data", {}) or {}
+            verdict = data.get("verdict") or data.get("status") or ""
+            summary_text = data.get("summary", "")
+            line = f"{event_type} {node_id} {agent} {verdict}".strip()
+            if summary_text:
+                line = f"{line} — {summary_text}"
+            spinner.print_line(line)
+
+        # Advance the cutoff so the next tick only fetches truly new events
+        cutoff_iso = datetime.now(timezone.utc).isoformat()

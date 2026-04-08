@@ -123,11 +123,11 @@ def test_seed_persists_center_dependencies_to_disk(petri_dir_for_seed, monkeypat
     fake_provider = SeedFakeProvider()
 
     # Replace the live ClaudeCodeProvider resolver with one that always
-    # hands the CLI our deterministic fake. The CLI imports
-    # ``_resolve_provider`` from its own module, so patching the
-    # attribute on ``petri.cli`` is sufficient.
+    # hands the CLI our deterministic fake. The seed command imports
+    # ``resolve_provider`` from ``petri.cli._bootstrap`` into its own
+    # module namespace, so we patch the bound name on ``petri.cli.seed``.
     monkeypatch.setattr(
-        "petri.cli._resolve_provider", lambda petri_dir: fake_provider
+        "petri.cli.seed.resolve_provider", lambda petri_dir: fake_provider
     )
 
     runner = CliRunner()

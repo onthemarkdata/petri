@@ -12,10 +12,19 @@ import io
 import re
 import threading
 import time
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import typer
 
-from petri.cli_ui import Spinner
+from petri.cli_ui import (
+    Spinner,
+    grow_status_loop,
+    print_error_and_exit,
+    render_dot,
+    render_text_tree,
+)
 
 
 class _FakeTtyBuffer(io.StringIO):
@@ -157,3 +166,292 @@ class TestTtyMode:
                 raise ValueError("nope")
         out = buf.getvalue()
         assert "✗ stage" in out
+
+
+# ── print_error_and_exit ─────────────────────────────────────────────────
+
+
+class TestPrintErrorAndExit:
+    def test_prints_to_stderr_and_raises(self, capsys):
+        with pytest.raises(typer.Exit) as exc_info:
+            print_error_and_exit("Error: something bad happened")
+        captured = capsys.readouterr()
+        assert "Error: something bad happened" in captured.err
+        # Default code is 1
+        assert exc_info.value.exit_code == 1
+
+    def test_default_code_is_one(self):
+        with pytest.raises(typer.Exit) as exc_info:
+            print_error_and_exit("boom")
+        assert exc_info.value.exit_code == 1
+
+    def test_custom_code_is_honored(self, capsys):
+        with pytest.raises(typer.Exit) as exc_info:
+            print_error_and_exit("nope", code=2)
+        captured = capsys.readouterr()
+        assert "nope" in captured.err
+        assert exc_info.value.exit_code == 2
+
+
+# ── render_text_tree / render_dot fixtures ──────────────────────────────
+
+
+class _FakeNode:
+    def __init__(self, node_id: str, level: int, claim_text: str) -> None:
+        self.id = node_id
+        self.level = level
+        self.claim_text = claim_text
+
+
+class _FakeEdge:
+    def __init__(self, from_node: str, to_node: str, edge_type: str = "intra_colony") -> None:
+        self.from_node = from_node
+        self.to_node = to_node
+        self.edge_type = edge_type
+
+
+class _FakeGraph:
+    def __init__(self, nodes: list[_FakeNode], edges: list[_FakeEdge], deps: dict[str, list[str]] | None = None) -> None:
+        self._nodes = nodes
+        self._edges = edges
+        self._deps = deps or {}
+
+    def get_nodes(self) -> list[_FakeNode]:
+        return list(self._nodes)
+
+    def get_edges(self) -> list[_FakeEdge]:
+        return list(self._edges)
+
+    def get_dependencies(self, node_id: str) -> list[str]:
+        return list(self._deps.get(node_id, []))
+
+
+class _FakeColony:
+    def __init__(self, colony_id: str, center_claim: str) -> None:
+        self.id = colony_id
+        self.center_claim = center_claim
+
+
+# ── render_text_tree ─────────────────────────────────────────────────────
+
+
+class TestRenderTextTree:
+    def test_outputs_levels_in_order(self, capsys):
+        root_node = _FakeNode("dish-col-0-0", level=0, claim_text="root claim")
+        child_node = _FakeNode("dish-col-1-0", level=1, claim_text="child claim")
+        graph = _FakeGraph(
+            nodes=[root_node, child_node],
+            edges=[],
+            deps={"dish-col-1-0": ["dish-col-0-0"]},
+        )
+        colony = _FakeColony("dish-col", "root claim")
+
+        render_text_tree(graph, colony)
+        captured = capsys.readouterr()
+        output = captured.out
+
+        # Level-0 line must appear before the level-1 line in stdout.
+        level_zero_index = output.find("[L0] dish-col-0-0")
+        level_one_index = output.find("[L1] dish-col-1-0")
+        assert level_zero_index >= 0
+        assert level_one_index >= 0
+        assert level_zero_index < level_one_index
+
+        # Colony header present.
+        assert "Colony: dish-col" in output
+        assert "Center: root claim" in output
+
+        # Dependency arrow on the child line.
+        assert "-> [dish-col-0-0]" in output
+
+    def test_empty_graph_emits_empty_marker(self, capsys):
+        graph = _FakeGraph(nodes=[], edges=[])
+        colony = _FakeColony("dish-empty", "nothing here")
+        render_text_tree(graph, colony)
+        captured = capsys.readouterr()
+        assert "(empty)" in captured.out
+
+
+# ── render_dot ───────────────────────────────────────────────────────────
+
+
+class TestRenderDot:
+    def test_outputs_valid_dot_syntax(self, capsys):
+        first_node = _FakeNode("dish-col-0-0", level=0, claim_text="first")
+        second_node = _FakeNode("dish-col-1-0", level=1, claim_text="second")
+        edge = _FakeEdge("dish-col-0-0", "dish-col-1-0")
+        graph = _FakeGraph(nodes=[first_node, second_node], edges=[edge])
+        colony = _FakeColony("dish-col", "root claim")
+
+        render_dot(graph, colony)
+        captured = capsys.readouterr()
+        output = captured.out
+
+        assert 'digraph "dish-col"' in output
+        assert "{" in output
+        assert "}" in output
+        assert '"dish-col-0-0" -> "dish-col-1-0"' in output
+
+    def test_cross_colony_edge_is_dashed_blue(self, capsys):
+        first_node = _FakeNode("dish-a-0-0", level=0, claim_text="a")
+        second_node = _FakeNode("dish-b-0-0", level=0, claim_text="b")
+        edge = _FakeEdge("dish-a-0-0", "dish-b-0-0", edge_type="cross_colony")
+        graph = _FakeGraph(nodes=[first_node, second_node], edges=[edge])
+        colony = _FakeColony("dish-a", "claim")
+
+        render_dot(graph, colony)
+        captured = capsys.readouterr()
+        assert "style=dashed" in captured.out
+        assert "color=blue" in captured.out
+
+    def test_long_label_is_truncated(self, capsys):
+        long_text = "x" * 80
+        node = _FakeNode("dish-col-0-0", level=0, claim_text=long_text)
+        graph = _FakeGraph(nodes=[node], edges=[])
+        colony = _FakeColony("dish-col", "claim")
+        render_dot(graph, colony)
+        captured = capsys.readouterr()
+        assert "..." in captured.out
+
+
+# ── grow_status_loop ─────────────────────────────────────────────────────
+
+
+class _RecordingSpinner:
+    """Tiny stand-in for Spinner that just records print_line calls."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def print_line(self, text: str) -> None:
+        self.lines.append(text)
+
+
+class TestGrowStatusLoop:
+    def test_exits_when_stop_event_set(self, tmp_path, monkeypatch):
+        # Stop event is already set before the loop runs — it should exit
+        # on the very first wait() and return within ~2× the interval.
+        petri_dir = tmp_path / ".petri"
+        petri_dir.mkdir()
+        queue_path = petri_dir / "queue.json"
+
+        # Patch out storage imports so no real filesystem access is needed.
+        import petri.storage.event_log as event_log_mod
+        import petri.storage.queue as queue_mod
+
+        monkeypatch.setattr(
+            queue_mod, "get_state_summary", lambda _path: {}, raising=True
+        )
+        monkeypatch.setattr(
+            event_log_mod, "query_events", lambda *args, **kwargs: [], raising=True
+        )
+
+        spinner = _RecordingSpinner()
+        stop_event = threading.Event()
+        stop_event.set()  # Pre-set: loop should not iterate at all.
+
+        interval_seconds = 0.05
+        start_time = time.monotonic()
+        grow_status_loop(
+            petri_dir=petri_dir,
+            queue_path=queue_path,
+            spinner=spinner,
+            stop_event=stop_event,
+            interval_seconds=interval_seconds,
+        )
+        elapsed = time.monotonic() - start_time
+
+        # Should have returned well under 2× the interval since stop was pre-set.
+        assert elapsed < interval_seconds * 2 + 0.2
+        # And should never have called print_line, because the loop exited
+        # on the very first while-check without advancing.
+        assert spinner.lines == []
+
+    def test_calls_print_line_with_status_header(self, tmp_path, monkeypatch):
+        petri_dir = tmp_path / ".petri"
+        petri_dir.mkdir()
+        queue_path = petri_dir / "queue.json"
+
+        # Stub storage so we get one deterministic state snapshot.
+        import petri.storage.event_log as event_log_mod
+        import petri.storage.queue as queue_mod
+
+        monkeypatch.setattr(
+            queue_mod,
+            "get_state_summary",
+            lambda _path: {"research_active": 2, "done": 1},
+            raising=True,
+        )
+        monkeypatch.setattr(
+            event_log_mod, "query_events", lambda *args, **kwargs: [], raising=True
+        )
+
+        spinner = _RecordingSpinner()
+        stop_event = threading.Event()
+
+        # Fire a background thread that signals stop after one tick has
+        # definitely elapsed. Interval is tiny.
+        interval_seconds = 0.05
+
+        def stop_after_one_tick() -> None:
+            time.sleep(interval_seconds * 2)
+            stop_event.set()
+
+        stopper = threading.Thread(target=stop_after_one_tick)
+        stopper.start()
+
+        grow_status_loop(
+            petri_dir=petri_dir,
+            queue_path=queue_path,
+            spinner=spinner,
+            stop_event=stop_event,
+            interval_seconds=interval_seconds,
+        )
+
+        stopper.join(timeout=1.0)
+
+        # At least one status line should have been printed, and it should
+        # start with the "status:" header.
+        assert spinner.lines, "expected at least one print_line call"
+        status_lines = [line for line in spinner.lines if "status" in line]
+        assert status_lines, f"no status header in recorded lines: {spinner.lines}"
+        # And the state summary text should include the counts we stubbed.
+        joined = " ".join(status_lines)
+        assert "research_active=2" in joined
+        assert "done=1" in joined
+
+    def test_empty_state_summary_prints_queue_empty(self, tmp_path, monkeypatch):
+        petri_dir = tmp_path / ".petri"
+        petri_dir.mkdir()
+        queue_path = petri_dir / "queue.json"
+
+        import petri.storage.event_log as event_log_mod
+        import petri.storage.queue as queue_mod
+
+        monkeypatch.setattr(
+            queue_mod, "get_state_summary", lambda _path: {}, raising=True
+        )
+        monkeypatch.setattr(
+            event_log_mod, "query_events", lambda *args, **kwargs: [], raising=True
+        )
+
+        spinner = _RecordingSpinner()
+        stop_event = threading.Event()
+        interval_seconds = 0.05
+
+        def stop_after_one_tick() -> None:
+            time.sleep(interval_seconds * 2)
+            stop_event.set()
+
+        stopper = threading.Thread(target=stop_after_one_tick)
+        stopper.start()
+        grow_status_loop(
+            petri_dir=petri_dir,
+            queue_path=queue_path,
+            spinner=spinner,
+            stop_event=stop_event,
+            interval_seconds=interval_seconds,
+        )
+        stopper.join(timeout=1.0)
+
+        assert any("queue empty" in line for line in spinner.lines)

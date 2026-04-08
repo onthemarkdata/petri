@@ -76,6 +76,11 @@ pip install petri-grow
 
 This installs the CLI and core library. Claude Code must be authenticated (see above).
 
+## Breaking changes
+
+**Next release:** `petri analyze` has been removed. Use `petri launch` (was `--dashboard`),
+`petri scan` (was `--scan`), `petri graph` (was `--graph`), and `petri connect` (was `--connect`).
+
 ## Quickstart
 
 ```bash
@@ -102,10 +107,10 @@ petri feed https://arxiv.org/abs/2026.12345
 # → Ingests content, matches to relevant nodes, flags for re-validation
 
 # 6. Analyze
-petri analyze --graph       # text tree / DOT export
-petri analyze --dashboard   # REST + SSE API on port 8090
-petri analyze --scan --fix  # contradiction scanner
-# → --graph shows the colony DAG; --dashboard opens a live web UI
+petri graph                 # text tree / DOT export
+petri launch                # REST + SSE API on port 8090
+petri scan --fix            # contradiction scanner
+# → `graph` shows the colony DAG; `launch` opens a live web UI
 
 # 7. Stop
 petri stop
@@ -127,7 +132,10 @@ petri --help
 | `petri check` | Show node statuses across colonies | `--colony`, `--node`, `--json` |
 | `petri grow` | Run nodes through the validation pipeline | `--all`, `--colony`, `--dry-run`, `--max-concurrent` |
 | `petri feed <source>` | Ingest new evidence and flag affected nodes | `--colony`, `--auto-reopen` |
-| `petri analyze` | Visualization and diagnostics | `--graph`, `--dashboard`, `--scan`, `--fix` |
+| `petri graph` | Render the colony DAG as text tree or DOT | `--format`, `--colony` |
+| `petri scan` | Run the contradiction scanner | `--fix`, `--loop` |
+| `petri connect <a> <b>` | Inspect or create a dependency edge between two nodes | |
+| `petri launch` | Start the REST + SSE dashboard | `--port` |
 | `petri stop` | Gracefully halt active processing | `--force` |
 | `petri inspect` | Check that all prerequisites are installed | |
 
@@ -139,7 +147,7 @@ petri --help
 4. `petri check` -- inspect progress
 5. `petri feed <url>` -- add evidence, re-open affected nodes
 6. `petri grow --all` -- re-validate impacted nodes
-7. `petri analyze --graph` -- view the final colony structure
+7. `petri graph` -- view the final colony structure
 
 > **Note:** `petri grow --all` processes all currently eligible nodes. For multi-level colonies, run it multiple times until all levels are resolved — cells validate first, unlocking their parents.
 

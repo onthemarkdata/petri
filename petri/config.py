@@ -27,6 +27,20 @@ def load_config(config_path: Path | None = None) -> dict:
     return cfg
 
 
+def load_dish_config(petri_dir: Path) -> dict:
+    """Load ``petri.yaml`` from a specific dish directory.
+
+    Returns an empty dict if the file does not exist — callers fall back
+    to defaults in that case. ``pyyaml`` is a hard dependency (see
+    ``pyproject.toml``) so no fallback parser is needed.
+    """
+    config_path = petri_dir / "defaults" / "petri.yaml"
+    if not config_path.exists():
+        return {}
+    cfg = yaml.safe_load(config_path.read_text())
+    return cfg or {}
+
+
 def get_model_name(config: dict | None = None) -> str:
     cfg = config or load_config()
     model = cfg.get("model")

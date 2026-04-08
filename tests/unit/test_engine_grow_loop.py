@@ -1,4 +1,4 @@
-"""Unit tests for the grow loop driver in ``petri.engine.grow_loop``.
+"""Unit tests for the ``grow_loop`` driver in ``petri.engine.grow_loop``.
 
 These tests exercise the pure ``grow_loop`` driver in isolation, with
 fake polling primitives, so they never spin up the real engine, the real
@@ -11,7 +11,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from petri.engine.grow_loop import GrowLoopOutcome, grow_loop
+from petri.engine.grow_loop import (
+    GrowLoopOutcome,
+    all_states_terminal,
+    format_state_summary,
+    grow_loop,
+)
 
 
 def _fake_pass_result(processed: int) -> SimpleNamespace:
@@ -279,3 +284,27 @@ def test_keyboard_interrupt_propagates() -> None:
             get_states=lambda: {"research_active": 1},
             is_stopped=lambda: False,
         )
+
+
+# ── all_states_terminal helper ──────────────────────────────────────────
+
+
+def test_all_states_terminal_empty_dict_returns_false() -> None:
+    """Empty state snapshot means the queue hasn't been populated yet."""
+    assert all_states_terminal({}) is False
+
+
+def test_all_states_terminal_with_terminal_states_returns_true() -> None:
+    """All 'done' entries are terminal → the loop should exit."""
+    assert all_states_terminal({"done": 3}) is True
+
+
+# ── format_state_summary helper ─────────────────────────────────────────
+
+
+def test_format_state_summary_outputs_compact_format() -> None:
+    """Summary is sorted ``key=value`` pairs joined by spaces."""
+    summary = format_state_summary({"research_active": 2, "done": 1})
+    assert summary == "done=1 research_active=2"
+
+    assert format_state_summary({}) == "queue empty"

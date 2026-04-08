@@ -39,9 +39,10 @@ petri check             # Show node statuses
 petri grow --all        # Run validation pipeline
 petri stop              # Gracefully halt processing
 petri feed <source>     # Feed new evidence
-petri analyze --graph   # Visualize colony structure
-petri analyze --dashboard  # Launch REST+SSE dashboard (port 8090)
-petri analyze --scan    # Run contradiction scanner
+petri graph             # Visualize colony structure
+petri launch            # Launch REST+SSE dashboard (port 8090)
+petri scan              # Run contradiction scanner
+petri connect <a> <b>   # Inspect or create a dependency edge
 petri inspect           # Check prerequisites
 ```
 
