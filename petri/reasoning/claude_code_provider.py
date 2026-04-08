@@ -687,7 +687,13 @@ class ClaudeCodeProvider:
         return []
 
     def assess_cell(
-        self, cell_id: str, claim_text: str, context: dict, agent_role: str
+        self,
+        cell_id: str,
+        claim_text: str,
+        context: dict,
+        agent_role: str,
+        *,
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> "AssessmentResult":
         from petri.config import get_agent_verdicts, get_agent_instruction
         from petri.models import AssessmentResult, SourceCitation
@@ -750,7 +756,7 @@ class ClaudeCodeProvider:
         )
 
         try:
-            raw = self._ask(prompt)
+            raw = self._ask(prompt, on_progress=on_progress)
         except ClaudeCLIError as cli_error:
             # Subprocess failure — surface the real stderr in the summary
             # so the user can see WHY claude failed (auth, rate limit,

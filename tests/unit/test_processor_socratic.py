@@ -40,6 +40,8 @@ class RecordingSocraticProvider:
         claim_text: str,
         context: dict,
         agent_role: str,
+        *,
+        on_progress=None,  # accepted but ignored by this stub
     ) -> dict:
         self.assess_calls.append(
             {

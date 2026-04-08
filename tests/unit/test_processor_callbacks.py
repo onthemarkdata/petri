@@ -85,6 +85,8 @@ class CallbackTestProvider:
         claim_text: str,
         context: dict,
         agent_role: str,
+        *,
+        on_progress=None,  # accepted but ignored by this stub
     ) -> dict:
         self.assess_calls.append(
             {
@@ -499,3 +501,114 @@ def test_slot_idx_unique_for_concurrent_cells(multi_cell_dish, monkeypatch):
     # Sanity — every slot is in [0, max_concurrent).
     for slot_index in occupied:
         assert 0 <= slot_index < 3, f"slot index out of bounds: {slot_index}"
+
+
+# ── agent_text streaming events ────────────────────────────────────────
+
+
+class StreamingCallbackTestProvider(CallbackTestProvider):
+    """CallbackTestProvider that actually drives on_progress with chunks.
+
+    When the phase runner passes an ``on_progress`` callback into
+    ``assess_cell``, this stub calls it a few times with synthetic
+    model-text chunks before returning the final verdict. This
+    exercises the text_emitter closure in ``process_cell`` and the
+    ``kind="agent_text"`` branch of ``CellProgressEvent``.
+    """
+
+    def assess_cell(
+        self,
+        cell_id: str,
+        claim_text: str,
+        context: dict,
+        agent_role: str,
+        *,
+        on_progress=None,
+    ) -> dict:
+        if on_progress is not None:
+            on_progress("Analyzing claim...")
+            on_progress("Looking at HELM benchmark data...")
+            on_progress("Found three primary sources.")
+        return super().assess_cell(
+            cell_id, claim_text, context, agent_role,
+            on_progress=None,  # don't double-record
+        )
+
+
+def test_callback_fires_agent_text_events_when_on_progress_streams(
+    single_cell_dish,
+):
+    """When the provider streams text via on_progress, the engine must
+    forward each chunk as a CellProgressEvent(kind="agent_text") so
+    the multi-spinner row can show live model output."""
+    captured: list[CellProgressEvent] = []
+
+    def _record(event: CellProgressEvent) -> None:
+        captured.append(event)
+
+    provider = StreamingCallbackTestProvider()
+    process_cell(
+        cell_id=single_cell_dish["cell_ids"][0],
+        petri_dir=single_cell_dish["petri_dir"],
+        provider=provider,
+        slot_idx=2,
+        on_event=_record,
+    )
+
+    agent_text_events = [
+        event for event in captured if event.kind == "agent_text"
+    ]
+    # Multiple agents run across phases; each streams 3 chunks. So
+    # we expect many agent_text events — just assert at least one
+    # landed and that it has the expected field shape.
+    assert len(agent_text_events) >= 3, (
+        f"expected at least 3 agent_text events, got "
+        f"{len(agent_text_events)}"
+    )
+
+    first_text_event = agent_text_events[0]
+    assert first_text_event.slot_idx == 2  # same slot as the process_cell call
+    assert first_text_event.cell_id == single_cell_dish["cell_ids"][0]
+    assert first_text_event.phase is not None, (
+        "agent_text events must carry the current phase"
+    )
+    assert first_text_event.agent is not None, (
+        "agent_text events must carry the current agent"
+    )
+    assert first_text_event.text is not None, (
+        "agent_text events must carry the streaming chunk"
+    )
+    # The text field should contain one of our synthetic chunks.
+    all_text_values = {event.text for event in agent_text_events}
+    assert "Analyzing claim..." in all_text_values
+    assert "Looking at HELM benchmark data..." in all_text_values
+
+
+def test_agent_text_field_defaults_to_none_on_other_events(
+    single_cell_dish,
+):
+    """Regression: adding a 'text' field to CellProgressEvent must not
+    populate it on kinds other than 'agent_text'. All existing event
+    kinds should keep text=None so consumers can branch on kind
+    without caring about field presence."""
+    captured: list[CellProgressEvent] = []
+
+    def _record(event: CellProgressEvent) -> None:
+        captured.append(event)
+
+    provider = CallbackTestProvider()  # NO streaming — does not call on_progress
+    process_cell(
+        cell_id=single_cell_dish["cell_ids"][0],
+        petri_dir=single_cell_dish["petri_dir"],
+        provider=provider,
+        slot_idx=0,
+        on_event=_record,
+    )
+
+    # Every captured event is NOT an agent_text event (the stub doesn't
+    # stream). Every such event must have text=None.
+    for event in captured:
+        assert event.kind != "agent_text"
+        assert event.text is None, (
+            f"{event.kind} event should have text=None, got {event.text!r}"
+        )

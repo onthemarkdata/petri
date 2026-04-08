@@ -143,6 +143,18 @@ def register(app: typer.Typer) -> None:
                             f"{cell_label} {event.phase} · "
                             f"{event.agent}: {verdict_short}"
                         )
+                    elif event.kind == "agent_text":
+                        # Streaming model text — overwrite the slot row
+                        # with the latest chunk so the user sees the
+                        # model thinking in real time, matching petri
+                        # seed's streaming UX. The next "verdict" event
+                        # will replace this with the final verdict
+                        # label when the agent finishes.
+                        text_excerpt = (event.text or "")[:120]
+                        row_text = (
+                            f"{cell_label} {event.phase} · "
+                            f"{event.agent}: {text_excerpt}"
+                        )
                     elif event.kind == "finished":
                         if event.error:
                             error_short = (event.error or "")[:60]

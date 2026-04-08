@@ -63,12 +63,13 @@ class CellProgressEvent:
     """
     slot_idx: int               # which worker slot owns this cell (-1 if unassigned)
     cell_id: str
-    kind: str                   # "started" | "phase" | "agent" | "verdict" | "finished"
-    phase: str | None = None    # set when kind in {"phase", "agent", "verdict"}
-    agent: str | None = None    # set when kind in {"agent", "verdict"}
+    kind: str                   # "started" | "phase" | "agent" | "verdict" | "agent_text" | "finished"
+    phase: str | None = None    # set when kind in {"phase", "agent", "verdict", "agent_text"}
+    agent: str | None = None    # set when kind in {"agent", "verdict", "agent_text"}
     verdict: str | None = None  # set when kind == "verdict"
     iteration: int | None = None
     error: str | None = None    # set when kind == "finished" with failure
+    text: str | None = None     # set when kind == "agent_text" — streaming model chunk
 
 
 CellProgressCallback = Callable[[CellProgressEvent], None]
@@ -610,6 +611,7 @@ def _run_socratic_phase(
     iteration: int,
     provider: InferenceProvider,
     fire: Callable[..., None] | None = None,
+    text_emitter: Callable[[str, str, str], None] | None = None,
 ) -> None:
     """Phase 0: Socratic questioning — clarify, challenge assumptions, identify evidence needed.
 
@@ -650,8 +652,14 @@ def _run_socratic_phase(
         step_agent_name = f"socratic_{step_name}"
         if fire is not None:
             fire("agent", phase="socratic", agent=step_agent_name, iteration=iteration)
+        if text_emitter is not None:
+            def on_progress_step(chunk: str, _phase="socratic", _agent=step_agent_name) -> None:
+                text_emitter(_phase, _agent, chunk)
+        else:
+            on_progress_step = None
         result = provider.assess_cell(
-            cell_id, claim_text, context, "socratic_questioner"
+            cell_id, claim_text, context, "socratic_questioner",
+            on_progress=on_progress_step,
         )
         if fire is not None:
             fire(
@@ -712,8 +720,14 @@ def _run_socratic_phase(
             agent="socratic_verifier",
             iteration=iteration,
         )
+    if text_emitter is not None:
+        def on_progress_verify(chunk: str) -> None:
+            text_emitter("socratic", "socratic_verifier", chunk)
+    else:
+        on_progress_verify = None
     verification = provider.assess_cell(
-        cell_id, claim_text, verification_context, "socratic_questioner"
+        cell_id, claim_text, verification_context, "socratic_questioner",
+        on_progress=on_progress_verify,
     )
     verification_verdict = _get(verification, "verdict", "VERIFIED")
     if fire is not None:
@@ -825,6 +839,7 @@ def _run_phase1(
     agent_roles: dict,
     queue_entry: dict,
     fire: Callable[..., None] | None = None,
+    text_emitter: Callable[[str, str, str], None] | None = None,
 ) -> list[dict]:
     """Phase 1: Research -- agents assigned to the research phase in config."""
     from petri.config import get_research_agents
@@ -850,8 +865,14 @@ def _run_phase1(
                 agent=agent_name,
                 iteration=iteration,
             )
+        if text_emitter is not None:
+            def on_progress_research(chunk: str, _agent=agent_name) -> None:
+                text_emitter("research", _agent, chunk)
+        else:
+            on_progress_research = None
         result = provider.assess_cell(
-            cell_id, claim_text, context, agent_name
+            cell_id, claim_text, context, agent_name,
+            on_progress=on_progress_research,
         )
         if fire is not None:
             fire(
@@ -894,6 +915,7 @@ def _run_phase2(
     debate_pairings: list | None,
     queue_entry: dict,
     fire: Callable[..., None] | None = None,
+    text_emitter: Callable[[str, str, str], None] | None = None,
 ) -> list[dict]:
     """Phase 2: Critique -- agents assigned to the critique phase in config."""
     from petri.config import get_critique_agents
@@ -920,8 +942,14 @@ def _run_phase2(
                 agent=agent_name,
                 iteration=iteration,
             )
+        if text_emitter is not None:
+            def on_progress_critique(chunk: str, _agent=agent_name) -> None:
+                text_emitter("critique", _agent, chunk)
+        else:
+            on_progress_critique = None
         result = provider.assess_cell(
-            cell_id, claim_text, context, agent_name
+            cell_id, claim_text, context, agent_name,
+            on_progress=on_progress_critique,
         )
         if fire is not None:
             fire(
@@ -987,6 +1015,7 @@ def _run_convergence(
     agent_roles: dict,
     queue_entry: dict,
     fire: Callable[..., None] | None = None,
+    text_emitter: Callable[[str, str, str], None] | None = None,
 ) -> ConvergenceOutcome:
     """Convergence check -- determines converged, iterate, or stalled."""
     events_file = _events_path(petri_dir, cell_id, dish_id)
@@ -1086,6 +1115,7 @@ def _run_red_team(
     provider: InferenceProvider,
     agent_roles: dict,
     fire: Callable[..., None] | None = None,
+    text_emitter: Callable[[str, str, str], None] | None = None,
 ) -> dict:
     """Red Team phase -- red_team_lead attempts disproval."""
     events_file = _events_path(petri_dir, cell_id, dish_id)
@@ -1101,7 +1131,15 @@ def _run_red_team(
             agent="red_team_lead",
             iteration=iteration,
         )
-    result = provider.assess_cell(cell_id, claim_text, context, "red_team_lead")
+    if text_emitter is not None:
+        def on_progress_red_team(chunk: str) -> None:
+            text_emitter("red_team", "red_team_lead", chunk)
+    else:
+        on_progress_red_team = None
+    result = provider.assess_cell(
+        cell_id, claim_text, context, "red_team_lead",
+        on_progress=on_progress_red_team,
+    )
     if fire is not None:
         fire(
             "verdict",
@@ -1138,6 +1176,7 @@ def _run_evaluation(
     provider: InferenceProvider,
     agent_roles: dict,
     fire: Callable[..., None] | None = None,
+    text_emitter: Callable[[str, str, str], None] | None = None,
 ) -> EvaluationResult:
     """Evidence Evaluation -- final verdict based on source hierarchy."""
     events_file = _events_path(petri_dir, cell_id, dish_id)
@@ -1158,8 +1197,14 @@ def _run_evaluation(
             agent="evidence_evaluator",
             iteration=iteration,
         )
+    if text_emitter is not None:
+        def on_progress_evaluator(chunk: str) -> None:
+            text_emitter("evaluating", "evidence_evaluator", chunk)
+    else:
+        on_progress_evaluator = None
     result = provider.assess_cell(
-        cell_id, claim_text, context, "evidence_evaluator"
+        cell_id, claim_text, context, "evidence_evaluator",
+        on_progress=on_progress_evaluator,
     )
     if fire is not None:
         fire(
@@ -1249,6 +1294,23 @@ def process_cell(
             # fail because of a spinner bug.
             pass
 
+    def emit_agent_text(phase_name: str, agent_role: str, chunk: str) -> None:
+        """Emit a streaming text chunk for the current agent.
+
+        Fires a ``kind="agent_text"`` ``CellProgressEvent`` so the
+        multi-spinner row can show the model's live output as it
+        arrives, matching ``petri seed``'s streaming UX. Phase runners
+        pass this as ``on_progress`` to ``provider.assess_cell``; the
+        provider streams deltas to us, we stamp them with the current
+        phase/agent and forward to the UI callback.
+        """
+        fire(
+            "agent_text",
+            phase=phase_name,
+            agent=agent_role,
+            text=chunk,
+        )
+
     # Load agent roles if not provided
     if agent_roles is None:
         agent_roles = load_agent_roles()
@@ -1316,6 +1378,7 @@ def process_cell(
                 cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider,
                 fire=fire,
+                text_emitter=emit_agent_text,
             )
 
         elif current_state == QueueState.research_active.value:
@@ -1324,6 +1387,7 @@ def process_cell(
                 cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, entry,
                 fire=fire,
+                text_emitter=emit_agent_text,
             )
             iterations_run += 1
 
@@ -1333,6 +1397,7 @@ def process_cell(
                 cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, debate_pairings, entry,
                 fire=fire,
+                text_emitter=emit_agent_text,
             )
 
         elif current_state == QueueState.mediating.value:
@@ -1341,6 +1406,7 @@ def process_cell(
                 cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles, entry,
                 fire=fire,
+                text_emitter=emit_agent_text,
             )
             if convergence_outcome.outcome == "iterate":
                 iterations_run += 1
@@ -1352,6 +1418,7 @@ def process_cell(
                 cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles,
                 fire=fire,
+                text_emitter=emit_agent_text,
             )
 
         elif current_state == QueueState.evaluating.value:
@@ -1361,6 +1428,7 @@ def process_cell(
                 cell_id, claim_text, petri_dir, dish_id,
                 iteration, provider, agent_roles,
                 fire=fire,
+                text_emitter=emit_agent_text,
             )
 
         elif current_state == QueueState.stalled.value:
