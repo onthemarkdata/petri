@@ -10,14 +10,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from petri.cli_ui import print_error_and_exit
-from petri.config import load_dish_config
+from petri.config import get_agent_tools, load_dish_config
 
 
 def resolve_provider(petri_dir: Path):
     """Resolve an InferenceProvider from petri.yaml config.
 
     All inference routes through Claude Code CLI, which handles auth
-    and model routing via the Anthropic API.
+    and model routing via the Anthropic API. Tool grants come from
+    ``agent_tools`` in the dish config (defaults to a research-focused
+    set including WebSearch and WebFetch).
     """
     config = load_dish_config(petri_dir)
     model_cfg = config.get("model", {})
@@ -29,8 +31,10 @@ def resolve_provider(petri_dir: Path):
     if not model_name:
         return None
 
+    allowed_tools = get_agent_tools(config)
+
     from petri.reasoning.claude_code_provider import ClaudeCodeProvider
-    return ClaudeCodeProvider(model=model_name)
+    return ClaudeCodeProvider(model=model_name, allowed_tools=allowed_tools)
 
 
 def find_petri_dir(start: Path | None = None) -> Path:

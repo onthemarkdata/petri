@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from typing import Callable, Optional
 
-from petri.config import LLM_INFERENCE_MODEL
+from petri.config import AGENT_TOOLS, LLM_INFERENCE_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +115,29 @@ def _parse_verdict(text: str, valid_verdicts: list[str]) -> str:
 
 
 class ClaudeCodeProvider:
-    """InferenceProvider that routes through the claude CLI."""
+    """InferenceProvider that routes through the claude CLI.
 
-    def __init__(self, model: str = LLM_INFERENCE_MODEL):
+    ``allowed_tools`` is the explicit allowlist passed to ``claude
+    --allowedTools``. It defaults to ``AGENT_TOOLS`` (read from
+    petri.yaml). Petri NEVER passes
+    ``--allow-dangerously-skip-permissions`` — every tool grant is
+    explicit and named, so adding new tools to Claude Code in the future
+    cannot silently widen the agents' permissions.
+    """
+
+    def __init__(
+        self,
+        model: str = LLM_INFERENCE_MODEL,
+        *,
+        allowed_tools: list[str] | None = None,
+    ):
         self.model = model
+        # If allowed_tools is None, fall back to the global AGENT_TOOLS
+        # default. An explicit empty list means "no tools" — text-only
+        # reasoning, no web access — and is honored as-is.
+        self.allowed_tools = (
+            list(AGENT_TOOLS) if allowed_tools is None else list(allowed_tools)
+        )
         if shutil.which("claude") is None:
             raise FileNotFoundError(
                 "Claude Code CLI ('claude') not found on PATH. "
@@ -126,6 +145,36 @@ class ClaudeCodeProvider:
                 "Install: https://docs.anthropic.com/en/docs/claude-code\n"
                 "Run 'petri inspect' to check all prerequisites."
             )
+
+    def _build_claude_command(
+        self, prompt: str, *, streaming: bool
+    ) -> list[str]:
+        """Build the argv for a single claude CLI invocation.
+
+        Centralised so both ``_ask_oneshot`` and ``_ask_streaming`` use
+        the same flag set, including the explicit ``--allowedTools``
+        allowlist. The prompt is always the final positional argument.
+        """
+        command = ["claude", "--print", "--model", self.model]
+        if self.allowed_tools:
+            command.extend(["--allowedTools", ",".join(self.allowed_tools)])
+        else:
+            # Explicit empty list means "no tools at all" — text-only
+            # reasoning. ``--tools ""`` is claude CLI's documented way
+            # to disable the entire built-in tool set, distinct from
+            # simply omitting --allowedTools (which would inherit
+            # whatever the user's settings.json grants).
+            command.extend(["--tools", ""])
+        if streaming:
+            command.extend(
+                [
+                    "--output-format", "stream-json",
+                    "--include-partial-messages",
+                    "--verbose",
+                ]
+            )
+        command.append(prompt)
+        return command
 
     def _ask(
         self,
@@ -146,12 +195,7 @@ class ClaudeCodeProvider:
         """One-shot subprocess call. No progress feedback."""
         try:
             result = subprocess.run(
-                [
-                    "claude",
-                    "--print",
-                    "--model", self.model,
-                    prompt,
-                ],
+                self._build_claude_command(prompt, streaming=False),
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -185,15 +229,7 @@ class ClaudeCodeProvider:
         line of accumulated text to ``on_progress``. Returns the full
         accumulated text on completion.
         """
-        cmd = [
-            "claude",
-            "--print",
-            "--model", self.model,
-            "--output-format", "stream-json",
-            "--include-partial-messages",
-            "--verbose",
-            prompt,
-        ]
+        cmd = self._build_claude_command(prompt, streaming=True)
         try:
             proc = subprocess.Popen(
                 cmd,

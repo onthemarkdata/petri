@@ -169,3 +169,132 @@ def test_assess_node_accepts_socratic_questioner_role():
         agent_role="socratic_questioner",
     )
     assert result.verdict == "CLARIFIED"
+
+
+# ── allowed_tools / _build_claude_command ───────────────────────────────
+
+
+class _ToolsStubProvider(ClaudeCodeProvider):
+    """ClaudeCodeProvider that skips the claude-CLI presence check.
+
+    Used to exercise the ``_build_claude_command`` argv shape without
+    requiring ``claude`` on PATH.
+    """
+
+    def __init__(self, *, allowed_tools: list[str] | None = None) -> None:
+        self.model = "test-model"
+        from petri.config import AGENT_TOOLS
+
+        self.allowed_tools = (
+            list(AGENT_TOOLS) if allowed_tools is None
+            else list(allowed_tools)
+        )
+
+
+def test_build_command_includes_allowed_tools_when_non_empty():
+    """The --allowedTools flag is passed with a comma-joined list."""
+    provider = _ToolsStubProvider(
+        allowed_tools=["WebSearch", "WebFetch", "Read"]
+    )
+    cmd = provider._build_claude_command("hello", streaming=False)
+    assert "--allowedTools" in cmd
+    flag_index = cmd.index("--allowedTools")
+    assert cmd[flag_index + 1] == "WebSearch,WebFetch,Read"
+    # The prompt is always the final positional argument.
+    assert cmd[-1] == "hello"
+    # The dangerous bypass flag must NEVER be present.
+    assert "--allow-dangerously-skip-permissions" not in cmd
+
+
+def test_build_command_disables_all_tools_when_empty_list():
+    """An explicit empty list means 'no tools at all' — passes --tools ""
+    rather than --allowedTools, because claude CLI's --tools "" is the
+    documented way to disable the entire built-in tool set. Omitting
+    --allowedTools would silently fall through to the user's settings."""
+    provider = _ToolsStubProvider(allowed_tools=[])
+    cmd = provider._build_claude_command("hello", streaming=False)
+    assert "--allowedTools" not in cmd
+    assert "--tools" in cmd
+    tools_index = cmd.index("--tools")
+    assert cmd[tools_index + 1] == ""
+    assert cmd[-1] == "hello"
+
+
+def test_build_command_streaming_adds_stream_json_flags():
+    """Streaming mode adds the stream-json output format and verbose."""
+    provider = _ToolsStubProvider(allowed_tools=["WebSearch"])
+    cmd = provider._build_claude_command("hello", streaming=True)
+    assert "--output-format" in cmd
+    output_index = cmd.index("--output-format")
+    assert cmd[output_index + 1] == "stream-json"
+    assert "--include-partial-messages" in cmd
+    assert "--verbose" in cmd
+    # The prompt is still last.
+    assert cmd[-1] == "hello"
+    # And tools are still passed.
+    assert "--allowedTools" in cmd
+
+
+def test_get_agent_tools_default_when_key_missing():
+    """A petri.yaml without an agent_tools key falls back to a
+    research-focused default that includes WebSearch and WebFetch."""
+    from petri.config import get_agent_tools
+
+    tools = get_agent_tools(config={"name": "petri"})
+    assert "WebSearch" in tools
+    assert "WebFetch" in tools
+
+
+def test_get_agent_tools_explicit_empty_list():
+    """An explicit empty list is honored (means: disable all tools)."""
+    from petri.config import get_agent_tools
+
+    tools = get_agent_tools(config={"name": "petri", "agent_tools": []})
+    assert tools == []
+
+
+def test_get_agent_tools_explicit_list():
+    """An explicit list is returned verbatim, in order."""
+    from petri.config import get_agent_tools
+
+    tools = get_agent_tools(
+        config={"name": "petri", "agent_tools": ["WebSearch", "Read"]}
+    )
+    assert tools == ["WebSearch", "Read"]
+
+
+def test_get_agent_tools_rejects_non_list():
+    """A non-list value in agent_tools surfaces a TypeError early
+    rather than producing weird argv at run time."""
+    from petri.config import get_agent_tools
+
+    with pytest.raises(TypeError, match="must be a list"):
+        get_agent_tools(config={"name": "petri", "agent_tools": "WebSearch"})
+
+
+def test_default_agent_tools_includes_web_search_and_fetch():
+    """Regression: the shipped petri.yaml MUST grant WebSearch and
+    WebFetch by default — without them the research agents fabricate
+    citation URLs from training data instead of validating live."""
+    from petri.config import AGENT_TOOLS
+
+    assert "WebSearch" in AGENT_TOOLS
+    assert "WebFetch" in AGENT_TOOLS
+
+
+def test_build_command_never_passes_dangerous_skip_flag():
+    """Regression: petri MUST NEVER pass --allow-dangerously-skip-permissions
+    regardless of what's in allowed_tools. Every grant is explicit."""
+    for tool_set in (
+        None,  # default
+        [],
+        ["WebSearch"],
+        ["WebSearch", "WebFetch", "Bash", "Edit", "Write"],
+    ):
+        provider = _ToolsStubProvider(allowed_tools=tool_set)
+        for streaming_flag in (True, False):
+            cmd = provider._build_claude_command(
+                "x", streaming=streaming_flag
+            )
+            assert "--allow-dangerously-skip-permissions" not in cmd
+            assert "--dangerously-skip-permissions" not in cmd

@@ -80,6 +80,37 @@ def get_max_decomposition_depth(config: dict | None = None) -> int:
     return int(value)
 
 
+def get_agent_tools(config: dict | None = None) -> list[str]:
+    """Tools the petri pipeline agents can call via Claude Code.
+
+    Used as the value for ``--allowedTools`` when invoking the ``claude``
+    CLI in print mode. Without this, agents inherit whatever the user's
+    local Claude Code config grants in non-interactive mode — which
+    typically does not include WebSearch or WebFetch, leaving the model
+    to fabricate citation URLs from training data.
+
+    Returns the list verbatim from petri.yaml. An empty list is
+    permitted (and means "no tools", which forces text-only reasoning).
+    A missing key falls back to a research-focused default.
+
+    Petri NEVER passes ``--allow-dangerously-skip-permissions`` —
+    every grant is explicit and named, so adding new tools to Claude
+    Code in the future cannot silently widen the agents' permissions.
+    """
+    cfg = config or load_config()
+    if "agent_tools" not in cfg:
+        return ["WebSearch", "WebFetch", "Read", "Glob", "Grep"]
+    tools = cfg.get("agent_tools")
+    if tools is None:
+        return []
+    if not isinstance(tools, list):
+        raise TypeError(
+            f"'agent_tools' in petri.yaml must be a list, "
+            f"got {type(tools).__name__}"
+        )
+    return [str(tool) for tool in tools]
+
+
 def get_max_nodes_per_layer(config: dict | None = None) -> int:
     """Per-layer cap on nodes created during seed-time decomposition.
 
@@ -216,3 +247,4 @@ def get_short_circuit_rules(config: dict | None = None) -> list[dict]:
 LLM_INFERENCE_MODEL: str = get_model_name()
 MAX_ITERATIONS: int = get_max_iterations()
 MAX_CONCURRENT: int = get_max_concurrent()
+AGENT_TOOLS: list[str] = get_agent_tools()

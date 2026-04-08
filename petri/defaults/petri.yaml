@@ -13,6 +13,25 @@ model:
 
 harness: claude-code
 
+# ── Agent Tools ─────────────────────────────────────────────────────────
+# Tools the petri pipeline agents (investigator, freshness_checker,
+# skeptic, etc.) can call via Claude Code. WebSearch and WebFetch are
+# load-bearing for research agents — without them the model has to
+# reason from training data and tends to fabricate citation URLs.
+#
+# The default set is read-only and web-aware. Add Bash/Edit/Write only
+# if you trust the agents to mutate the filesystem.
+#
+# Pass an empty list ([]) to disable all tools (the model will only
+# produce text — useful for offline / cost-controlled runs but expect
+# fabricated URLs).
+agent_tools:
+  - WebSearch
+  - WebFetch
+  - Read
+  - Glob
+  - Grep
+
 # ── Pipeline ────────────────────────────────────────────────────────────
 
 max_iterations: 3
