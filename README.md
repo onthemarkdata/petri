@@ -22,59 +22,47 @@ model:
 
 **Monitor your usage.** Start with small claims to understand the cost profile before running large colonies.
 
-## Prerequisites
+## Setup
 
-### 1. Python 3.11+
+Petri needs **Python 3.11+** and the **Claude Code CLI** (which provides the LLM inference). The cleanest path is to install both into a fresh [uv](https://docs.astral.sh/uv/) environment.
 
-Petri requires Python 3.11 or later. Check your version:
-
-```bash
-python3 --version
-```
-
-If you need a newer version, [uv](https://docs.astral.sh/uv/) can install one for you:
+### 1. Install uv
 
 ```bash
-# Install uv (package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Create a virtual environment with Python 3.11
-uv venv --python 3.11 .venv
-source .venv/bin/activate    # macOS/Linux
-# .venv\Scripts\activate     # Windows
 ```
 
-### 2. Claude Code
+### 2. Create and activate a Python 3.11+ virtual environment
 
-Petri uses [Claude Code](https://claude.com/claude-code) as its agentic harness for inference.
+```bash
+uv venv --python 3.11 .venv
+source .venv/bin/activate          # macOS / Linux
+# .venv\Scripts\activate           # Windows PowerShell
+```
 
-Install: https://docs.anthropic.com/en/docs/claude-code
+Every command from here on assumes this venv is active. If you open a new shell, re-run the `source .venv/bin/activate` line.
 
-Verify it's working:
+### 3. Install petri-grow into the venv
+
+```bash
+uv pip install petri-grow
+```
+
+### 4. Install and authenticate Claude Code
+
+Petri uses [Claude Code](https://claude.com/claude-code) as its agent harness. Follow the install + login steps at https://docs.anthropic.com/en/docs/claude-code, then verify:
 
 ```bash
 claude --version
 ```
 
-### Verify everything
+### 5. Verify the full prerequisite chain
 
 ```bash
 petri inspect
 ```
 
-This checks all prerequisites and reports what's missing.
-
-## Install
-
-```bash
-# Recommended (with uv)
-uv pip install petri-grow
-
-# Or with pip
-pip install petri-grow
-```
-
-This installs the CLI and core library. Claude Code must be authenticated (see above).
+This reports any missing pieces (Python version, Claude Code login, PATH issues) without modifying your system.
 
 ## Breaking changes
 
@@ -89,6 +77,10 @@ mkdir my-research && cd my-research
 petri init
 # → Initialized petri dish 'my-research' at /path/to/my-research
 #   Model: claude-sonnet-4-6
+#
+# Skip step 1 if you'd rather use the web onboarding wizard:
+# `petri launch` creates `.petri/` from defaults the first time it
+# runs and walks you through dish setup in the browser.
 
 # 2. Seed a colony from a claim
 petri seed "A hotdog is a sandwich" --no-questions
@@ -108,9 +100,11 @@ petri feed https://arxiv.org/abs/2026.12345
 
 # 6. Analyze
 petri graph                 # text tree / DOT export
-petri launch                # REST + SSE API on port 8090
+petri launch                # Live web dashboard on port 8090
 petri scan --fix            # contradiction scanner
-# → `graph` shows the colony DAG; `launch` opens a live web UI
+# → `graph` shows the colony DAG as text;
+#   `launch` opens the full Petri Lab dashboard (Computer tab,
+#   Lab overview, Colony DAG, Logs, Cell detail)
 
 # 7. Stop
 petri stop
@@ -127,7 +121,7 @@ petri --help
 
 | Command | Description | Key Flags |
 |---------|-------------|-----------|
-| `petri init` | Create `.petri/` directory with defaults | `--name` |
+| `petri init` | Create `.petri/` directory with defaults (interactive setup wizard) | `--name`, `--no-questions` |
 | `petri seed <claim>` | Decompose a claim into a colony DAG | `--no-questions`, `--colony` |
 | `petri check` | Show cell statuses across colonies | `--colony`, `--cell`, `--json` |
 | `petri grow` | Run cells through the validation pipeline (defaults to all eligible) | `--cell`, `--colony`, `--dry-run`, `--max-concurrent` |
@@ -135,7 +129,7 @@ petri --help
 | `petri graph` | Render the colony DAG as text tree or DOT | `--format`, `--colony` |
 | `petri scan` | Run the contradiction scanner | `--fix`, `--loop` |
 | `petri connect <a> <b>` | Inspect or create a dependency edge between two cells | |
-| `petri launch` | Start the REST + SSE dashboard | `--port` |
+| `petri launch` | Open the live web dashboard | `--port`, `--host` |
 | `petri stop` | Gracefully halt active processing | `--force` |
 | `petri inspect` | Check that all prerequisites are installed | |
 
@@ -173,6 +167,7 @@ Every action is logged as an immutable event in the cell's JSONL file, identifie
 - **Event sourcing**: append-only JSONL per cell, rolled up to SQLite for the dashboard
 - **Queue state machine**: enforced transitions, file-locked for concurrency
 - **Harness-agnostic**: core uses only stdlib + Pydantic; adapters bridge to Claude Code and future harnesses
+- **Live dashboard**: single-file SPA with PTY-backed terminal, interactive colony DAG, and per-cell detail pages
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, state machine diagram, and agent details.
 

@@ -213,6 +213,57 @@ Petri uses a two-store separation:
 
 No data is duplicated between event logs and queue. The event log is authoritative; the queue tracks processing state only.
 
+## Dashboard / Frontend
+
+`petri launch` boots a single-process FastAPI server (default `127.0.0.1:8090`) that serves both the REST/SSE API and the Petri Lab web UI. The frontend is intentionally a **single static HTML file** with no build step — just `petri/templates/frontend.html`, ~116 KB, vanilla JS plus xterm.js and marked from CDN.
+
+### Server (`petri/dashboard/`)
+
+| File | Role |
+|------|------|
+| `api.py` | FastAPI app with ~15 routes: health, init, seed, dishes, cells, cell detail, events, stats, queue, plus the `/api/proc/*` PTY subprocess bridge and the `/api/stream` SSE event bus |
+| `frontend.py` | Loads `templates/frontend.html` and substitutes status colors, event colors, pass-verdict list, and version via `string.Template.safe_substitute` (same pattern as agent generators) |
+| `migrate.py` | Builds the disposable SQLite read index from the JSONL event logs at startup |
+
+The SQLite index is rebuilt from JSONL on every `petri launch`, so killing the dashboard never loses data — the event log is still the source of truth.
+
+### Six screens (single-file SPA)
+
+The frontend is a hash-routed SPA inside one HTML file:
+
+| Screen | Purpose |
+|--------|---------|
+| **Title** | Animated PETRI splash; tap-to-enter gates the audio + the rest of the UI |
+| **Computer** | PTY-backed terminal that runs petri subcommands through xterm.js. Doubles as the onboarding wizard surface for first-run users |
+| **Lab** | HUD overview of all colonies + the live processing queue |
+| **Colony DAG** | Interactive force-directed DAG of one colony's cells, color-coded by status |
+| **Logs** | Filtered stream of recent events across all colonies |
+| **Cell** | Detail page for one cell: research tag, title, info cards, latest verdicts per agent, evidence summary (markdown), citations with URL links, friendly-rendered event log |
+
+All non-title screens share a CRT/HUD chrome with cut-corner panels, phosphor-green on black, and a shared pixel-art PETRI logo drawn to a `<canvas>` in the header bar.
+
+### The Computer tab is one xterm surface
+
+The Computer screen is the most architecturally interesting piece. It is **one xterm.js terminal** that hosts two modes interchangeably:
+
+1. **Onboarding wizard** — for first-run users with no `.petri/`, the wizard prompts (dish name, model, concurrency, iterations) are written into xterm via ANSI sequences and answered through the persistent bottom `#term-cmd` input. Arrow-key selects redraw in place via `\x1b[<n>A` cursor-up + `\r\x1b[2K` clear-line escapes.
+
+2. **Command mode** — once initialized, the user types `petri <subcommand>` into the same input. The frontend POSTs to `/api/proc/start`, which spawns `python -m petri <subcommand>` inside a `pty.openpty()` PTY with `TERM=xterm-256color`, `FORCE_COLOR=1`, and `PYTHONUNBUFFERED=1`. The subprocess sees a real terminal, so rich's `Live` display, animated braille spinners, and ANSI colors all activate. Raw PTY bytes stream back over SSE (`/api/proc/stream/{id}`), base64-encoded so escape sequences survive JSON transit, and are written straight into `XTERM.write(bytes)`. The output in the browser is byte-for-byte identical to the same command run in a real terminal.
+
+xterm itself runs with `disableStdin: true` — it's a write-only display. All keystrokes go to the bottom HTML input, which dispatches to either the wizard's `pendingPrompt` callback or to `termRun()`. Clicking anywhere in the xterm area redirects focus back to the input so xterm's hidden textarea cannot silently steal focus.
+
+### Live event bus
+
+`/api/stream` is a long-lived SSE channel that the dashboard subscribes to once on page load. The processor publishes events (cell status changes, verdicts issued, evidence appended, convergence checked, etc.) through an in-process broker; the SSE generator forwards them to all connected clients. Each screen opportunistically refreshes itself when a relevant event arrives — e.g. the Lab queue re-renders on a status change, the Cell page re-renders when a verdict for its cell is issued.
+
+This is what makes the dashboard "live" without polling: the JSONL event log is also the source of truth for the UI, and the in-memory broker is just a fan-out tap on top of it.
+
+### Security posture
+
+- Default bind is `127.0.0.1` only — the Computer tab can run arbitrary `petri` subcommands, so loopback-only is the safe default. `--host 0.0.0.0` is opt-in and prints a LAN-exposure warning at launch.
+- Subprocess argv is restricted to a hard-coded allowlist of petri subcommands; arbitrary shell commands are rejected.
+- Stale prior dashboards on the same port are detected via `/api/health` self-identification before being SIGKILLed, so an unrelated dev server on port 8090 is never killed by accident.
+
 ## Propagation
 
 When new evidence arrives (`petri feed`):

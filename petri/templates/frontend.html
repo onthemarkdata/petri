@@ -2879,7 +2879,14 @@ function termInitXterm() {
   mount.style.display = 'block';
 
   XTERM = new Terminal({
+    // The bottom #term-cmd input is the only way the user types into
+    // this surface — xterm itself is a write-only display. disableStdin
+    // tells xterm to ignore its own keyboard events, and the click
+    // handler below redirects focus to #term-cmd whenever the user
+    // clicks anywhere in the xterm area, so xterm's hidden textarea
+    // never silently steals focus away from the real input.
     cursorBlink: true,
+    disableStdin: true,
     fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
     fontSize: 13,
     lineHeight: 1.2,
@@ -2921,6 +2928,19 @@ function termInitXterm() {
   // Refit on viewport changes so the terminal grows with the window.
   window.addEventListener('resize', function() {
     if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
+  });
+
+  // Click-to-redirect: when the user clicks anywhere in the xterm
+  // surface, focus the bottom #term-cmd input instead. Without this,
+  // xterm's hidden textarea grabs focus and the user's keystrokes
+  // disappear into a void. We skip the redirect when the user is
+  // actively selecting text (so copy still works).
+  mount.addEventListener('mouseup', function() {
+    if (window.getSelection && window.getSelection().toString().length > 0) {
+      return;
+    }
+    var input = document.getElementById('term-cmd');
+    if (input) input.focus();
   });
 
   XTERM_DECODER = (typeof TextDecoder !== 'undefined')
@@ -3197,14 +3217,18 @@ function loadComputer() {
   if (!XTERM) termInitXterm();
   termBindInputHandlers();
 
-  // Re-entry: if we're already in a live mode, just refocus + refit.
-  // The wizard already wrote its history to xterm; don't restart it.
+  // Always focus the bottom command input the moment we enter the
+  // Computer tab. This is the only typing surface; the user should
+  // never have to click before they can type.
+  setTimeout(function() {
+    var input = document.getElementById('term-cmd');
+    if (input) input.focus();
+    if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
+  }, 30);
+
+  // Re-entry: if we're already in a live mode, do not restart the
+  // wizard or banner — the xterm scrollback already has them.
   if (TerminalState.mode === 'idle' || TerminalState.mode === 'running' || TerminalState.mode === 'onboarding') {
-    setTimeout(function() {
-      var input = document.getElementById('term-cmd');
-      if (input) input.focus();
-      if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
-    }, 30);
     return;
   }
 
