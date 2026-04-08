@@ -619,6 +619,54 @@ class TestMultiSpinner:
         assert "✗ growing" in output
         assert "✓ growing" not in output
 
+    def test_set_header_in_plain_mode_writes_one_line_per_call(self):
+        """Plain-mode set_header behaves like update_slot: each call
+        becomes one permanent line, not an in-place overwrite (there's
+        no cursor to seek in a non-TTY stream)."""
+        buf = io.StringIO()
+        with MultiSpinner(
+            "growing", slot_count=2, stream=buf, force_plain=True
+        ) as multi:
+            multi.set_header("status: queued=10")
+            multi.set_header("status: queued=9 socratic_active=1")
+        output = buf.getvalue()
+        assert "status: queued=10\n" in output
+        assert "status: queued=9 socratic_active=1\n" in output
+
+    def test_set_header_ignores_empty_or_none_in_plain_mode(self):
+        """An empty or None header in plain mode is a no-op so tests
+        can clear the header without producing a blank log line."""
+        buf = io.StringIO()
+        with MultiSpinner(
+            "growing", slot_count=2, stream=buf, force_plain=True
+        ) as multi:
+            multi.set_header("")
+            multi.set_header(None)
+        output = buf.getvalue()
+        # Only the banner + summary should be in the stream.
+        assert "status" not in output
+
+    def test_set_header_stores_text_in_tty_mode_without_direct_write(self):
+        """In TTY mode set_header only stores the text; the animation
+        thread redraws the header row on its next tick. We don't
+        assert on the rendered bytes (timing-dependent) — just that
+        the call succeeds and the internal state is updated."""
+        buf = _FakeTtyBuffer()
+        with MultiSpinner(
+            "growing", slot_count=3, stream=buf
+        ) as multi:
+            multi.set_header("status: queued=5 socratic_active=3")
+            # Give the animation thread a beat to pick up the new header.
+            time.sleep(0.15)
+            # Internal state should reflect the most recent call.
+            assert multi._header_text == "status: queued=5 socratic_active=3"
+            # Overwriting the header with a newer state replaces the
+            # stored value — the old header does not accumulate.
+            multi.set_header("status: queued=4 research_active=4")
+            assert multi._header_text == "status: queued=4 research_active=4"
+        output = buf.getvalue()
+        assert "✓ growing" in output
+
     def test_thread_safe_smoke(self):
         buf = _FakeTtyBuffer()
         slot_count = 4

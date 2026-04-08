@@ -182,12 +182,21 @@ class MultiSpinner:
     without disturbing the row block.
 
     TTY mode: a daemon animation thread redraws all N rows on every
-    frame using ``\\033[{slot_count}F`` (cursor-up) + ``\\033[2K``
-    (clear-line) + the per-slot payload. The cursor is kept just
-    below the row block between frames.
+    frame using ``\\033[{slot_count+1}F`` (cursor-up) + ``\\033[2K``
+    (clear-line) + the header row + the per-slot payload. The cursor
+    is kept just below the block between frames. The block contains
+    ``slot_count + 1`` lines: one optional header + N rows.
+
+    A persistent header line lives at the top of the block and is
+    updated in place via :meth:`set_header` — use it for aggregate
+    state ("status: queued=9 ...") that should overwrite itself
+    rather than scroll. :meth:`print_line` writes permanent lines
+    that ARE meant to scroll above the block.
 
     Plain mode: each :meth:`update_slot` call writes a single
-    ``[cell lead {letter}] <text>`` line; no animation thread is spawned.
+    ``[cell lead {letter}] <text>`` line; :meth:`set_header` writes
+    a single ``status: <text>`` line each time it's called; no
+    animation thread is spawned.
 
     ``MultiSpinner`` and the single-line :class:`Spinner` are
     intentionally independent classes — the seed wizard relies on
@@ -211,10 +220,21 @@ class MultiSpinner:
         self._stop_event = threading.Event()
         self._animation_thread: Optional[threading.Thread] = None
         self._start_time: float = 0.0
+        self._header_text: str = ""
         self._slot_texts: list[str] = [""] * self._slot_count
         self._frame_iterator = itertools.cycle(_FRAMES)
         self._current_frame: str = _FRAMES[0]
         self._terminal_width_cached: int = _terminal_width()
+
+    @property
+    def _block_line_count(self) -> int:
+        """Total vertical lines managed by the animation thread.
+
+        The block layout is ``[header row] + [slot rows...]``, so
+        every ``\\033[NF`` cursor-up must move past all
+        ``slot_count + 1`` lines to reach the header position.
+        """
+        return self._slot_count + 1
 
     def update_slot(self, slot_idx: int, text: str) -> None:
         """Set the live text for a single worker slot.
@@ -238,6 +258,33 @@ class MultiSpinner:
         except (ValueError, OSError):
             pass
 
+    def set_header(self, text: str) -> None:
+        """Set the persistent header text shown just above the slot rows.
+
+        The header updates in place on each animation frame — it does
+        NOT scroll. Use this for aggregate state (e.g.
+        ``"status: queued=9 socratic_active=4"``) that should overwrite
+        itself as the state evolves. Use :meth:`print_line` instead
+        for permanent lines that should scroll above the block.
+
+        Safe from any thread. Passing ``None`` or empty string clears
+        the header (the row is still drawn, just blank).
+        """
+        flat = "" if text is None else text.replace("\n", " ").strip()
+        if self._is_tty:
+            with self._lock:
+                self._header_text = flat
+            return
+        # Plain mode: each call becomes a single permanent line. This
+        # matches update_slot's plain-mode behavior (one line per call)
+        # and keeps non-TTY runs readable as a log.
+        if flat:
+            self._stream.write(flat + "\n")
+            try:
+                self._stream.flush()
+            except (ValueError, OSError):
+                pass
+
     def print_line(self, text: str) -> None:
         """Write a permanent line above the row block.
 
@@ -259,14 +306,22 @@ class MultiSpinner:
             return
         with self._lock:
             try:
-                # Move up to the top of the row block, write the
-                # permanent line in place, then redraw every row
-                # beneath it so the cursor ends one line below the
-                # block — ready for the next animation frame.
-                self._stream.write(f"\033[{self._slot_count}F")
+                # Move up to the top of the block (the header row),
+                # overwrite it with the permanent line, then redraw
+                # the header + every slot row underneath. The net
+                # effect is that the permanent line lands at the
+                # current block-top position and the header+rows
+                # shift down by one line — exactly the "scroll-up"
+                # illusion the old print_line provided before the
+                # header row existed.
+                self._stream.write(f"\033[{self._block_line_count}F")
                 self._stream.write("\033[2K")
                 self._stream.write(flat + "\n")
                 frame_char = self._current_frame
+                # Redraw header
+                self._stream.write("\033[2K")
+                self._stream.write(self._header_text + "\n")
+                # Redraw every slot row
                 for slot_idx in range(self._slot_count):
                     self._stream.write("\033[2K")
                     self._stream.write(self._format_row(slot_idx, frame_char))
@@ -278,11 +333,12 @@ class MultiSpinner:
         self._start_time = time.monotonic()
         self._stream.write(f"\n─ {self._label}\n")
         if self._is_tty and self._slot_count > 0:
-            # Reserve vertical real estate for the row block so the
-            # animation thread can immediately do ``\033[NF`` and land
-            # at the top of the block without stomping whatever was on
-            # the current line.
-            self._stream.write("\n" * self._slot_count)
+            # Reserve vertical real estate for the header row + every
+            # slot row so the animation thread can immediately do
+            # ``\033[(N+1)F`` and land at the top of the block
+            # (the header) without stomping whatever was on the
+            # current line.
+            self._stream.write("\n" * self._block_line_count)
         try:
             self._stream.flush()
         except (ValueError, OSError):
@@ -304,15 +360,16 @@ class MultiSpinner:
         with self._lock:
             if self._is_tty and self._slot_count > 0:
                 try:
-                    # Rewind to the top of the row block and blank out
-                    # every row so the summary line replaces the block
+                    # Rewind to the top of the block (header row)
+                    # and blank out every line — header + all slot
+                    # rows — so the summary line replaces the block
                     # entirely.
-                    self._stream.write(f"\033[{self._slot_count}F")
-                    for _row_index in range(self._slot_count):
+                    self._stream.write(f"\033[{self._block_line_count}F")
+                    for _line_index in range(self._block_line_count):
                         self._stream.write("\033[2K\n")
-                    # Now move back up to the start of the cleared
-                    # block and write the summary in its place.
-                    self._stream.write(f"\033[{self._slot_count}F")
+                    # Move back up to the cleared header position and
+                    # write the summary in its place.
+                    self._stream.write(f"\033[{self._block_line_count}F")
                     self._stream.write(summary_line)
                     self._stream.flush()
                 except (ValueError, OSError):
@@ -355,10 +412,16 @@ class MultiSpinner:
             self._current_frame = frame_char
             with self._lock:
                 try:
-                    # Step to the top of the row block and redraw
-                    # every row; the trailing newline on the last row
-                    # leaves the cursor one line below the block.
-                    self._stream.write(f"\033[{self._slot_count}F")
+                    # Step to the top of the block (header row) and
+                    # redraw the header + every slot row. The trailing
+                    # newline on the last row leaves the cursor one
+                    # line below the block, ready for the next tick.
+                    self._stream.write(f"\033[{self._block_line_count}F")
+                    # Header row — cleared + rewritten every frame so
+                    # ``set_header`` takes effect on the next tick.
+                    self._stream.write("\033[2K")
+                    self._stream.write(self._header_text + "\n")
+                    # Slot rows
                     for slot_idx in range(self._slot_count):
                         self._stream.write("\033[2K")
                         self._stream.write(self._format_row(slot_idx, frame_char))
@@ -446,24 +509,26 @@ def grow_status_loop(
     stop_event,
     interval_seconds: float,
 ) -> None:
-    """Daemon-thread body that prints periodic aggregate progress lines.
+    """Daemon-thread body that refreshes the aggregate status header.
 
     Each tick (``interval_seconds``):
 
     * snapshot queue state via ``get_state_summary``
-    * print a single ``status: <state_summary>`` line above the spinner
-      via ``spinner.print_line``
+    * push a ``status: <state_summary>`` line into the spinner header
+      via ``spinner.set_header`` (if available) — this updates in
+      place every animation frame rather than scrolling. For
+      :class:`Spinner` (single-line, no header support) this falls
+      back to ``print_line``.
 
-    Per-cell lifecycle activity is already rendered in real time on the
-    :class:`MultiSpinner` per-slot rows, so this loop no longer walks
-    event logs for recent verdicts. Shuts down promptly when
+    Per-cell lifecycle activity is already rendered in real time on
+    the :class:`MultiSpinner` per-slot rows, so this loop no longer
+    walks event logs for recent verdicts. Shuts down promptly when
     ``stop_event`` is set.
-
-    ``spinner`` can be either a :class:`Spinner` or a
-    :class:`MultiSpinner` — both expose ``print_line``.
     """
     from petri.engine.grow_loop import format_state_summary
     from petri.storage.queue import get_state_summary
+
+    set_header = getattr(spinner, "set_header", None)
 
     while True:
         if stop_event.is_set():
@@ -474,8 +539,13 @@ def grow_status_loop(
         except Exception:
             state_counts = {}
 
-        state_summary = format_state_summary(state_counts)
-        spinner.print_line(f"status: {state_summary}")
+        status_line = f"status: {format_state_summary(state_counts)}"
+        if set_header is not None:
+            set_header(status_line)
+        else:
+            # Single-line Spinner fallback — no header row, so
+            # fall back to scrolling the status above the spinner.
+            spinner.print_line(status_line)
 
         # Sleep until next tick OR until stop_event is set
         if stop_event.wait(timeout=interval_seconds):
