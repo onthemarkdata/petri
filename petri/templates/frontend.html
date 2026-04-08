@@ -1,0 +1,1526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Petri Lab</title>
+<style>
+/* ── Reset & Base ──────────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #050810;
+  --bg-panel: #0c0f1a;
+  --bg-card: #111526;
+  --bg-header: #0a0d18;
+  --border: #1a1d2e;
+  --border-bright: #2a2d4a;
+  --text: #e0e0e0;
+  --text-dim: #666;
+  --text-mid: #999;
+  --green: #00ff88;
+  --green-dim: #116644;
+  --green-dark: #0a4a2a;
+  --phosphor: #00ff88;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ── Screens ──────────────────────────────────────────────────────── */
+.screen { display: none; position: absolute; inset: 0; overflow: hidden; }
+.screen.active { display: flex; flex-direction: column; }
+
+/* ── Mute Button (global, always visible) ─────────────────────────── */
+#mute-btn {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  background: rgba(10, 15, 24, 0.85);
+  border: 1px solid var(--border-bright);
+  color: var(--green);
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  backdrop-filter: blur(8px);
+}
+#mute-btn:hover { border-color: var(--green); background: rgba(0,255,136,0.08); }
+#mute-btn.muted { color: #555; }
+
+/* ── Title Screen ─────────────────────────────────────────────────── */
+#screen-title {
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg);
+}
+.title-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.title-bg img {
+  max-width: 80%;
+  max-height: 70vh;
+  object-fit: contain;
+  filter: drop-shadow(0 0 40px rgba(0,255,136,0.15));
+}
+.title-enter {
+  position: absolute;
+  bottom: 12vh;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: var(--green);
+  text-shadow: 0 0 20px rgba(0,255,136,0.6), 0 0 40px rgba(0,255,136,0.3);
+  animation: flash 1.2s ease-in-out infinite;
+}
+@keyframes flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+/* ── CRT Onboarding ──────────────────────────────────────────────── */
+#screen-onboarding {
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+.crt-frame {
+  position: relative;
+  width: min(900px, 90vw);
+  height: min(600px, 80vh);
+  background: #0a0a0a;
+  border-radius: 18px;
+  border: 3px solid #222;
+  box-shadow: 0 0 60px rgba(0,255,136,0.08), inset 0 0 80px rgba(0,0,0,0.8);
+  overflow: hidden;
+}
+.crt-screen {
+  position: absolute;
+  inset: 12px;
+  background: #000800;
+  border-radius: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 28px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--green);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.crt-screen::-webkit-scrollbar { width: 4px; }
+.crt-screen::-webkit-scrollbar-track { background: transparent; }
+.crt-screen::-webkit-scrollbar-thumb { background: var(--green-dark); border-radius: 2px; }
+.crt-scanlines {
+  position: absolute;
+  inset: 12px;
+  border-radius: 10px;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px);
+  z-index: 2;
+}
+.crt-glow {
+  position: absolute;
+  inset: 12px;
+  border-radius: 10px;
+  pointer-events: none;
+  box-shadow: inset 0 0 60px rgba(0,255,136,0.04);
+  z-index: 3;
+}
+.term-line { margin-bottom: 2px; white-space: pre-wrap; word-break: break-word; }
+.term-line.dim { color: #116644; }
+.term-line.bright { color: #66ffbb; }
+.term-line.error { color: #ff4444; }
+.term-prompt { color: #33bb88; }
+.term-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: var(--green);
+  animation: blink-cursor 0.8s step-end infinite;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+@keyframes blink-cursor { 50% { opacity: 0; } }
+.term-input-wrap { display: flex; align-items: center; margin-top: 4px; }
+.term-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--green);
+  font-family: inherit;
+  font-size: inherit;
+  flex: 1;
+  caret-color: var(--green);
+}
+.term-option {
+  padding: 4px 12px;
+  margin: 2px 0;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.term-option:hover { background: rgba(0,255,136,0.1); }
+.term-option.selected { background: rgba(0,255,136,0.15); color: #66ffbb; }
+.term-option::before { content: '  '; }
+.term-option.selected::before { content: '> '; color: var(--green); }
+
+/* ── Header Bar (Lab + other views) ──────────────────────────────── */
+.header-bar {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 16px;
+  z-index: 10;
+}
+.header-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.header-nav { display: flex; gap: 2px; margin-left: 24px; }
+.nav-tab {
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-family: inherit;
+}
+.nav-tab:first-child { border-radius: 4px 0 0 4px; }
+.nav-tab:last-child { border-radius: 0 4px 4px 0; }
+.nav-tab.active { background: var(--bg-card); color: var(--text); border-color: var(--border-bright); }
+.nav-tab:hover:not(.active) { color: var(--text-mid); }
+.header-spacer { flex: 1; }
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--green);
+  letter-spacing: 2px;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.live-badge.connected { opacity: 1; }
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--green); }
+  50% { opacity: 0.4; box-shadow: none; }
+}
+
+/* ── Lab Overview ────────────────────────────────────────────────── */
+#screen-lab { background: var(--bg); }
+.lab-content { flex: 1; overflow-y: auto; padding: 20px; }
+.lab-content::-webkit-scrollbar { width: 6px; }
+.lab-content::-webkit-scrollbar-track { background: transparent; }
+.lab-content::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+
+.stats-ribbon { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 20px;
+  min-width: 140px;
+}
+.stat-value { font-size: 28px; font-weight: 700; color: var(--green); }
+.stat-label { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+
+.section-title {
+  font-size: 12px; font-weight: 700; color: var(--text-dim);
+  letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;
+}
+.colony-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px; margin-bottom: 28px;
+}
+.colony-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.colony-card:hover { border-color: var(--green-dim); transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,255,136,0.06); }
+.colony-name { font-size: 15px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.colony-name .active-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse-dot 1.5s ease-in-out infinite; }
+.colony-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+.status-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #1a1a2e; }
+.status-bar-seg { transition: width 0.3s; }
+
+.queue-panel { margin-top: 8px; }
+.queue-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: 6px;
+  margin-bottom: 6px; font-size: 12px;
+}
+.queue-node { color: var(--green); cursor: pointer; font-weight: 600; }
+.queue-node:hover { text-decoration: underline; }
+.queue-state-badge {
+  padding: 2px 8px; border-radius: 3px; font-size: 10px;
+  font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+  background: rgba(0,255,136,0.1); color: var(--green);
+}
+
+/* ── Colony DAG View ─────────────────────────────────────────────── */
+#screen-colony { background: var(--bg); }
+.dag-container { flex: 1; position: relative; overflow: hidden; cursor: grab; }
+.dag-container.grabbing { cursor: grabbing; }
+.dag-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dag-node { cursor: pointer; transition: filter 0.2s; }
+.dag-node:hover { filter: brightness(1.3); }
+.dag-edge { fill: none; stroke-width: 1.5; }
+.dag-edge.intra { stroke: rgba(0,255,136,0.25); }
+.dag-edge.cross { stroke: rgba(255,165,0,0.3); stroke-dasharray: 6 4; }
+.dag-label { font-size: 10px; fill: var(--text-mid); text-anchor: middle; pointer-events: none; }
+.dag-tooltip {
+  display: none; position: fixed;
+  background: var(--bg-card); border: 1px solid var(--border-bright);
+  border-radius: 8px; padding: 12px 16px; font-size: 12px;
+  max-width: 320px; z-index: 200;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.7); pointer-events: none; line-height: 1.5;
+}
+.dag-legend {
+  position: absolute; bottom: 16px; left: 16px;
+  background: rgba(10,15,24,0.9); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; font-size: 11px;
+  display: flex; flex-wrap: wrap; gap: 10px; z-index: 5;
+  backdrop-filter: blur(8px);
+}
+.legend-item { display: flex; align-items: center; gap: 5px; color: var(--text-dim); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.dag-back {
+  position: absolute; top: 8px; left: 8px; z-index: 5;
+  background: rgba(10,15,24,0.9); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 14px; color: var(--text-mid);
+  cursor: pointer; font-size: 12px; font-family: inherit;
+  backdrop-filter: blur(8px);
+}
+.dag-back:hover { color: var(--text); border-color: var(--border-bright); }
+.dag-colony-title {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 5; font-size: 14px; font-weight: 700; color: var(--green);
+  letter-spacing: 2px; background: rgba(10,15,24,0.9);
+  padding: 6px 18px; border-radius: 6px; border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+
+@keyframes pulse-glow { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+.node-active { animation: pulse-glow 1.5s ease-in-out infinite; }
+
+/* ── Research Logs ───────────────────────────────────────────────── */
+#screen-logs { background: var(--bg); }
+.logs-toolbar {
+  display: flex; gap: 10px; padding: 10px 20px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+  flex-wrap: wrap; align-items: center;
+}
+.logs-filter {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 4px; padding: 5px 10px; color: var(--text);
+  font-family: inherit; font-size: 12px; outline: none;
+}
+.logs-filter:focus { border-color: var(--green-dim); }
+.logs-feed { flex: 1; overflow-y: auto; padding: 8px 20px; font-size: 12px; }
+.logs-feed::-webkit-scrollbar { width: 6px; }
+.logs-feed::-webkit-scrollbar-track { background: transparent; }
+.logs-feed::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+.log-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 0; border-bottom: 1px solid rgba(26,29,46,0.5);
+}
+.log-time { color: var(--text-dim); flex-shrink: 0; width: 70px; }
+.log-type-badge {
+  padding: 1px 8px; border-radius: 3px; font-size: 10px; font-weight: 700;
+  flex-shrink: 0; min-width: 100px; text-align: center;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.log-agent { color: var(--text-mid); flex-shrink: 0; min-width: 120px; }
+.log-node { color: var(--green); cursor: pointer; font-weight: 600; flex-shrink: 0; }
+.log-node:hover { text-decoration: underline; }
+.log-iter { color: var(--text-dim); flex-shrink: 0; }
+.logs-empty { color: var(--text-dim); text-align: center; padding: 60px 20px; font-size: 14px; }
+
+/* ── Node Detail ─────────────────────────────────────────────────── */
+#screen-node { background: var(--bg); }
+.node-content { flex: 1; overflow-y: auto; padding: 20px; }
+.node-content::-webkit-scrollbar { width: 6px; }
+.node-content::-webkit-scrollbar-track { background: transparent; }
+.node-content::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+.node-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+.node-claim { font-size: 18px; font-weight: 600; flex: 1; min-width: 200px; }
+.node-status-badge {
+  padding: 4px 12px; border-radius: 4px; font-size: 11px;
+  font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; flex-shrink: 0;
+}
+.node-meta-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px; margin-bottom: 24px;
+}
+.meta-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; }
+.meta-label { font-size: 10px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+.meta-value { font-size: 13px; }
+.meta-link { color: var(--green); cursor: pointer; }
+.meta-link:hover { text-decoration: underline; }
+
+.verdict-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 12px; }
+.verdict-table th { text-align: left; padding: 8px 12px; color: var(--text-dim); border-bottom: 1px solid var(--border); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+.verdict-table td { padding: 8px 12px; border-bottom: 1px solid rgba(26,29,46,0.5); }
+.verdict-pass { color: #22c55e; font-weight: 600; }
+.verdict-block { color: #ef4444; font-weight: 600; }
+
+.timeline-group { margin-bottom: 20px; }
+.timeline-iter-label { font-size: 11px; font-weight: 700; color: var(--text-dim); letter-spacing: 1px; padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.timeline-event { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(26,29,46,0.3); font-size: 12px; }
+.timeline-detail { flex: 1; color: var(--text-mid); line-height: 1.5; }
+.timeline-detail strong { color: var(--text); }
+.timeline-time { color: var(--text-dim); flex-shrink: 0; font-size: 11px; }
+.expand-toggle { cursor: pointer; color: var(--text-dim); font-size: 10px; }
+.expand-toggle:hover { color: var(--text-mid); }
+.expand-content { display: none; margin-top: 6px; padding: 8px; background: var(--bg-panel); border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+
+.node-back { margin-bottom: 16px; }
+.node-back button {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 14px; color: var(--text-mid);
+  cursor: pointer; font-size: 12px; font-family: inherit;
+}
+.node-back button:hover { color: var(--text); border-color: var(--border-bright); }
+
+/* ── Loading / Empty States ──────────────────────────────────────── */
+.loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); font-size: 14px; }
+.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border-bright); border-top-color: var(--green); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- Audio -->
+<audio id="bgm" loop preload="auto">
+  <source src="/assets/WBA Free Track - Proletariat FINAL MIX.mp3" type="audio/mpeg">
+</audio>
+<button id="mute-btn" title="Toggle Music">&#9835;</button>
+
+<!-- Title Screen -->
+<div id="screen-title" class="screen active">
+  <div class="title-bg">
+    <img src="/assets/petri-title-screen.svg" alt="PETRI">
+  </div>
+  <div class="title-enter">ENTER PETRI LAB</div>
+</div>
+
+<!-- Onboarding -->
+<div id="screen-onboarding" class="screen">
+  <div class="crt-frame">
+    <div class="crt-screen" id="crt-output"></div>
+    <div class="crt-scanlines"></div>
+    <div class="crt-glow"></div>
+  </div>
+</div>
+
+<!-- Lab Overview -->
+<div id="screen-lab" class="screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
+    <div class="header-nav">
+      <button class="nav-tab active" data-view="lab">Lab</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge" id="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="lab-content" id="lab-content">
+    <div class="loading"><span class="spinner"></span>Loading...</div>
+  </div>
+</div>
+
+<!-- Colony DAG -->
+<div id="screen-colony" class="screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
+    <div class="header-nav">
+      <button class="nav-tab" data-view="lab">Lab</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="dag-container" id="dag-container">
+    <button class="dag-back" id="dag-back-btn">&larr; Back</button>
+    <div class="dag-colony-title" id="dag-title"></div>
+    <svg class="dag-svg" id="dag-svg">
+      <defs>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+    </svg>
+    <div class="dag-legend" id="dag-legend"></div>
+    <div class="dag-tooltip" id="dag-tooltip"></div>
+  </div>
+</div>
+
+<!-- Research Logs -->
+<div id="screen-logs" class="screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
+    <div class="header-nav">
+      <button class="nav-tab" data-view="lab">Lab</button>
+      <button class="nav-tab active" data-view="logs">Logs</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="logs-toolbar">
+    <input class="logs-filter" id="filter-node" placeholder="Filter node..." />
+    <input class="logs-filter" id="filter-agent" placeholder="Filter agent..." />
+    <select class="logs-filter" id="filter-type">
+      <option value="">All types</option>
+      <option>search_executed</option>
+      <option>source_reviewed</option>
+      <option>freshness_checked</option>
+      <option>verdict_issued</option>
+      <option>evidence_appended</option>
+      <option>debate_mediated</option>
+      <option>convergence_checked</option>
+      <option>node_reopened</option>
+      <option>propagation_triggered</option>
+      <option>decomposition_created</option>
+      <option>decomposition_audit</option>
+    </select>
+  </div>
+  <div class="logs-feed" id="logs-feed">
+    <div class="logs-empty">Waiting for events...</div>
+  </div>
+</div>
+
+<!-- Node Detail -->
+<div id="screen-node" class="screen">
+  <div class="header-bar">
+    <div class="header-title" onclick="navigate('lab')">PETRI LAB</div>
+    <div class="header-nav">
+      <button class="nav-tab" data-view="lab">Lab</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  </div>
+  <div class="node-content" id="node-content">
+    <div class="loading"><span class="spinner"></span>Loading node...</div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   PETRI LAB — Single-file SPA
+   All data comes from the backend API; no user-supplied content is
+   rendered without escaping via textContent or createTextNode.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+var API = '';
+
+// ── Color Maps ──────────────────────────────────────────────────────────
+
+var STATUS_COLORS = $status_colors_json;
+
+var EVENT_COLORS = $event_colors_json;
+
+var QUEUE_ACTIVE_STATES = $queue_active_states_json;
+
+var PASS_VERDICTS = new Set($pass_verdicts_json);
+
+// ── State ───────────────────────────────────────────────────────────────
+
+var State = {
+  nodes: [],
+  queue: [],
+  stats: {},
+  events: [],
+  sseConnected: false,
+  currentView: 'title',
+  currentColony: null,
+  currentNode: null,
+};
+
+// ── Utility ─────────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+  var el = document.createElement('span');
+  el.textContent = str || '';
+  return el.innerHTML;
+}
+
+function setText(parent, text) {
+  parent.textContent = '';
+  parent.appendChild(document.createTextNode(text || ''));
+}
+
+function buildEl(tag, attrs, children) {
+  var el = document.createElement(tag);
+  if (attrs) {
+    Object.keys(attrs).forEach(function(key) {
+      if (key === 'className') el.className = attrs[key];
+      else if (key === 'onclick') el.addEventListener('click', attrs[key]);
+      else if (key === 'style' && typeof attrs[key] === 'object') {
+        Object.keys(attrs[key]).forEach(function(prop) { el.style[prop] = attrs[key][prop]; });
+      } else el.setAttribute(key, attrs[key]);
+    });
+  }
+  if (typeof children === 'string') el.textContent = children;
+  else if (Array.isArray(children)) children.forEach(function(child) { if (child) el.appendChild(child); });
+  return el;
+}
+
+function buildSVGEl(tag, attrs) {
+  var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) Object.keys(attrs).forEach(function(key) { el.setAttribute(key, attrs[key]); });
+  return el;
+}
+
+// ── Audio Manager ───────────────────────────────────────────────────────
+
+var bgm = document.getElementById('bgm');
+var muteBtn = document.getElementById('mute-btn');
+var audioStarted = false;
+var muted = localStorage.getItem('petri-muted') === 'true';
+
+function updateMuteUI() {
+  bgm.muted = muted;
+  muteBtn.textContent = muted ? 'M' : '\u266B';
+  muteBtn.classList.toggle('muted', muted);
+}
+updateMuteUI();
+
+muteBtn.addEventListener('click', function(evt) {
+  evt.stopPropagation();
+  muted = !muted;
+  localStorage.setItem('petri-muted', String(muted));
+  updateMuteUI();
+  if (!audioStarted) startAudio();
+});
+
+function startAudio() {
+  if (audioStarted) return;
+  audioStarted = true;
+  bgm.volume = 0.4;
+  bgm.play().catch(function() {});
+  updateMuteUI();
+}
+
+// ── Router ──────────────────────────────────────────────────────────────
+
+function navigate(view, param) {
+  if (param) location.hash = view + '/' + encodeURIComponent(param);
+  else location.hash = view;
+}
+
+function handleRoute() {
+  var hash = location.hash.slice(1) || 'title';
+  var parts = hash.split('/');
+  var view = parts[0];
+  var param = parts.slice(1).join('/');
+  if (param) param = decodeURIComponent(param);
+
+  State.currentView = view;
+
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+
+  switch (view) {
+    case 'title':
+      document.getElementById('screen-title').classList.add('active');
+      break;
+    case 'onboarding':
+      document.getElementById('screen-onboarding').classList.add('active');
+      startOnboarding();
+      break;
+    case 'lab':
+      document.getElementById('screen-lab').classList.add('active');
+      updateNavTabs('lab');
+      loadLabData();
+      break;
+    case 'colony':
+      document.getElementById('screen-colony').classList.add('active');
+      updateNavTabs(null);
+      State.currentColony = param;
+      loadColonyDAG(param);
+      break;
+    case 'logs':
+      document.getElementById('screen-logs').classList.add('active');
+      updateNavTabs('logs');
+      loadLogs();
+      break;
+    case 'node':
+      document.getElementById('screen-node').classList.add('active');
+      updateNavTabs(null);
+      State.currentNode = param;
+      loadNodeDetail(param);
+      break;
+    default:
+      document.getElementById('screen-title').classList.add('active');
+  }
+}
+
+window.addEventListener('hashchange', handleRoute);
+
+function updateNavTabs(activeView) {
+  document.querySelectorAll('.nav-tab').forEach(function(tab) {
+    tab.classList.toggle('active', tab.dataset.view === activeView);
+  });
+}
+
+document.querySelectorAll('.nav-tab').forEach(function(tab) {
+  tab.addEventListener('click', function() { navigate(tab.dataset.view); });
+});
+
+document.getElementById('dag-back-btn').addEventListener('click', function() { navigate('lab'); });
+
+// ── Title Screen ────────────────────────────────────────────────────────
+
+var titleActivated = false;
+
+function handleTitleActivation() {
+  if (titleActivated) return;
+  titleActivated = true;
+  startAudio();
+
+  fetch(API + '/api/dishes')
+    .then(function(res) { return res.json(); })
+    .then(function(dishes) {
+      navigate(dishes.length === 0 ? 'onboarding' : 'lab');
+    })
+    .catch(function() { navigate('lab'); });
+}
+
+document.getElementById('screen-title').addEventListener('click', handleTitleActivation);
+document.addEventListener('keydown', function(evt) {
+  if (State.currentView !== 'title') return;
+  if (evt.key === 'Enter' || evt.key === ' ') {
+    evt.preventDefault();
+    handleTitleActivation();
+  }
+});
+
+// ── SSE Manager ─────────────────────────────────────────────────────────
+
+var eventSource = null;
+
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(API + '/api/stream');
+
+  eventSource.addEventListener('connected', function() {
+    State.sseConnected = true;
+    document.querySelectorAll('.live-badge').forEach(function(b) { b.classList.add('connected'); });
+  });
+
+  eventSource.addEventListener('event_inserted', function(evt) {
+    var data = JSON.parse(evt.data);
+    State.events.unshift(data);
+    if (State.events.length > 500) State.events.length = 500;
+    if (State.currentView === 'logs') appendLogRow(data);
+    if (State.currentView === 'lab') loadLabData();
+    if (State.currentView === 'colony' && State.currentColony) loadColonyDAG(State.currentColony);
+    if (State.currentView === 'node' && State.currentNode === data.node_id) loadNodeDetail(State.currentNode);
+  });
+
+  eventSource.onerror = function() {
+    State.sseConnected = false;
+    document.querySelectorAll('.live-badge').forEach(function(b) { b.classList.remove('connected'); });
+    setTimeout(connectSSE, 5000);
+  };
+}
+
+// ── API Helpers ──────────────────────────────────────────────────────────
+
+function fetchJSON(url) {
+  return fetch(API + url).then(function(res) {
+    if (!res.ok) throw new Error(String(res.status));
+    return res.json();
+  });
+}
+
+// ── Lab Overview ────────────────────────────────────────────────────────
+
+function loadLabData() {
+  Promise.all([
+    fetchJSON('/api/nodes'),
+    fetchJSON('/api/queue'),
+    fetchJSON('/api/stats'),
+  ]).then(function(results) {
+    State.nodes = results[0];
+    State.queue = results[1];
+    State.stats = results[2];
+    renderLab();
+  }).catch(function(err) {
+    var container = document.getElementById('lab-content');
+    container.textContent = '';
+    container.appendChild(buildEl('div', { className: 'loading' }, 'Failed to load: ' + err.message));
+  });
+}
+
+function renderLab() {
+  var container = document.getElementById('lab-content');
+  container.textContent = '';
+
+  var stats = State.stats;
+  var nodes = State.nodes;
+  var queue = State.queue;
+
+  // Group nodes by colony
+  var colonies = {};
+  nodes.forEach(function(node) {
+    var cid = node.colony_id || 'unknown';
+    if (!colonies[cid]) colonies[cid] = [];
+    colonies[cid].push(node);
+  });
+
+  var queueEntries = Array.isArray(queue) ? queue : Object.values(queue.entries || queue);
+  var activeQueue = queueEntries.filter(function(entry) {
+    return QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1;
+  });
+
+  // Stats ribbon
+  var ribbon = buildEl('div', { className: 'stats-ribbon' });
+  [
+    [stats.total_events || 0, 'Events'],
+    [nodes.length, 'Nodes'],
+    [stats.queue_size || 0, 'In Queue'],
+    [activeQueue.length, 'Active'],
+  ].forEach(function(pair) {
+    var card = buildEl('div', { className: 'stat-card' });
+    card.appendChild(buildEl('div', { className: 'stat-value' }, String(pair[0])));
+    card.appendChild(buildEl('div', { className: 'stat-label' }, pair[1]));
+    ribbon.appendChild(card);
+  });
+  container.appendChild(ribbon);
+
+  // Colony cards
+  var colonyKeys = Object.keys(colonies);
+  if (colonyKeys.length > 0) {
+    container.appendChild(buildEl('div', { className: 'section-title' }, 'Colonies'));
+    var grid = buildEl('div', { className: 'colony-grid' });
+
+    colonyKeys.forEach(function(colonyId) {
+      var colonyNodes = colonies[colonyId];
+      var hasActive = colonyNodes.some(function(node) {
+        return queueEntries.some(function(entry) {
+          return entry.node_id === node.node_id && QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1;
+        });
+      });
+
+      var statusCounts = {};
+      colonyNodes.forEach(function(node) {
+        statusCounts[node.status] = (statusCounts[node.status] || 0) + 1;
+      });
+
+      var displayName = colonyId.split('-').slice(1).join('-') || colonyId;
+
+      var card = buildEl('div', { className: 'colony-card', onclick: function() { navigate('colony', colonyId); } });
+
+      var nameEl = buildEl('div', { className: 'colony-name' });
+      if (hasActive) nameEl.appendChild(buildEl('span', { className: 'active-dot' }));
+      nameEl.appendChild(document.createTextNode(displayName));
+      card.appendChild(nameEl);
+
+      card.appendChild(buildEl('div', { className: 'colony-meta' }, colonyNodes.length + ' nodes'));
+
+      var bar = buildEl('div', { className: 'status-bar' });
+      var total = colonyNodes.length;
+      Object.keys(statusCounts).forEach(function(status) {
+        var pct = (statusCounts[status] / total * 100).toFixed(1);
+        var color = STATUS_COLORS[status] || '#555';
+        bar.appendChild(buildEl('div', { className: 'status-bar-seg', title: status + ': ' + statusCounts[status], style: { width: pct + '%', background: color } }));
+      });
+      card.appendChild(bar);
+      grid.appendChild(card);
+    });
+
+    container.appendChild(grid);
+  } else {
+    container.appendChild(buildEl('div', { className: 'logs-empty' }, 'No colonies yet. Run petri seed to create one.'));
+  }
+
+  // Active queue
+  if (activeQueue.length > 0) {
+    container.appendChild(buildEl('div', { className: 'section-title' }, 'Active Processing'));
+    var panel = buildEl('div', { className: 'queue-panel' });
+    activeQueue.forEach(function(entry) {
+      var row = buildEl('div', { className: 'queue-row' });
+      var nodeLink = buildEl('span', { className: 'queue-node', onclick: function() { navigate('node', entry.node_id); } }, entry.node_id);
+      row.appendChild(nodeLink);
+      row.appendChild(buildEl('span', { className: 'queue-state-badge' }, entry.queue_state));
+      if (entry.iteration) row.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'iter ' + entry.iteration));
+      panel.appendChild(row);
+    });
+    container.appendChild(panel);
+  }
+}
+
+// ── Colony DAG View ─────────────────────────────────────────────────────
+
+function loadColonyDAG(colonyId) {
+  Promise.all([fetchJSON('/api/nodes'), fetchJSON('/api/queue')]).then(function(results) {
+    var allNodes = results[0];
+    var queue = results[1];
+    var colonyNodes = allNodes.filter(function(node) { return node.colony_id === colonyId; });
+    if (colonyNodes.length === 0) {
+      setText(document.getElementById('dag-title'), 'Colony not found');
+      return;
+    }
+
+    var queueEntries = Array.isArray(queue) ? queue : Object.values(queue.entries || queue);
+    var activeSet = {};
+    queueEntries.forEach(function(entry) {
+      if (QUEUE_ACTIVE_STATES.indexOf(entry.queue_state) !== -1) activeSet[entry.node_id] = entry.queue_state;
+    });
+
+    var displayName = colonyId.split('-').slice(1).join('-') || colonyId;
+    setText(document.getElementById('dag-title'), displayName.toUpperCase());
+    renderDAG(colonyNodes, activeSet);
+    renderDAGLegend();
+  });
+}
+
+function renderDAG(colonyNodes, activeSet) {
+  var svg = document.getElementById('dag-svg');
+  var container = document.getElementById('dag-container');
+  var width = container.clientWidth;
+  var height = container.clientHeight;
+
+  var nodeMap = {};
+  colonyNodes.forEach(function(node) { nodeMap[node.node_id] = node; });
+
+  var simNodes = colonyNodes.map(function(node) {
+    var edgeCount = (node.dependencies || []).length + (node.dependents || []).length;
+    return {
+      id: node.node_id, data: node,
+      x: width / 2 + (Math.random() - 0.5) * width * 0.5,
+      y: height / 2 + (Math.random() - 0.5) * height * 0.5,
+      vx: 0, vy: 0,
+      radius: Math.max(8, Math.min(24, 6 + edgeCount * 3)),
+      edgeCount: edgeCount,
+      isCenter: node.level === 0,
+    };
+  });
+
+  var centerNode = simNodes.find(function(n) { return n.isCenter; }) || simNodes[0];
+  if (centerNode) { centerNode.x = width / 2; centerNode.y = height / 2; centerNode.radius = 28; }
+
+  var simEdges = [];
+  colonyNodes.forEach(function(node) {
+    (node.dependencies || []).forEach(function(depId) {
+      if (nodeMap[depId]) simEdges.push({ source: node.node_id, target: depId });
+    });
+  });
+
+  var simMap = {};
+  simNodes.forEach(function(n) { simMap[n.id] = n; });
+
+  // Force simulation
+  for (var tick = 0; tick < 120; tick++) {
+    var alpha = 1 - tick / 120;
+    simNodes.forEach(function(node) {
+      var strength = node.isCenter ? 0.1 : 0.005;
+      node.vx += (width / 2 - node.x) * strength * alpha;
+      node.vy += (height / 2 - node.y) * strength * alpha;
+    });
+    simEdges.forEach(function(edge) {
+      var src = simMap[edge.source], tgt = simMap[edge.target];
+      if (!src || !tgt) return;
+      var dx = tgt.x - src.x, dy = tgt.y - src.y;
+      var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ideal = 80 + src.radius + tgt.radius;
+      var force = (dist - ideal) * 0.02 * alpha;
+      var fx = dx / dist * force, fy = dy / dist * force;
+      src.vx += fx; src.vy += fy; tgt.vx -= fx; tgt.vy -= fy;
+    });
+    for (var nodeIdx = 0; nodeIdx < simNodes.length; nodeIdx++) {
+      for (var otherIdx = nodeIdx + 1; otherIdx < simNodes.length; otherIdx++) {
+        var nA = simNodes[nodeIdx], nB = simNodes[otherIdx];
+        var dx = nB.x - nA.x, dy = nB.y - nA.y;
+        var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (dist < (nA.radius + nB.radius + 20) * 3) {
+          var rep = 800 / (dist * dist) * alpha;
+          var fx = dx / dist * rep, fy = dy / dist * rep;
+          nA.vx -= fx; nA.vy -= fy; nB.vx += fx; nB.vy += fy;
+        }
+      }
+    }
+    simNodes.forEach(function(node) {
+      if (node.isCenter && tick < 30) return;
+      node.vx *= 0.85; node.vy *= 0.85;
+      node.x += node.vx; node.y += node.vy;
+      node.x = Math.max(40, Math.min(width - 40, node.x));
+      node.y = Math.max(90, Math.min(height - 40, node.y));
+    });
+  }
+
+  // Clear SVG except defs
+  var defs = svg.querySelector('defs');
+  while (svg.lastChild && svg.lastChild !== defs) svg.removeChild(svg.lastChild);
+
+  var viewX = 0, viewY = 0, viewScale = 1;
+  var group = buildSVGEl('g', { id: 'dag-group' });
+  svg.appendChild(group);
+
+  // Edges
+  simEdges.forEach(function(edge) {
+    var src = simMap[edge.source], tgt = simMap[edge.target];
+    if (!src || !tgt) return;
+    var mx = (src.x + tgt.x) / 2, my = (src.y + tgt.y) / 2;
+    var dx = tgt.x - src.x, dy = tgt.y - src.y;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var off = Math.min(20, len * 0.15);
+    var cx = mx + (-dy / len) * off, cy = my + (dx / len) * off;
+    group.appendChild(buildSVGEl('path', {
+      d: 'M' + src.x + ',' + src.y + ' Q' + cx + ',' + cy + ' ' + tgt.x + ',' + tgt.y,
+      class: 'dag-edge intra',
+    }));
+  });
+
+  // Nodes
+  simNodes.forEach(function(node) {
+    var nodeGroup = buildSVGEl('g', { class: 'dag-node', 'data-id': node.id });
+    var isActive = activeSet[node.id];
+    var color = STATUS_COLORS[node.data.status] || '#5c5c6e';
+
+    if (isActive) {
+      nodeGroup.appendChild(buildSVGEl('circle', {
+        cx: String(node.x), cy: String(node.y), r: String(node.radius + 6),
+        fill: 'none', stroke: color, 'stroke-width': '2',
+        opacity: '0.5', class: 'node-active', filter: 'url(#glow)',
+      }));
+    }
+
+    nodeGroup.appendChild(buildSVGEl('circle', {
+      cx: String(node.x), cy: String(node.y), r: String(node.radius),
+      fill: color,
+      stroke: isActive ? '#00ff88' : 'rgba(255,255,255,0.15)',
+      'stroke-width': isActive ? '2' : '1',
+    }));
+
+    if (node.radius >= 12) {
+      var label = (node.data.claim_text || '').substring(0, 30);
+      if ((node.data.claim_text || '').length > 30) label += '...';
+      var textEl = buildSVGEl('text', {
+        x: String(node.x), y: String(node.y + node.radius + 14), class: 'dag-label',
+      });
+      textEl.textContent = label;
+      nodeGroup.appendChild(textEl);
+    }
+
+    nodeGroup.addEventListener('click', function() { navigate('node', node.id); });
+
+    var tooltip = document.getElementById('dag-tooltip');
+    nodeGroup.addEventListener('mouseenter', function(evt) {
+      tooltip.textContent = '';
+      var claimDiv = buildEl('div', { className: 'tt-claim' }, node.data.claim_text || node.id);
+      var statusSpan = buildEl('span', { className: 'tt-status', style: { background: color } }, node.data.status);
+      var levelSpan = buildEl('span', { style: { marginLeft: '8px', color: 'var(--text-dim)', fontSize: '11px' } }, 'Level ' + node.data.level);
+      tooltip.appendChild(claimDiv);
+      tooltip.appendChild(statusSpan);
+      tooltip.appendChild(levelSpan);
+      tooltip.style.display = 'block';
+      tooltip.style.left = (evt.clientX + 12) + 'px';
+      tooltip.style.top = (evt.clientY + 12) + 'px';
+    });
+    nodeGroup.addEventListener('mousemove', function(evt) {
+      tooltip.style.left = (evt.clientX + 12) + 'px';
+      tooltip.style.top = (evt.clientY + 12) + 'px';
+    });
+    nodeGroup.addEventListener('mouseleave', function() { tooltip.style.display = 'none'; });
+
+    group.appendChild(nodeGroup);
+  });
+
+  // Pan & Zoom
+  var isPanning = false, panStartX = 0, panStartY = 0;
+  function updateTransform() {
+    group.setAttribute('transform', 'translate(' + viewX + ',' + viewY + ') scale(' + viewScale + ')');
+  }
+  container.addEventListener('mousedown', function(evt) {
+    if (evt.target.closest('.dag-node') || evt.target.closest('.dag-back') || evt.target.closest('.dag-legend')) return;
+    isPanning = true;
+    panStartX = evt.clientX - viewX;
+    panStartY = evt.clientY - viewY;
+    container.classList.add('grabbing');
+  });
+  document.addEventListener('mousemove', function(evt) {
+    if (!isPanning) return;
+    viewX = evt.clientX - panStartX;
+    viewY = evt.clientY - panStartY;
+    updateTransform();
+  });
+  document.addEventListener('mouseup', function() { isPanning = false; container.classList.remove('grabbing'); });
+  container.addEventListener('wheel', function(evt) {
+    evt.preventDefault();
+    var delta = evt.deltaY > 0 ? 0.9 : 1.1;
+    var newScale = Math.max(0.2, Math.min(5, viewScale * delta));
+    var rect = container.getBoundingClientRect();
+    var mx = evt.clientX - rect.left, my = evt.clientY - rect.top;
+    viewX = mx - (mx - viewX) * (newScale / viewScale);
+    viewY = my - (my - viewY) * (newScale / viewScale);
+    viewScale = newScale;
+    updateTransform();
+  }, { passive: false });
+}
+
+function renderDAGLegend() {
+  var legend = document.getElementById('dag-legend');
+  legend.textContent = '';
+  ['NEW', 'RESEARCH', 'RED_TEAM', 'VALIDATED', 'DISPROVEN', 'STALLED'].forEach(function(status) {
+    var item = buildEl('div', { className: 'legend-item' });
+    item.appendChild(buildEl('div', { className: 'legend-dot', style: { background: STATUS_COLORS[status] } }));
+    item.appendChild(document.createTextNode(status));
+    legend.appendChild(item);
+  });
+}
+
+// ── Research Logs ───────────────────────────────────────────────────────
+
+function loadLogs() {
+  fetchJSON('/api/events?limit=200').then(function(events) {
+    var feed = document.getElementById('logs-feed');
+    feed.textContent = '';
+    events.reverse().forEach(function(evt) { appendLogRow(evt, true); });
+    if (events.length === 0) {
+      feed.appendChild(buildEl('div', { className: 'logs-empty' }, 'No events recorded yet. Run petri grow to start.'));
+    }
+  });
+}
+
+function appendLogRow(evt, skipScroll) {
+  var feed = document.getElementById('logs-feed');
+
+  var filterNode = document.getElementById('filter-node').value.toLowerCase();
+  var filterAgent = document.getElementById('filter-agent').value.toLowerCase();
+  var filterType = document.getElementById('filter-type').value;
+
+  if (filterNode && (evt.node_id || '').toLowerCase().indexOf(filterNode) === -1) return;
+  if (filterAgent && (evt.agent || '').toLowerCase().indexOf(filterAgent) === -1) return;
+  if (filterType && evt.type !== filterType) return;
+
+  var empty = feed.querySelector('.logs-empty');
+  if (empty) empty.remove();
+
+  var row = buildEl('div', { className: 'log-row' });
+  var time = (evt.timestamp || '').substring(11, 19) || '--:--:--';
+  var typeColor = EVENT_COLORS[evt.type] || '#666';
+
+  row.appendChild(buildEl('span', { className: 'log-time' }, time));
+  var badge = buildEl('span', { className: 'log-type-badge', style: { background: typeColor + '22', color: typeColor } }, (evt.type || '').replace(/_/g, ' '));
+  row.appendChild(badge);
+  row.appendChild(buildEl('span', { className: 'log-agent' }, evt.agent || ''));
+  row.appendChild(buildEl('span', { className: 'log-node', onclick: function() { navigate('node', evt.node_id); } }, evt.node_id || ''));
+  row.appendChild(buildEl('span', { className: 'log-iter' }, 'iter ' + (evt.iteration || 0)));
+
+  feed.insertBefore(row, feed.firstChild);
+  while (feed.children.length > 500) feed.removeChild(feed.lastChild);
+  if (!skipScroll) feed.scrollTop = 0;
+}
+
+['filter-node', 'filter-agent', 'filter-type'].forEach(function(id) {
+  document.getElementById(id).addEventListener('input', function() {
+    if (State.currentView === 'logs') loadLogs();
+  });
+});
+
+// ── Node Detail ─────────────────────────────────────────────────────────
+
+function loadNodeDetail(nodeId) {
+  var container = document.getElementById('node-content');
+  container.textContent = '';
+  var loading = buildEl('div', { className: 'loading' });
+  loading.appendChild(buildEl('span', { className: 'spinner' }));
+  loading.appendChild(document.createTextNode('Loading node...'));
+  container.appendChild(loading);
+
+  fetchJSON('/api/node/' + encodeURIComponent(nodeId)).then(function(node) {
+    renderNodeDetail(node);
+  }).catch(function() {
+    container.textContent = '';
+    container.appendChild(buildEl('div', { className: 'loading' }, 'Node not found: ' + nodeId));
+  });
+}
+
+function renderNodeDetail(node) {
+  var container = document.getElementById('node-content');
+  container.textContent = '';
+  var statusColor = STATUS_COLORS[node.status] || '#555';
+
+  // Back
+  var backDiv = buildEl('div', { className: 'node-back' });
+  backDiv.appendChild(buildEl('button', { onclick: function() { history.back(); } }, '\u2190 Back'));
+  container.appendChild(backDiv);
+
+  // Header
+  var header = buildEl('div', { className: 'node-header' });
+  header.appendChild(buildEl('div', { className: 'node-claim' }, node.claim_text || node.node_id));
+  header.appendChild(buildEl('span', { className: 'node-status-badge', style: { background: statusColor } }, node.status));
+  container.appendChild(header);
+
+  // Meta grid
+  var metaGrid = buildEl('div', { className: 'node-meta-grid' });
+
+  function addMetaItem(label, valueContent) {
+    var item = buildEl('div', { className: 'meta-item' });
+    item.appendChild(buildEl('div', { className: 'meta-label' }, label));
+    var valDiv = buildEl('div', { className: 'meta-value' });
+    if (typeof valueContent === 'string') valDiv.textContent = valueContent;
+    else valDiv.appendChild(valueContent);
+    item.appendChild(valDiv);
+    metaGrid.appendChild(item);
+  }
+
+  addMetaItem('Node ID', node.node_id);
+  addMetaItem('Colony', node.colony_id || '');
+  addMetaItem('Level', String(node.level));
+
+  var depsDiv = document.createDocumentFragment();
+  (node.dependencies || []).forEach(function(depId) {
+    var link = buildEl('span', { className: 'meta-link', onclick: function() { navigate('node', depId); } }, depId);
+    depsDiv.appendChild(link);
+    depsDiv.appendChild(document.createElement('br'));
+  });
+  if ((node.dependencies || []).length === 0) depsDiv.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'None (leaf node)'));
+  addMetaItem('Dependencies (' + (node.dependencies || []).length + ')', depsDiv);
+
+  var depntsDiv = document.createDocumentFragment();
+  (node.dependents || []).forEach(function(depId) {
+    depntsDiv.appendChild(buildEl('span', { className: 'meta-link', onclick: function() { navigate('node', depId); } }, depId));
+    depntsDiv.appendChild(document.createElement('br'));
+  });
+  if ((node.dependents || []).length === 0) depntsDiv.appendChild(buildEl('span', { style: { color: 'var(--text-dim)' } }, 'None'));
+  addMetaItem('Dependents (' + (node.dependents || []).length + ')', depntsDiv);
+
+  container.appendChild(metaGrid);
+
+  // Verdicts
+  var events = node.events || [];
+  var verdicts = events.filter(function(evt) { return evt.type === 'verdict_issued'; });
+  if (verdicts.length > 0) {
+    container.appendChild(buildEl('div', { className: 'section-title' }, 'Verdicts'));
+    var table = buildEl('table', { className: 'verdict-table' });
+    var thead = buildEl('thead');
+    var headRow = buildEl('tr');
+    ['Agent', 'Verdict', 'Confidence', 'Iteration'].forEach(function(h) { headRow.appendChild(buildEl('th', {}, h)); });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = buildEl('tbody');
+    verdicts.forEach(function(evt) {
+      var verdict = (evt.data && evt.data.verdict) || '';
+      var isPass = PASS_VERDICTS.has(verdict);
+      var row = buildEl('tr');
+      row.appendChild(buildEl('td', {}, evt.agent || ''));
+      row.appendChild(buildEl('td', { className: isPass ? 'verdict-pass' : 'verdict-block' }, verdict));
+      row.appendChild(buildEl('td', {}, String((evt.data && evt.data.confidence) || '')));
+      row.appendChild(buildEl('td', {}, String(evt.iteration)));
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  // Timeline
+  if (events.length > 0) {
+    container.appendChild(buildEl('div', { className: 'section-title' }, 'Event Timeline (' + events.length + ' events)'));
+
+    var byIteration = {};
+    events.forEach(function(evt) {
+      var iter = evt.iteration || 0;
+      if (!byIteration[iter]) byIteration[iter] = [];
+      byIteration[iter].push(evt);
+    });
+
+    Object.keys(byIteration).sort(function(a, b) { return Number(b) - Number(a); }).forEach(function(iter) {
+      var grp = buildEl('div', { className: 'timeline-group' });
+      grp.appendChild(buildEl('div', { className: 'timeline-iter-label' }, 'ITERATION ' + iter));
+
+      byIteration[iter].slice().reverse().forEach(function(evt) {
+        var typeColor = EVENT_COLORS[evt.type] || '#666';
+        var time = (evt.timestamp || '').substring(11, 19) || '';
+        var row = buildEl('div', { className: 'timeline-event' });
+        row.appendChild(buildEl('span', { className: 'log-type-badge', style: { background: typeColor + '22', color: typeColor } }, (evt.type || '').replace(/_/g, ' ')));
+
+        var detail = buildEl('div', { className: 'timeline-detail' });
+        detail.appendChild(buildEl('strong', {}, evt.agent || ''));
+
+        var data = evt.data || {};
+        var extraText = '';
+        if (evt.type === 'verdict_issued' && data.verdict) {
+          extraText = ' \u2014 ' + data.verdict;
+          if (data.summary) extraText += '\n' + data.summary.substring(0, 200);
+        } else if (evt.type === 'search_executed' && data.query) {
+          extraText = ' \u2014 "' + data.query + '"';
+          if (data.sources_found) extraText += ' (' + data.sources_found + ' sources)';
+        } else if (evt.type === 'source_reviewed' && data.url) {
+          extraText = ' \u2014 ' + data.url.substring(0, 60);
+          if (data.supports_or_contradicts) extraText += ' [' + data.supports_or_contradicts + ']';
+        } else if (evt.type === 'debate_mediated' && data.from_agent) {
+          extraText = ' \u2014 ' + data.from_agent + ' vs ' + (data.to_agent || '');
+        } else if (evt.type === 'convergence_checked') {
+          extraText = ' \u2014 ' + (data.converged ? 'CONVERGED' : 'NOT CONVERGED');
+          if (data.weakest_link) extraText += ' (weakest: ' + data.weakest_link + ')';
+        }
+        if (extraText) detail.appendChild(document.createTextNode(extraText));
+
+        // Expandable raw data
+        var toggleSpan = buildEl('span', { className: 'expand-toggle' }, ' [show data]');
+        var expandDiv = buildEl('div', { className: 'expand-content' }, JSON.stringify(data, null, 2));
+        toggleSpan.addEventListener('click', function() {
+          var showing = expandDiv.style.display === 'block';
+          expandDiv.style.display = showing ? 'none' : 'block';
+          toggleSpan.textContent = showing ? ' [show data]' : ' [hide data]';
+        });
+        detail.appendChild(document.createElement('br'));
+        detail.appendChild(toggleSpan);
+        detail.appendChild(expandDiv);
+
+        row.appendChild(detail);
+        row.appendChild(buildEl('span', { className: 'timeline-time' }, time));
+        grp.appendChild(row);
+      });
+
+      container.appendChild(grp);
+    });
+  } else {
+    container.appendChild(buildEl('div', { className: 'logs-empty' }, 'No events recorded for this node yet.'));
+  }
+}
+
+// ── CRT Onboarding Terminal ─────────────────────────────────────────────
+
+var onboardingStarted = false;
+
+function startOnboarding() {
+  if (onboardingStarted) return;
+  onboardingStarted = true;
+
+  var output = document.getElementById('crt-output');
+  output.textContent = '';
+
+  var config = { name: '', model: 'claude-sonnet-4-6', max_concurrent: 4, max_iterations: 3 };
+
+  function addLine(text, className) {
+    return new Promise(function(resolve) {
+      var line = buildEl('div', { className: 'term-line' + (className ? ' ' + className : '') });
+      output.appendChild(line);
+      typeText(line, text, 0, resolve);
+      output.scrollTop = output.scrollHeight;
+    });
+  }
+
+  function addLineInstant(text, className) {
+    var line = buildEl('div', { className: 'term-line' + (className ? ' ' + className : '') }, text);
+    output.appendChild(line);
+    output.scrollTop = output.scrollHeight;
+  }
+
+  function typeText(el, text, idx, resolve) {
+    if (idx < text.length) {
+      el.textContent = text.substring(0, idx + 1);
+      setTimeout(function() { typeText(el, text, idx + 1, resolve); }, 15);
+    } else if (resolve) resolve();
+  }
+
+  function waitFor(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+  function promptText(promptStr, defaultVal) {
+    return new Promise(function(resolve) {
+      var wrap = buildEl('div', { className: 'term-input-wrap' });
+      var prompt = buildEl('span', { className: 'term-prompt' }, promptStr + ' ');
+      var input = buildEl('input', { className: 'term-input', type: 'text', value: defaultVal || '' });
+      wrap.appendChild(prompt);
+      wrap.appendChild(input);
+      output.appendChild(wrap);
+      output.scrollTop = output.scrollHeight;
+      input.focus();
+      input.addEventListener('keydown', function(evt) {
+        if (evt.key === 'Enter') {
+          var val = input.value.trim() || defaultVal || '';
+          input.disabled = true;
+          input.style.color = '#66ffbb';
+          resolve(val);
+        }
+      });
+    });
+  }
+
+  function promptSelect(promptStr, options, defaultIdx) {
+    return new Promise(function(resolve) {
+      addLineInstant(promptStr, 'bright');
+      var selected = defaultIdx || 0;
+      var optEls = [];
+
+      options.forEach(function(opt, idx) {
+        var optEl = buildEl('div', { className: 'term-option' + (idx === selected ? ' selected' : '') });
+        optEl.textContent = opt.label;
+        optEl.addEventListener('click', function() { cleanup(); resolve(opt.value); });
+        optEls.push(optEl);
+        output.appendChild(optEl);
+      });
+
+      function updateSelection() {
+        optEls.forEach(function(el, idx) { el.classList.toggle('selected', idx === selected); });
+        output.scrollTop = output.scrollHeight;
+      }
+
+      function handleKey(evt) {
+        if (evt.key === 'ArrowUp') { evt.preventDefault(); selected = Math.max(0, selected - 1); updateSelection(); }
+        else if (evt.key === 'ArrowDown') { evt.preventDefault(); selected = Math.min(options.length - 1, selected + 1); updateSelection(); }
+        else if (evt.key === 'Enter') { evt.preventDefault(); cleanup(); resolve(options[selected].value); }
+      }
+
+      function cleanup() {
+        document.removeEventListener('keydown', handleKey);
+        optEls.forEach(function(el) { el.style.pointerEvents = 'none'; });
+      }
+
+      document.addEventListener('keydown', handleKey);
+      output.scrollTop = output.scrollHeight;
+    });
+  }
+
+  (async function runOnboarding() {
+    await addLine('PETRI RESEARCH OS $petri_version', 'bright');
+    await waitFor(300);
+    await addLine('Initializing subsystems...', 'dim');
+    await waitFor(200);
+    addLineInstant('[OK] Event log engine', 'dim');
+    await waitFor(150);
+    addLineInstant('[OK] Queue state machine (13 states)', 'dim');
+    await waitFor(150);
+    addLineInstant('[OK] Agent roster (13 agents)', 'dim');
+    await waitFor(150);
+    addLineInstant('[OK] Convergence checker', 'dim');
+    await waitFor(150);
+    addLineInstant('[OK] Colony graph engine', 'dim');
+    await waitFor(400);
+    addLineInstant('');
+    await addLine('No petri dish detected. Starting initialization...', 'bright');
+    addLineInstant('');
+    await addLine('$ petri init', 'bright');
+    addLineInstant('');
+
+    config.name = await promptText('Dish name [my-research]:', 'my-research');
+    addLineInstant('');
+
+    config.model = await promptSelect('Inference model:', [
+      { label: 'claude-sonnet-4-6  (fast, cost-effective)', value: 'claude-sonnet-4-6' },
+      { label: 'claude-opus-4-6  (most capable, higher cost)', value: 'claude-opus-4-6' },
+    ], 0);
+    addLineInstant('  Selected: ' + config.model, 'dim');
+    addLineInstant('');
+
+    var concStr = await promptText('Max concurrent agents [4]:', '4');
+    config.max_concurrent = parseInt(concStr, 10) || 4;
+    addLineInstant('');
+
+    var iterStr = await promptText('Max iterations per cycle [3]:', '3');
+    config.max_iterations = parseInt(iterStr, 10) || 3;
+    addLineInstant('');
+
+    await addLine('Initializing petri dish...', 'bright');
+
+    try {
+      var initRes = await fetch(API + '/api/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      var initData = await initRes.json();
+      if (initData.status === 'ok' || initData.status === 'already_exists') {
+        addLineInstant('[OK] Dish "' + config.name + '" initialized', 'bright');
+      } else {
+        addLineInstant('[ERROR] ' + JSON.stringify(initData), 'error');
+      }
+    } catch (err) {
+      addLineInstant('[ERROR] Init failed: ' + err.message, 'error');
+    }
+
+    addLineInstant('');
+    await waitFor(500);
+
+    var starterClaim = '$starter_claim';
+    await addLine('$ petri seed "' + starterClaim + '"', 'bright');
+    addLineInstant('');
+    await addLine('Decomposing claim into colony structure...', 'dim');
+    await addLine('This may take a moment (LLM inference)...', 'dim');
+    addLineInstant('');
+
+    try {
+      var seedRes = await fetch(API + '/api/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claim: starterClaim }),
+      });
+      var seedData = await seedRes.json();
+      if (seedData.status === 'ok') {
+        addLineInstant('[OK] Colony "' + seedData.colony_name + '" created with ' + seedData.node_count + ' nodes', 'bright');
+        addLineInstant('');
+        if (seedData.nodes) {
+          seedData.nodes.forEach(function(nd) {
+            addLineInstant('  L' + nd.level + '  ' + (nd.claim_text || '').substring(0, 60), 'dim');
+          });
+        }
+      } else {
+        addLineInstant('[WARN] Seed returned: ' + JSON.stringify(seedData), 'error');
+      }
+    } catch (err) {
+      addLineInstant('[WARN] Seed failed: ' + err.message + '. You can seed later via CLI.', 'error');
+    }
+
+    addLineInstant('');
+    await waitFor(800);
+    await addLine('Initialization complete. Entering Petri Lab...', 'bright');
+    await waitFor(1200);
+    navigate('lab');
+  })();
+}
+
+// ── Initialize ──────────────────────────────────────────────────────────
+
+handleRoute();
+connectSSE();
+</script>
+</body>
+</html>
