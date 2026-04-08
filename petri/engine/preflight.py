@@ -22,7 +22,7 @@ class CheckResult:
     message: str
 
 
-def check_python_version(minimum: tuple[int, int] = (3, 11)) -> CheckResult:
+def check_python_version(minimum: tuple[int, int] = (3, 14)) -> CheckResult:
     """Check that the running Python meets the minimum version."""
     current = sys.version_info[:2]
     if current >= minimum:
@@ -36,7 +36,7 @@ def check_python_version(minimum: tuple[int, int] = (3, 11)) -> CheckResult:
         passed=False,
         message=(
             f"{current[0]}.{current[1]} (requires {minimum[0]}.{minimum[1]}+). "
-            "Fix: uv venv --python 3.11 .venv && source .venv/bin/activate"
+            "Fix: uv venv --python 3.14 .venv && source .venv/bin/activate"
         ),
     )
 

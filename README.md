@@ -4,7 +4,7 @@
 # Petri
 
 [![PyPI version](https://img.shields.io/pypi/v/petri-grow)](https://pypi.org/project/petri-grow/)
-[![Python 3.11+](https://img.shields.io/pypi/pyversions/petri-grow)](https://pypi.org/project/petri-grow/)
+[![Python 3.14+](https://img.shields.io/pypi/pyversions/petri-grow)](https://pypi.org/project/petri-grow/)
 [![License](https://img.shields.io/pypi/l/petri-grow)](https://github.com/onthemarkdata/petri/blob/main/LICENSE)
 
 An agent orchestration framework to grow your AI's context via Claude Code. Decomposes claims into DAGs of logical units and validates them bottom-up through a multi-agent adversarial review pipeline.
@@ -24,7 +24,7 @@ model:
 
 ## Setup
 
-Petri needs **Python 3.11+** and the **Claude Code CLI** (which provides the LLM inference). The cleanest path is to install both into a fresh [uv](https://docs.astral.sh/uv/) environment.
+Petri needs **Python 3.14+** and the **Claude Code CLI** (which provides the LLM inference). The cleanest path is to install both into a fresh [uv](https://docs.astral.sh/uv/) environment.
 
 ### 1. Install uv
 
@@ -32,10 +32,10 @@ Petri needs **Python 3.11+** and the **Claude Code CLI** (which provides the LLM
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. Create and activate a Python 3.11+ virtual environment
+### 2. Create and activate a Python 3.14 virtual environment
 
 ```bash
-uv venv --python 3.11 .venv
+uv venv --python 3.14 .venv
 source .venv/bin/activate          # macOS / Linux
 # .venv\Scripts\activate           # Windows PowerShell
 ```
