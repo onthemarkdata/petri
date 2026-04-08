@@ -291,14 +291,27 @@ class ClaudeCodeProvider:
         """
         command = ["claude", "--print", "--model", self.model]
         if self.allowed_tools:
-            command.extend(["--allowedTools", ",".join(self.allowed_tools)])
+            # IMPORTANT: use the ``--allowedTools=value`` equals form,
+            # NOT the space-separated ``--allowedTools value`` form.
+            # claude CLI declares the flag as ``<tools...>`` (variadic),
+            # so a space-separated value causes the parser to consume
+            # every following positional argument — including our prompt
+            # — as additional tool names, producing the cryptic error
+            # ``Error: Input must be provided either through stdin or
+            # as a prompt argument when using --print``. The equals form
+            # binds the value to the flag unambiguously.
+            command.append(
+                f"--allowedTools={','.join(self.allowed_tools)}"
+            )
         else:
             # Explicit empty list means "no tools at all" — text-only
-            # reasoning. ``--tools ""`` is claude CLI's documented way
-            # to disable the entire built-in tool set, distinct from
-            # simply omitting --allowedTools (which would inherit
-            # whatever the user's settings.json grants).
-            command.extend(["--tools", ""])
+            # reasoning. ``--tools=`` (equals form, empty value) is
+            # claude CLI's documented way to disable the entire
+            # built-in tool set, distinct from simply omitting
+            # --allowedTools (which would inherit whatever the user's
+            # settings.json grants). Use the equals form for the same
+            # variadic-parser reason as above.
+            command.append("--tools=")
         if streaming:
             command.extend(
                 [

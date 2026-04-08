@@ -595,14 +595,23 @@ class _ToolsStubProvider(ClaudeCodeProvider):
 
 
 def test_build_command_includes_allowed_tools_when_non_empty():
-    """The --allowedTools flag is passed with a comma-joined list."""
+    """The --allowedTools flag is passed in equals form (--allowedTools=X,Y,Z).
+
+    The equals form is critical: claude CLI declares --allowedTools as
+    variadic (``<tools...>``), so the space-separated form
+    ``--allowedTools value`` would let the parser consume every
+    following positional arg — including our prompt — as additional
+    tool names, producing ``Error: Input must be provided either
+    through stdin or as a prompt argument when using --print``.
+    """
     provider = _ToolsStubProvider(
         allowed_tools=["WebSearch", "WebFetch", "Read"]
     )
     cmd = provider._build_claude_command("hello", streaming=False)
-    assert "--allowedTools" in cmd
-    flag_index = cmd.index("--allowedTools")
-    assert cmd[flag_index + 1] == "WebSearch,WebFetch,Read"
+    expected_flag = "--allowedTools=WebSearch,WebFetch,Read"
+    assert expected_flag in cmd
+    # The flag+value is ONE element, not two — no bare --allowedTools.
+    assert "--allowedTools" not in cmd
     # The prompt is always the final positional argument.
     assert cmd[-1] == "hello"
     # The dangerous bypass flag must NEVER be present.
@@ -610,16 +619,22 @@ def test_build_command_includes_allowed_tools_when_non_empty():
 
 
 def test_build_command_disables_all_tools_when_empty_list():
-    """An explicit empty list means 'no tools at all' — passes --tools ""
-    rather than --allowedTools, because claude CLI's --tools "" is the
-    documented way to disable the entire built-in tool set. Omitting
-    --allowedTools would silently fall through to the user's settings."""
+    """An explicit empty list means 'no tools at all' — passes
+    ``--tools=`` (equals form, empty value), which is claude CLI's
+    documented way to disable the entire built-in tool set. The equals
+    form matters for the same variadic-parser reason as --allowedTools:
+    ``--tools ""`` with a separate empty arg would still let the parser
+    consume the prompt as a tool name."""
     provider = _ToolsStubProvider(allowed_tools=[])
     cmd = provider._build_claude_command("hello", streaming=False)
-    assert "--allowedTools" not in cmd
-    assert "--tools" in cmd
-    tools_index = cmd.index("--tools")
-    assert cmd[tools_index + 1] == ""
+    # The equals form is a single element.
+    assert "--tools=" in cmd
+    # No bare --tools flag (which would be variadic).
+    assert "--tools" not in cmd
+    # No allowedTools when disabled.
+    assert not any(
+        element.startswith("--allowedTools") for element in cmd
+    )
     assert cmd[-1] == "hello"
 
 
@@ -634,8 +649,43 @@ def test_build_command_streaming_adds_stream_json_flags():
     assert "--verbose" in cmd
     # The prompt is still last.
     assert cmd[-1] == "hello"
-    # And tools are still passed.
-    assert "--allowedTools" in cmd
+    # And tools are still passed in equals form.
+    assert "--allowedTools=WebSearch" in cmd
+
+
+def test_build_command_prompt_is_unambiguous_positional():
+    """Regression for the 'Input must be provided' bug: the prompt
+    must be the LAST element of argv, and NO preceding element can be
+    a bare variadic flag that would consume it. This test iterates
+    over every combination (streaming on/off, various tool sets)
+    and asserts the invariant."""
+    for tool_set in (
+        ["WebSearch"],
+        ["WebSearch", "WebFetch", "Read", "Glob", "Grep"],
+        [],  # empty list -> --tools=
+    ):
+        provider = _ToolsStubProvider(allowed_tools=tool_set)
+        for streaming_flag in (True, False):
+            cmd = provider._build_claude_command(
+                "the prompt text", streaming=streaming_flag
+            )
+            # 1. Prompt is the last element.
+            assert cmd[-1] == "the prompt text"
+            # 2. NO bare variadic flag precedes it.
+            # The only tool-related elements should be the equals form.
+            assert "--allowedTools" not in cmd  # no bare flag
+            assert "--tools" not in cmd  # no bare flag
+            # 3. Every --allowedTools / --tools reference is an
+            #    equals-form single element.
+            for element in cmd:
+                if element.startswith("--allowedTools"):
+                    assert "=" in element, (
+                        f"--allowedTools must use equals form, got {element!r}"
+                    )
+                if element.startswith("--tools"):
+                    assert "=" in element, (
+                        f"--tools must use equals form, got {element!r}"
+                    )
 
 
 def test_get_agent_tools_default_when_key_missing():
