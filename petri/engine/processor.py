@@ -273,6 +273,87 @@ def _verdict_data(result: object) -> dict:
     }
 
 
+def _source_to_dict(source_entry: object) -> dict | None:
+    """Normalize a cited source to a plain dict.
+
+    Accepts:
+
+    * ``SourceCitation`` Pydantic instances (or any object exposing
+      ``model_dump``) — returned via ``model_dump(exclude_none=True)``.
+    * Raw dicts — returned verbatim.
+    * Anything else — returns ``None``.
+
+    **Critical**: the evidence.md formatters (``_format_phase1_evidence``,
+    ``_format_phase2_evidence``, ``_format_red_team_evidence``,
+    ``_format_evaluation_evidence``) receive ``AssessmentResult``
+    Pydantic objects from the phase runners. Their ``sources_cited``
+    fields are lists of ``SourceCitation`` Pydantic instances — NOT
+    dicts. Before this helper existed, each formatter did
+    ``if not isinstance(source, dict): continue`` and silently dropped
+    100% of the cited sources on the floor. The evidence.md files
+    ended up with zero URLs even though the ``verdict_issued`` events
+    on disk had the full source payloads via ``_verdict_data``. Every
+    formatter MUST pipe each source through this helper before reading
+    fields.
+    """
+    if source_entry is None:
+        return None
+    if hasattr(source_entry, "model_dump"):
+        try:
+            return source_entry.model_dump(exclude_none=True)
+        except Exception:
+            return None
+    if isinstance(source_entry, dict):
+        return source_entry
+    return None
+
+
+def _render_source_line(source_index: int, source_dict: dict) -> str:
+    """Render one cited source as a single markdown bullet line.
+
+    Shared by every formatter so the citation format is identical
+    across phases (research, critique, red team, evaluation).
+    """
+    level = source_dict.get("hierarchy_level", 6)
+    try:
+        level_int = int(level)
+    except (TypeError, ValueError):
+        level_int = 6
+    level_name = _LEVEL_NAMES.get(level_int, "Unknown")
+    title = source_dict.get("title") or "Unknown source"
+    url = source_dict.get("url") or source_dict.get("url_or_name") or ""
+    finding = source_dict.get("finding") or ""
+    direction_raw = (source_dict.get("supports_or_contradicts") or "supports").lower()
+    if direction_raw == "contradicts":
+        direction_label = "Contradicts claim."
+    elif direction_raw == "supports":
+        direction_label = "Supports claim."
+    else:
+        direction_label = f"{direction_raw.capitalize()}."
+    url_part = f" — {url}" if url else ""
+    return (
+        f"**Source {source_index} (Level {level_int} — {level_name}):** "
+        f"{title}{url_part} — {finding} **{direction_label}**"
+    )
+
+
+def _iter_verdict_sources(verdict_entry: object):
+    """Yield normalized dicts for every valid source on a verdict entry.
+
+    ``verdict_entry`` may be an ``AssessmentResult`` Pydantic object or
+    a dict (the two shapes the formatters receive). Returns an empty
+    iterator if there are no sources. Invalid / non-dict-like entries
+    are silently dropped at the helper boundary.
+    """
+    sources = _get(verdict_entry, "sources_cited", [])
+    if not isinstance(sources, list):
+        return
+    for source_entry in sources:
+        source_dict = _source_to_dict(source_entry)
+        if source_dict is not None:
+            yield source_dict
+
+
 # Hierarchy level display names.
 _LEVEL_NAMES = {
     1: "Direct Measurement",
@@ -377,8 +458,13 @@ def _update_evidence_status(
     evidence_path.write_text(updated)
 
 
-def _format_phase1_evidence(verdicts: list[dict], iteration: int) -> str:
-    """Format Phase 1 (Research) findings as markdown — citation-first."""
+def _format_phase1_evidence(verdicts: list, iteration: int) -> str:
+    """Format Phase 1 (Research) findings as markdown — citation-first.
+
+    ``verdicts`` may contain ``AssessmentResult`` Pydantic objects OR
+    dicts; every source is normalized via ``_source_to_dict`` before
+    rendering so Pydantic instances can't be silently skipped.
+    """
     lines = [f"### Iteration {iteration} — Phase 1 Research\n"]
 
     # Collect all sources across phase 1 agents into a numbered list.
@@ -391,27 +477,14 @@ def _format_phase1_evidence(verdicts: list[dict], iteration: int) -> str:
         summary_text = _get(verdict_entry, "summary", "")
         agent_summaries[agent_name] = (verdict_value, summary_text)
 
-        cited_sources = _get(verdict_entry, "sources_cited", [])
-        if isinstance(cited_sources, list):
-            for source in cited_sources:
-                if not isinstance(source, dict):
-                    continue
-                source_num += 1
-                level = source.get("hierarchy_level", 6)
-                level_name = _LEVEL_NAMES.get(level, "Unknown")
-                title = source.get("title", "Unknown source")
-                url = source.get("url", source.get("url_or_name", ""))
-                finding = source.get("finding", "")
-                direction = source.get("supports_or_contradicts", "supports")
-                direction_label = direction.capitalize() + "s" if not direction.endswith("s") else direction.capitalize()
+        for source_dict in _iter_verdict_sources(verdict_entry):
+            source_num += 1
+            lines.append(_render_source_line(source_num, source_dict))
+            lines.append("")
 
-                url_part = f" — {url}" if url else ""
-                lines.append(
-                    f"**Source {source_num} (Level {level} — {level_name}):** "
-                    f"{title}{url_part} — {finding} "
-                    f"**{direction_label} claim.**"
-                )
-                lines.append("")
+    if source_num == 0:
+        lines.append("_No sources cited by research agents._")
+        lines.append("")
 
     # Agent summaries
     for agent_name, (verdict_value, summary_text) in agent_summaries.items():
@@ -426,8 +499,28 @@ def _format_phase1_evidence(verdicts: list[dict], iteration: int) -> str:
 def _format_phase2_evidence(
     verdicts: list, debates: list, iteration: int,
 ) -> str:
-    """Format Phase 2 (Critique) assessment as markdown — citation-first."""
+    """Format Phase 2 (Critique) assessment as markdown — citation-first.
+
+    ``verdicts`` may contain ``AssessmentResult`` Pydantic objects OR
+    dicts; every source is normalized via ``_source_to_dict`` before
+    rendering. Historically this formatter only produced a verdict
+    summary table and never surfaced cited sources, which meant every
+    skeptic/champion/pragmatist URL landed in the event log but never
+    in evidence.md. Now we render sources too.
+    """
     lines = [f"### Iteration {iteration} — Phase 2 Critique\n"]
+
+    # Collect all sources across phase 2 agents into a numbered list.
+    source_num = 0
+    for verdict_entry in verdicts:
+        for source_dict in _iter_verdict_sources(verdict_entry):
+            source_num += 1
+            lines.append(_render_source_line(source_num, source_dict))
+            lines.append("")
+
+    if source_num == 0:
+        lines.append("_No sources cited by critique agents._")
+        lines.append("")
 
     # Verdict summary table
     lines.append("| Agent | Verdict | Summary |")
@@ -452,29 +545,26 @@ def _format_phase2_evidence(
     return "\n".join(lines)
 
 
-def _format_red_team_evidence(result: dict, iteration: int) -> str:
-    """Format Red Team review as markdown — citation-first."""
+def _format_red_team_evidence(result: object, iteration: int) -> str:
+    """Format Red Team review as markdown — citation-first.
+
+    ``result`` may be an ``AssessmentResult`` Pydantic object OR a
+    dict; sources are normalized via ``_source_to_dict``.
+    """
     verdict = _get(result, "verdict", "")
     summary = _to_str(_get(result, "summary", ""))
 
     lines = [f"### Red Team Review (Iteration {iteration})\n"]
 
     # Numbered counter-arguments from sources
-    sources = _get(result, "sources_cited", [])
-    if isinstance(sources, list) and sources:
-        for source_idx, source_entry in enumerate(sources, 1):
-            if not isinstance(source_entry, dict):
-                continue
-            level = source_entry.get("hierarchy_level", 6)
-            level_name = _LEVEL_NAMES.get(level, "Unknown")
-            title = source_entry.get("title", "Unknown source")
-            source_url = source_entry.get("url", source_entry.get("url_or_name", ""))
-            finding = source_entry.get("finding", "")
-            url_part = f" — {source_url}" if source_url else ""
-            lines.append(
-                f"{source_idx}. **(Level {level} — {level_name})** "
-                f"{title}{url_part} — {finding} **Contradicts claim.**"
-            )
+    source_num = 0
+    for source_dict in _iter_verdict_sources(result):
+        source_num += 1
+        lines.append(_render_source_line(source_num, source_dict))
+        lines.append("")
+
+    if source_num == 0:
+        lines.append("_No sources cited by red team._")
         lines.append("")
 
     lines.append(f"**Red Team Verdict:** {verdict} — {summary}")
@@ -484,28 +574,54 @@ def _format_red_team_evidence(result: dict, iteration: int) -> str:
 
 
 def _format_evaluation_evidence(
-    result: dict, source_validation: dict, iteration: int,
+    result: object, source_validation: dict, iteration: int,
 ) -> str:
-    """Format Evidence Evaluation as markdown — citation-first."""
+    """Format Evidence Evaluation as markdown — citation-first.
+
+    ``result`` may be an ``AssessmentResult`` Pydantic object OR a
+    dict; sources are normalized via ``_source_to_dict``. The
+    evaluation phase also renders the full URL under each table row
+    so the final verdict report has every citation inline (this is
+    the row the user will read when they're looking up a specific
+    claim's source repository).
+    """
     verdict = _get(result, "verdict", "")
     summary = _to_str(_get(result, "summary", ""))
     confidence = _to_str(_get(result, "confidence", ""))
 
     lines = [f"### Evidence Evaluation (Iteration {iteration})\n"]
 
-    # Source inventory table
-    sources = _get(result, "sources_cited", [])
-    if isinstance(sources, list) and sources:
-        lines.append("| # | Source | Level | Direction | Key Finding |")
-        lines.append("|---|--------|-------|-----------|-------------|")
-        for source_idx, source_entry in enumerate(sources, 1):
-            if not isinstance(source_entry, dict):
-                continue
-            title = source_entry.get("title", "Unknown")
-            level = source_entry.get("hierarchy_level", "—")
-            direction = source_entry.get("supports_or_contradicts", "—")
-            finding = source_entry.get("finding", "—")
-            lines.append(f"| {source_idx} | {title} | {level} | {direction} | {finding} |")
+    # Full source list with URLs (numbered, same format as the other
+    # phases so a user can copy-paste citations between phases).
+    source_num = 0
+    for source_dict in _iter_verdict_sources(result):
+        source_num += 1
+        lines.append(_render_source_line(source_num, source_dict))
+        lines.append("")
+
+    if source_num == 0:
+        lines.append("_No sources cited by evidence evaluator._")
+        lines.append("")
+
+    # Compact source inventory table — one row per source, keyed to
+    # the numbered entries above. Great for quick scanning.
+    if source_num > 0:
+        lines.append("| # | Source | URL | Level | Direction | Finding |")
+        lines.append("|---|--------|-----|-------|-----------|---------|")
+        for table_index, source_dict in enumerate(
+            _iter_verdict_sources(result), 1
+        ):
+            title = source_dict.get("title") or "Unknown"
+            source_url = (
+                source_dict.get("url") or source_dict.get("url_or_name") or ""
+            )
+            level = source_dict.get("hierarchy_level", "—")
+            direction = source_dict.get("supports_or_contradicts") or "—"
+            finding = source_dict.get("finding") or "—"
+            lines.append(
+                f"| {table_index} | {title} | {source_url} | {level} | "
+                f"{direction} | {finding} |"
+            )
         lines.append("")
 
     lines.append(f"**Verdict:** {verdict} | **Confidence:** {confidence}")
@@ -679,6 +795,12 @@ def _run_socratic_phase(
             iteration=iteration,
             data=_verdict_data(result),
         )
+        # Log one source_reviewed event per cited source so the citation
+        # repository captures anything the Socratic step grounded in a
+        # real URL (e.g. a definition citing a published glossary).
+        _log_sources_from_result(
+            events_file, cell_id, f"socratic_{step_name}", iteration, result,
+        )
 
         # Append to evidence
         summary = _to_str(_get(result, "summary", ""))
@@ -689,6 +811,12 @@ def _run_socratic_phase(
             lines.append(f"{summary}")
         if arguments:
             lines.append(f"\n{arguments}")
+        # Render any cited sources from this Socratic step inline so
+        # URLs show up in evidence.md (previously: sources were
+        # persisted to events.jsonl via the provider but never
+        # surfaced in the human-readable file).
+        for source_dict in _iter_verdict_sources(result):
+            lines.append(_render_source_line(len(lines), source_dict))
         lines.append("")
 
     # NOTE: The Socratic Analysis block is intentionally written to
@@ -747,6 +875,9 @@ def _run_socratic_phase(
         iteration=iteration,
         data=_verdict_data(verification),
     )
+    _log_sources_from_result(
+        events_file, cell_id, "socratic_verifier", iteration, verification,
+    )
 
     # Append verification to the in-memory Socratic block, then write
     # the complete block to evidence.md exactly once.
@@ -754,6 +885,10 @@ def _run_socratic_phase(
     if verification_summary:
         lines.append(f"**Socratic Verification:** {verification_verdict}")
         lines.append(f"{verification_summary}\n")
+    # Render any sources the verifier cited (e.g. linking to a
+    # terminology reference used during clarification).
+    for source_dict in _iter_verdict_sources(verification):
+        lines.append(_render_source_line(len(lines), source_dict))
     content = "\n".join(lines)
     _append_evidence(petri_dir, cell_id, dish_id, "socratic", iteration, content)
 
