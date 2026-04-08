@@ -15,11 +15,16 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+from petri.dashboard.frontend import build_frontend_html
 from petri.dashboard.migrate import incremental_sync, rebuild_sqlite
 from petri.storage.event_log import rollup_to_combined
 from petri.storage.queue import list_queue, load_queue
+
+ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 
 # ── SQLite connection ─────────────────────────────────────────────────────
@@ -77,11 +82,187 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # ── Root + Static ────────────────────────────────────────────────
+
+    @app.get("/")
+    def root():
+        return HTMLResponse(build_frontend_html())
+
+    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+
     # ── Health ────────────────────────────────────────────────────────
 
     @app.get("/api/health")
     def health():
         return {"status": "ok"}
+
+    # ── Dishes ────────────────────────────────────────────────────────
+
+    @app.get("/api/dishes")
+    def get_dishes():
+        """List available dishes (empty list triggers onboarding)."""
+        dishes_dir = petri_dir / "petri-dishes"
+        if not dishes_dir.is_dir():
+            return []
+        result = []
+        for entry in sorted(dishes_dir.iterdir()):
+            if entry.is_dir():
+                result.append({"id": entry.name, "path": str(entry)})
+        return result
+
+    # ── Init (web-based onboarding) ──────────────────────────────────
+
+    @app.post("/api/init")
+    def post_init(body: dict):
+        """Run petri init logic from the web UI."""
+        import shutil
+
+        from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+
+        dish_name = body.get("name", petri_dir.parent.name)
+        model_name = body.get("model", LLM_INFERENCE_MODEL)
+        max_concurrent = int(body.get("max_concurrent", MAX_CONCURRENT))
+        max_iterations = int(body.get("max_iterations", MAX_ITERATIONS))
+
+        defaults_dir = Path(__file__).parent.parent / "defaults"
+
+        # Check for proper initialization (not just directory existence)
+        config_exists = (petri_dir / "defaults" / "petri.yaml").exists()
+        if config_exists:
+            return {"status": "already_exists", "dish_id": dish_name}
+
+        try:
+            petri_dir.mkdir(parents=True, exist_ok=True)
+            defaults_dest = petri_dir / "defaults"
+            defaults_dest.mkdir(exist_ok=True)
+
+            src_config = defaults_dir / "petri.yaml"
+            if src_config.exists():
+                try:
+                    import yaml
+
+                    with open(src_config) as f_cfg:
+                        config = yaml.safe_load(f_cfg)
+                    config["name"] = dish_name
+                    config.setdefault("model", {})["name"] = model_name
+                    config["max_concurrent"] = max_concurrent
+                    config["max_iterations"] = max_iterations
+                    with open(defaults_dest / "petri.yaml", "w") as f_out:
+                        f_out.write("# Petri Dish Configuration\n")
+                        f_out.write(f"# Initialized for dish: {dish_name}\n\n")
+                        yaml.dump(config, f_out, default_flow_style=False, sort_keys=False)
+                except ImportError:
+                    (defaults_dest / "petri.yaml").write_text(
+                        f"name: {dish_name}\nmodel:\n  name: {model_name}\n"
+                        f"max_concurrent: {max_concurrent}\nmax_iterations: {max_iterations}\n",
+                    )
+            else:
+                (defaults_dest / "petri.yaml").write_text(
+                    f"name: {dish_name}\nmodel:\n  name: {model_name}\n"
+                    f"max_concurrent: {max_concurrent}\nmax_iterations: {max_iterations}\n",
+                )
+
+            src_constitution = defaults_dir / "constitution.md"
+            if src_constitution.exists():
+                shutil.copy2(src_constitution, defaults_dest / "constitution.md")
+
+            (petri_dir / "petri-dishes").mkdir(exist_ok=True)
+
+            queue_data = {"version": 1, "last_updated": None, "entries": {}}
+            (petri_dir / "queue.json").write_text(
+                json.dumps(queue_data, indent=2) + "\n",
+            )
+
+            return {"status": "ok", "dish_id": dish_name}
+        except OSError as exc:
+            raise HTTPException(500, f"Init failed: {exc}")
+
+    # ── Seed (web-based colony creation) ─────────────────────────────
+
+    @app.post("/api/seed")
+    def post_seed(body: dict):
+        """Seed a new colony from the web UI."""
+        from datetime import datetime, timezone
+
+        claim = body.get("claim", "")
+        colony_name_input = body.get("colony")
+
+        if not claim:
+            raise HTTPException(400, "claim is required")
+
+        dish_id = _get_dish_id(petri_dir)
+
+        from petri.reasoning.decomposer import (
+            decompose_claim,
+            generate_colony_name,
+        )
+
+        colony_name = colony_name_input or generate_colony_name(claim)
+
+        try:
+            result = decompose_claim(
+                claim=claim,
+                clarifications=[],
+                dish_id=dish_id,
+                colony_name=colony_name,
+            )
+        except Exception as exc:
+            raise HTTPException(500, f"Decomposition failed: {exc}")
+
+        from petri.graph.colony import ColonyGraph, serialize_colony
+        from petri.models import Colony
+        from petri.storage.event_log import append_event
+
+        now = datetime.now(timezone.utc).isoformat()
+        colony_id = f"{dish_id}-{colony_name}"
+
+        graph = ColonyGraph(colony_id=colony_id)
+        nodes = result.nodes
+        edges = result.edges
+
+        for node in nodes:
+            graph.add_node(node)
+        for edge in edges:
+            graph.add_edge(edge)
+
+        center_node_id = nodes[0].id if nodes else ""
+        colony_model = Colony(
+            id=colony_id,
+            dish=dish_id,
+            center_claim=claim,
+            center_node_id=center_node_id,
+            clarifications=[],
+            created_at=now,
+        )
+
+        colony_path = petri_dir / "petri-dishes" / colony_name
+        serialize_colony(graph, colony_model, colony_path)
+
+        for node in nodes:
+            child_ids = [e.from_node for e in edges if e.to_node == node.id]
+            node_rel_path = colony_model.node_paths.get(
+                node.id, f"{node.id.split('-')[-2]}-{node.id.split('-')[-1]}"
+            )
+            events_path = colony_path / node_rel_path / "events.jsonl"
+            append_event(
+                events_path=events_path,
+                node_id=node.id,
+                event_type="decomposition_created",
+                agent="decomposition_lead",
+                iteration=0,
+                data={"parent_node_id": node.id, "child_node_ids": child_ids},
+            )
+
+        return {
+            "status": "ok",
+            "colony_id": colony_id,
+            "colony_name": colony_name,
+            "node_count": len(nodes),
+            "nodes": [
+                {"id": n.id, "claim_text": n.claim_text, "level": n.level}
+                for n in nodes
+            ],
+        }
 
     # ── Events ────────────────────────────────────────────────────────
 
@@ -117,7 +298,10 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         params.append(limit)
 
         conn = get_db(db_path)
-        rows = conn.execute(sql, params).fetchall()
+        try:
+            rows = conn.execute(sql, params).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
         conn.close()
 
         return [
@@ -201,11 +385,14 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
 
                 # Fetch events from SQLite
                 conn = get_db(db_path)
-                rows = conn.execute(
-                    "SELECT id, node_id, timestamp, type, agent, iteration, data "
-                    "FROM events WHERE node_id = ? ORDER BY timestamp ASC",
-                    [node_id],
-                ).fetchall()
+                try:
+                    rows = conn.execute(
+                        "SELECT id, node_id, timestamp, type, agent, iteration, data "
+                        "FROM events WHERE node_id = ? ORDER BY timestamp ASC",
+                        [node_id],
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    rows = []
                 conn.close()
 
                 events = [
@@ -239,27 +426,31 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     @app.get("/api/stats")
     def get_stats():
         conn = get_db(db_path)
-        total_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        nodes_with_events = conn.execute(
-            "SELECT COUNT(DISTINCT node_id) FROM events"
-        ).fetchone()[0]
-
-        # Per-type counts
-        type_rows = conn.execute(
-            "SELECT type, COUNT(*) as cnt FROM events GROUP BY type ORDER BY cnt DESC"
-        ).fetchall()
-
-        # Top nodes by event count
-        top_nodes = conn.execute(
-            "SELECT node_id, COUNT(*) as cnt FROM events "
-            "GROUP BY node_id ORDER BY cnt DESC LIMIT 10"
-        ).fetchall()
-
+        try:
+            total_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            nodes_with_events = conn.execute(
+                "SELECT COUNT(DISTINCT node_id) FROM events"
+            ).fetchone()[0]
+            type_rows = conn.execute(
+                "SELECT type, COUNT(*) as cnt FROM events GROUP BY type ORDER BY cnt DESC"
+            ).fetchall()
+            top_nodes = conn.execute(
+                "SELECT node_id, COUNT(*) as cnt FROM events "
+                "GROUP BY node_id ORDER BY cnt DESC LIMIT 10"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            total_events = 0
+            nodes_with_events = 0
+            type_rows = []
+            top_nodes = []
         conn.close()
 
         # Queue stats
         queue_path = petri_dir / "queue.json"
-        queue = load_queue(queue_path)
+        try:
+            queue = load_queue(queue_path)
+        except Exception:
+            queue = {"entries": {}}
         entries = queue.get("entries", {})
 
         nodes_by_state: dict[str, int] = {}
@@ -287,8 +478,11 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     async def event_stream():
         async def generate():
             conn = get_db(db_path)
-            row = conn.execute("SELECT MAX(rowid) FROM events").fetchone()
-            last_rowid = row[0] or 0
+            try:
+                row = conn.execute("SELECT MAX(rowid) FROM events").fetchone()
+                last_rowid = row[0] or 0
+            except sqlite3.OperationalError:
+                last_rowid = 0
             conn.close()
 
             yield {
