@@ -172,6 +172,186 @@ def test_assess_node_accepts_socratic_questioner_role():
     assert result.verdict == "CLARIFIED"
 
 
+# ── _is_transient_failure classification ────────────────────────────────
+
+
+def test_is_transient_failure_classifies_rate_limit():
+    from petri.reasoning.claude_code_provider import _is_transient_failure
+
+    assert _is_transient_failure("Error: rate limit exceeded") is True
+    assert _is_transient_failure("HTTP 429 Too Many Requests") is True
+    assert _is_transient_failure("Request was throttled") is False  # not in our list
+
+
+def test_is_transient_failure_classifies_server_errors():
+    from petri.reasoning.claude_code_provider import _is_transient_failure
+
+    assert _is_transient_failure("503 Service Unavailable") is True
+    assert _is_transient_failure("HTTP 502 bad gateway") is True
+    assert _is_transient_failure("Internal server error") is True
+    assert _is_transient_failure("temporarily unavailable") is True
+    assert _is_transient_failure("overloaded") is True
+
+
+def test_is_transient_failure_classifies_network_errors():
+    from petri.reasoning.claude_code_provider import _is_transient_failure
+
+    assert _is_transient_failure("connection reset by peer") is True
+    assert _is_transient_failure("network error: timeout") is True
+    assert _is_transient_failure("Request timed out after 60s") is True
+
+
+def test_is_transient_failure_classifies_permanent_failures():
+    from petri.reasoning.claude_code_provider import _is_transient_failure
+
+    assert _is_transient_failure("Error: unauthorized (401)") is False
+    assert _is_transient_failure("HTTP 403 forbidden") is False
+    assert _is_transient_failure("Authentication failed") is False
+    assert _is_transient_failure("Invalid API key") is False
+    assert _is_transient_failure("Model 'claude-foo' not found") is False
+    assert _is_transient_failure("Prompt exceeds max context (200k tokens)") is False
+    assert _is_transient_failure("Billing issue: please update payment") is False
+
+
+def test_is_transient_failure_permanent_wins_over_transient():
+    """A stderr that mentions both 'auth' and 'rate limit' is permanent
+    — the auth issue won't fix itself, no point burning retries."""
+    from petri.reasoning.claude_code_provider import _is_transient_failure
+
+    assert _is_transient_failure(
+        "auth error after multiple rate limit retries"
+    ) is False
+
+
+def test_is_transient_failure_empty_stderr_is_transient():
+    """Empty stderr is the case the user actually hit — claude CLI
+    sometimes exits 1 with no diagnostic on rate limits or network blips.
+    Retry once rather than fail hard."""
+    from petri.reasoning.claude_code_provider import _is_transient_failure
+
+    assert _is_transient_failure("") is True
+    assert _is_transient_failure("   \n  ") is True
+    assert _is_transient_failure(None) is True  # type: ignore[arg-type]
+
+
+# ── _ask retry behavior ──────────────────────────────────────────────────
+
+
+class _FlakyOneshotProvider(ClaudeCodeProvider):
+    """Provider whose ``_oneshot_attempt`` returns/raises a scripted
+    sequence and whose ``_sleep`` is a no-op.
+
+    Used to drive the retry loop without touching real subprocesses or
+    the wall clock. Records the wait amounts that would have happened.
+    """
+
+    def __init__(self, sequence: list) -> None:
+        self.model = "test-model"
+        self.allowed_tools = []
+        self._sequence = list(sequence)
+        self.attempt_count = 0
+        self.sleep_calls: list[float] = []
+
+    def _oneshot_attempt(self, prompt: str) -> str:  # type: ignore[override]
+        self.attempt_count += 1
+        action = self._sequence.pop(0)
+        if isinstance(action, ClaudeCLIError):
+            raise action
+        return action  # str — success
+
+    def _sleep(self, seconds: float) -> None:  # type: ignore[override]
+        # No-op: record the requested duration but don't actually wait,
+        # so the test runs at full speed even with retries.
+        self.sleep_calls.append(seconds)
+
+
+def test_ask_oneshot_succeeds_on_first_attempt():
+    provider = _FlakyOneshotProvider(sequence=["the model response"])
+    result = provider._ask_oneshot("hello")
+    assert result == "the model response"
+    assert provider.attempt_count == 1
+    assert provider.sleep_calls == []  # no retry, no sleep
+
+
+def test_ask_oneshot_retries_transient_then_succeeds():
+    provider = _FlakyOneshotProvider(
+        sequence=[
+            ClaudeCLIError(exit_code=1, stderr="rate limit exceeded", stdout=""),
+            "the model response",
+        ]
+    )
+    result = provider._ask_oneshot("hello")
+    assert result == "the model response"
+    assert provider.attempt_count == 2
+    # One retry → one sleep call.
+    assert len(provider.sleep_calls) == 1
+    # First retry delay should be in the [_RETRY_BASE_DELAY_SECONDS,
+    # _RETRY_BASE_DELAY_SECONDS + _RETRY_JITTER_SECONDS] window.
+    assert 1.5 <= provider.sleep_calls[0] <= 2.0
+
+
+def test_ask_oneshot_retries_then_gives_up():
+    """After _MAX_RETRIES retries (3 attempts total), give up and raise
+    the most recent ClaudeCLIError."""
+    provider = _FlakyOneshotProvider(
+        sequence=[
+            ClaudeCLIError(exit_code=1, stderr="rate limit", stdout=""),
+            ClaudeCLIError(exit_code=1, stderr="rate limit", stdout=""),
+            ClaudeCLIError(exit_code=1, stderr="rate limit", stdout=""),
+        ]
+    )
+    with pytest.raises(ClaudeCLIError):
+        provider._ask_oneshot("hello")
+    assert provider.attempt_count == 3
+    # Two retries → two sleep calls (the third attempt isn't followed
+    # by a sleep — it raises straight to the caller).
+    assert len(provider.sleep_calls) == 2
+    # Backoff grows.
+    assert provider.sleep_calls[0] < provider.sleep_calls[1]
+
+
+def test_ask_oneshot_does_not_retry_permanent_failure():
+    """Auth failure should NOT trigger any retries — fail fast."""
+    provider = _FlakyOneshotProvider(
+        sequence=[
+            ClaudeCLIError(
+                exit_code=1, stderr="Error: unauthorized (401)", stdout=""
+            ),
+        ]
+    )
+    with pytest.raises(ClaudeCLIError, match="exited 1"):
+        provider._ask_oneshot("hello")
+    assert provider.attempt_count == 1  # no retries
+    assert provider.sleep_calls == []  # no backoff
+
+
+def test_ask_oneshot_retries_empty_stderr_once():
+    """Empty stderr is ambiguous → treated as transient → retried."""
+    provider = _FlakyOneshotProvider(
+        sequence=[
+            ClaudeCLIError(exit_code=1, stderr="", stdout=""),
+            "recovered",
+        ]
+    )
+    result = provider._ask_oneshot("hello")
+    assert result == "recovered"
+    assert provider.attempt_count == 2
+    assert len(provider.sleep_calls) == 1
+
+
+def test_retry_delay_grows_exponentially():
+    from petri.reasoning.claude_code_provider import _retry_delay_seconds
+
+    delays = [_retry_delay_seconds(attempt) for attempt in (1, 2, 3)]
+    # Each successive delay is at least roughly 2x the prior. With
+    # bounded jitter (+0..0.5s) this ordering is reliable.
+    assert delays[0] < delays[1] < delays[2]
+    # Attempt 1 should be in [base, base + jitter] = [1.5, 2.0]
+    assert 1.5 <= delays[0] <= 2.0
+    # Attempt 2 should be in [3.0, 3.5]
+    assert 3.0 <= delays[1] <= 3.5
+
+
 # ── ClaudeCLIError surfacing ────────────────────────────────────────────
 
 

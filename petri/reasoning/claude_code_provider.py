@@ -8,14 +8,76 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import shutil
 import subprocess
+import time
 from typing import Callable, Optional
 
 from petri.config import AGENT_TOOLS, LLM_INFERENCE_MODEL
 
 logger = logging.getLogger(__name__)
+
+
+# ── Retry policy for transient claude CLI failures ──────────────────────
+# Up to (1 + _MAX_RETRIES) attempts per _ask call. Backoff is exponential
+# with bounded jitter so concurrent workers don't synchronise their
+# retries against the same upstream rate limit.
+_MAX_RETRIES = 2
+_RETRY_BASE_DELAY_SECONDS = 1.5
+_RETRY_JITTER_SECONDS = 0.5
+
+
+def _is_transient_failure(stderr: str) -> bool:
+    """Decide whether a claude CLI failure looks worth retrying.
+
+    Permanent markers win over transient ones — a stderr that mentions
+    both 'auth' and 'rate limit' is treated as permanent (the auth
+    issue won't fix itself). Empty/unknown stderr is treated as
+    transient (claude CLI sometimes exits 1 with no diagnostic on
+    network blips and rate limits).
+    """
+    text = (stderr or "").lower()
+
+    # Permanent: don't waste retries on these.
+    permanent_markers = (
+        "unauthorized", "401", "403", "forbidden",
+        "auth",  # auth, authentication, unauthenticated
+        "model", "not found", "404",
+        "context", "too long", "exceeds", "max tokens",
+        "invalid api key",
+        "billing",
+    )
+    for marker in permanent_markers:
+        if marker in text:
+            return False
+
+    # Transient: worth retrying.
+    transient_markers = (
+        "rate limit", "rate-limit", "too many requests", "429",
+        "timeout", "timed out",
+        "connection reset", "connection refused", "broken pipe",
+        "network",
+        "service unavailable", "503", "502", "504",
+        "internal server error", "500",
+        "temporarily unavailable",
+        "overloaded",
+    )
+    for marker in transient_markers:
+        if marker in text:
+            return True
+
+    # Empty/unknown stderr — claude CLI sometimes fails this way on
+    # transient issues. Retry once rather than fail hard.
+    return not text.strip()
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    """Exponential backoff with bounded jitter. attempt is 1-indexed:
+    attempt=1 → ~1.5s, attempt=2 → ~3s, attempt=3 → ~6s."""
+    base = _RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+    return base + random.uniform(0, _RETRY_JITTER_SECONDS)
 
 
 def _extract_text_delta(event: dict) -> str:
@@ -170,6 +232,11 @@ class ClaudeCodeProvider:
                 "Run 'petri inspect' to check all prerequisites."
             )
 
+    def _sleep(self, seconds: float) -> None:
+        """Sleep for ``seconds``. Overridable so tests can drive the
+        retry loop without actually waiting on the wall clock."""
+        time.sleep(seconds)
+
     def _build_claude_command(
         self, prompt: str, *, streaming: bool
     ) -> list[str]:
@@ -216,7 +283,43 @@ class ClaudeCodeProvider:
         return self._ask_streaming(prompt, on_progress)
 
     def _ask_oneshot(self, prompt: str) -> str:
-        """One-shot subprocess call. No progress feedback."""
+        """One-shot subprocess call with retry on transient failures.
+
+        Retries up to ``_MAX_RETRIES`` times for transient failures
+        (rate limits, network blips, server errors). Permanent failures
+        (auth, model not found, context too long) raise immediately so
+        we don't burn budget on a doomed call.
+        """
+        for attempt in range(1, _MAX_RETRIES + 2):
+            try:
+                return self._oneshot_attempt(prompt)
+            except ClaudeCLIError as cli_error:
+                if attempt > _MAX_RETRIES:
+                    raise
+                if not _is_transient_failure(cli_error.stderr):
+                    raise
+                delay = _retry_delay_seconds(attempt)
+                logger.warning(
+                    "Transient claude CLI failure (exit %d, attempt %d/%d), "
+                    "retrying in %.1fs. stderr: %r",
+                    cli_error.exit_code,
+                    attempt,
+                    _MAX_RETRIES + 1,
+                    delay,
+                    (cli_error.stderr or "")[:200],
+                )
+                self._sleep(delay)
+        # Unreachable: the loop either returns or raises.
+        raise RuntimeError(  # pragma: no cover
+            "_ask_oneshot retry loop fell through"
+        )
+
+    def _oneshot_attempt(self, prompt: str) -> str:
+        """A single one-shot subprocess call. No retries.
+
+        Raises ``ClaudeCLIError`` on non-zero exit so the caller (the
+        retry wrapper) can decide whether to back off or give up.
+        """
         try:
             result = subprocess.run(
                 self._build_claude_command(prompt, streaming=False),
@@ -254,13 +357,48 @@ class ClaudeCodeProvider:
     def _ask_streaming(
         self, prompt: str, on_progress: Callable[[str], None]
     ) -> str:
-        """Stream claude output line-by-line, feeding progress to on_progress.
+        """Stream claude output line-by-line with retry on transient failures.
+
+        Each retry restarts the subprocess from scratch — partial output
+        from the failed attempt is discarded. ``on_progress`` may be
+        called multiple times across retries (the spinner will simply
+        update twice).
+        """
+        for attempt in range(1, _MAX_RETRIES + 2):
+            try:
+                return self._streaming_attempt(prompt, on_progress)
+            except ClaudeCLIError as cli_error:
+                if attempt > _MAX_RETRIES:
+                    raise
+                if not _is_transient_failure(cli_error.stderr):
+                    raise
+                delay = _retry_delay_seconds(attempt)
+                logger.warning(
+                    "Transient claude CLI streaming failure "
+                    "(exit %d, attempt %d/%d), retrying in %.1fs. stderr: %r",
+                    cli_error.exit_code,
+                    attempt,
+                    _MAX_RETRIES + 1,
+                    delay,
+                    (cli_error.stderr or "")[:200],
+                )
+                self._sleep(delay)
+        # Unreachable: the loop either returns or raises.
+        raise RuntimeError(  # pragma: no cover
+            "_ask_streaming retry loop fell through"
+        )
+
+    def _streaming_attempt(
+        self, prompt: str, on_progress: Callable[[str], None]
+    ) -> str:
+        """A single streaming subprocess call. No retries.
 
         Uses ``--output-format stream-json --include-partial-messages`` so
         each line of stdout is a JSON event. Assistant-text deltas are
         accumulated into a buffer; on each new chunk we feed the most recent
         line of accumulated text to ``on_progress``. Returns the full
-        accumulated text on completion.
+        accumulated text on completion. Raises ``ClaudeCLIError`` on
+        non-zero exit so the retry wrapper can decide whether to back off.
         """
         cmd = self._build_claude_command(prompt, streaming=True)
         try:
