@@ -126,6 +126,15 @@ def register(app: typer.Typer) -> None:
 
         try:
             with Spinner("growing") as spinner:
+                # Surface the starting queue state immediately so the user
+                # sees something other than a static "growing" label while
+                # the first pass spins up.
+                initial_states = _get_states()
+                if initial_states:
+                    spinner.update(
+                        f"growing — {format_state_summary(initial_states)}"
+                    )
+
                 status_thread = threading.Thread(
                     target=grow_status_loop,
                     kwargs={

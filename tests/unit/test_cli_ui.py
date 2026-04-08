@@ -318,13 +318,17 @@ class TestRenderDot:
 
 
 class _RecordingSpinner:
-    """Tiny stand-in for Spinner that just records print_line calls."""
+    """Tiny stand-in for Spinner that records print_line and update calls."""
 
     def __init__(self) -> None:
         self.lines: list[str] = []
+        self.updates: list[str] = []
 
     def print_line(self, text: str) -> None:
         self.lines.append(text)
+
+    def update(self, text: str) -> None:
+        self.updates.append(text)
 
 
 class TestGrowStatusLoop:
@@ -455,3 +459,89 @@ class TestGrowStatusLoop:
         stopper.join(timeout=1.0)
 
         assert any("queue empty" in line for line in spinner.lines)
+
+    def test_first_status_tick_is_immediate(self, tmp_path, monkeypatch):
+        """The first status line should land BEFORE any wait — earlier
+        behavior delayed the first tick by one full interval, so a
+        60s default left users staring at a static spinner."""
+        petri_dir = tmp_path / ".petri"
+        petri_dir.mkdir()
+        queue_path = petri_dir / "queue.json"
+
+        import petri.storage.event_log as event_log_mod
+        import petri.storage.queue as queue_mod
+
+        monkeypatch.setattr(
+            queue_mod, "get_state_summary",
+            lambda _path: {"socratic_active": 4}, raising=True
+        )
+        monkeypatch.setattr(
+            event_log_mod, "query_events",
+            lambda *args, **kwargs: [], raising=True
+        )
+
+        spinner = _RecordingSpinner()
+        stop_event = threading.Event()
+        # Long interval — if the first tick still runs, we know it's
+        # because the loop printed BEFORE waiting.
+        interval_seconds = 5.0
+
+        def stop_after_short_delay() -> None:
+            time.sleep(0.1)
+            stop_event.set()
+
+        stopper = threading.Thread(target=stop_after_short_delay)
+        stopper.start()
+        start_time = time.monotonic()
+        grow_status_loop(
+            petri_dir=petri_dir,
+            queue_path=queue_path,
+            spinner=spinner,
+            stop_event=stop_event,
+            interval_seconds=interval_seconds,
+        )
+        elapsed = time.monotonic() - start_time
+        stopper.join(timeout=1.0)
+
+        # Returned in well under one full interval — proving the loop
+        # printed first and then exited via the stop signal during wait.
+        assert elapsed < interval_seconds
+        # And actually printed something meaningful.
+        assert any("socratic_active=4" in line for line in spinner.lines)
+        # Spinner bottom line was also updated with the state summary.
+        assert any("socratic_active=4" in update for update in spinner.updates)
+
+    def test_format_status_event_truncates_long_summary(self):
+        """Verdict summaries can be hundreds of words; the CLI must keep
+        each event on one line. Full text lives in evidence.md."""
+        from petri.cli_ui import _format_status_event
+
+        long_summary = "The claim rests on at least seven hidden assumptions, " * 30
+        event = {
+            "type": "verdict_issued",
+            "node_id": "petri-ai-considered-commodity-12-001-002",
+            "agent": "socratic_challenge_assumptions",
+            "data": {
+                "verdict": "ASSUMPTIONS_CHALLENGED",
+                "summary": long_summary,
+            },
+        }
+        line = _format_status_event(event)
+        # Compact node id (last two segments only).
+        assert "001-002" in line
+        assert "petri-ai-considered" not in line
+        # Verdict surfaced.
+        assert "ASSUMPTIONS_CHALLENGED" in line
+        # Summary truncated with ellipsis.
+        assert "…" in line
+        # Whole line is reasonable for one terminal row (~250 char ceiling
+        # to give some headroom for prefix + verdict + node id).
+        assert len(line) < 250
+
+    def test_format_status_event_short_node_id_handles_simple_ids(self):
+        from petri.cli_ui import _short_node_id
+
+        assert _short_node_id("dish-colony-001-002") == "001-002"
+        assert _short_node_id("petri-ai-considered-12-003-004") == "003-004"
+        # Short input falls through unchanged.
+        assert _short_node_id("foo") == "foo"

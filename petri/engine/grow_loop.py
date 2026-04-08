@@ -15,7 +15,7 @@ from petri.storage.queue import is_terminal_state
 
 # Status thread tick interval. Module-level so tests can monkeypatch it
 # down to a tiny value.  Configurable only via code edit for now.
-GROW_STATUS_INTERVAL_SECONDS: float = 60.0
+GROW_STATUS_INTERVAL_SECONDS: float = 10.0
 
 
 @dataclass

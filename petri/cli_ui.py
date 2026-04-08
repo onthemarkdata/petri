@@ -248,10 +248,8 @@ def grow_status_loop(
 
     cutoff_iso = datetime.now(timezone.utc).isoformat()
 
-    while not stop_event.is_set():
-        # Wait first so the very first status line lands one interval in,
-        # not at t=0 (which would race with the loop's own startup output).
-        if stop_event.wait(timeout=interval_seconds):
+    while True:
+        if stop_event.is_set():
             return
 
         try:
@@ -259,7 +257,9 @@ def grow_status_loop(
         except Exception:
             state_counts = {}
 
-        spinner.print_line(f"status: {format_state_summary(state_counts)}")
+        state_summary = format_state_summary(state_counts)
+        spinner.print_line(f"status: {state_summary}")
+        spinner.update(f"growing — {state_summary}")
 
         recent_events: list[dict] = []
         for events_file in iter_events_files(petri_dir):
@@ -280,16 +280,58 @@ def grow_status_loop(
         )
 
         for event in recent_events[:5]:
-            event_type = event.get("type", "")
-            node_id = event.get("node_id", "")
-            agent = event.get("agent", "")
-            data = event.get("data", {}) or {}
-            verdict = data.get("verdict") or data.get("status") or ""
-            summary_text = data.get("summary", "")
-            line = f"{event_type} {node_id} {agent} {verdict}".strip()
-            if summary_text:
-                line = f"{line} — {summary_text}"
-            spinner.print_line(line)
+            spinner.print_line(_format_status_event(event))
 
-        # Advance the cutoff so the next tick only fetches truly new events
+        # Advance cutoff so the next tick only fetches truly new events
         cutoff_iso = datetime.now(timezone.utc).isoformat()
+
+        # Sleep until next tick OR until stop_event is set
+        if stop_event.wait(timeout=interval_seconds):
+            return
+
+
+# Maximum characters to show from a verdict's summary in the CLI status feed.
+# Full summaries are persisted to evidence.md; the CLI is just a high-level
+# activity feed, not a debugging surface.
+_STATUS_SUMMARY_MAX_CHARS = 100
+
+
+def _short_node_id(node_id: str) -> str:
+    """Return the trailing ``level-seq`` portion of a composite node id.
+
+    ``"petri-ai-considered-commodity-12-001-002"`` -> ``"001-002"``.
+    Falls back to the original string if it has fewer than 2 hyphens.
+    """
+    parts = node_id.rsplit("-", 2)
+    if len(parts) < 3:
+        return node_id
+    return f"{parts[-2]}-{parts[-1]}"
+
+
+def _truncate_summary(summary_text: str, max_chars: int = _STATUS_SUMMARY_MAX_CHARS) -> str:
+    """Collapse whitespace and truncate to ``max_chars`` with an ellipsis."""
+    collapsed = " ".join(summary_text.split())
+    if len(collapsed) <= max_chars:
+        return collapsed
+    return collapsed[: max_chars - 1].rstrip() + "…"
+
+
+def _format_status_event(event: dict) -> str:
+    """Render a verdict_issued or convergence_checked event as a one-line
+    status entry: ``<short_node> <agent>: <verdict> — <truncated summary>``.
+
+    Drops the redundant event_type prefix and dish/colony portion of the
+    node id since both are obvious from context. Truncates the summary so
+    one event fits on one terminal line — the full text lives in
+    evidence.md.
+    """
+    node_id = _short_node_id(event.get("node_id", ""))
+    agent = event.get("agent", "")
+    data = event.get("data", {}) or {}
+    verdict = data.get("verdict") or data.get("status") or ""
+    summary_text = data.get("summary", "")
+
+    head = f"{node_id} {agent}: {verdict}".strip()
+    if summary_text:
+        return f"{head} — {_truncate_summary(summary_text)}"
+    return head
