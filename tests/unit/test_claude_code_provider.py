@@ -20,6 +20,7 @@ from __future__ import annotations
 import pytest
 
 from petri.reasoning.claude_code_provider import (
+    ClaudeCLIError,
     ClaudeCodeProvider,
     _parse_verdict,
 )
@@ -169,6 +170,103 @@ def test_assess_node_accepts_socratic_questioner_role():
         agent_role="socratic_questioner",
     )
     assert result.verdict == "CLARIFIED"
+
+
+# ── ClaudeCLIError surfacing ────────────────────────────────────────────
+
+
+class _RaisingStubProvider(ClaudeCodeProvider):
+    """ClaudeCodeProvider whose _ask raises ClaudeCLIError instead of
+    returning a string. Used to verify the high-level methods produce
+    informative error reports rather than corrupt buffers."""
+
+    def __init__(
+        self, *, exit_code: int = 1, stderr: str = "rate limit hit"
+    ) -> None:
+        self.model = "test-model"
+        self.allowed_tools = []
+        self._exit_code = exit_code
+        self._stderr = stderr
+
+    def _ask(self, prompt, on_progress=None):  # type: ignore[override]
+        raise ClaudeCLIError(
+            exit_code=self._exit_code, stderr=self._stderr, stdout=""
+        )
+
+
+def test_assess_node_returns_execution_error_with_stderr_on_cli_failure():
+    """When the claude subprocess fails, assess_node must surface the
+    actual stderr in the AssessmentResult.summary so users can see WHY
+    (rate limit, auth, model name, etc.) instead of generic 'execution
+    error'."""
+    provider = _RaisingStubProvider(
+        exit_code=1, stderr="Error: rate limit exceeded (HTTP 429)"
+    )
+    result = provider.assess_node(
+        node_id="test-dish-colony-001-001",
+        claim_text="A sample claim",
+        context={"phase": "research"},
+        agent_role="investigator",
+    )
+    assert result.verdict == "EXECUTION_ERROR"
+    assert "exit 1" in result.summary
+    assert "rate limit" in result.summary.lower()
+
+
+def test_assess_node_returns_execution_error_with_empty_stderr():
+    """Empty stderr (which is what the user actually saw — exit 1 with
+    no diagnostic) must produce a result that flags the empty case
+    rather than a confusing blank summary."""
+    provider = _RaisingStubProvider(exit_code=1, stderr="")
+    result = provider.assess_node(
+        node_id="test-dish-colony-001-001",
+        claim_text="A claim",
+        context={"phase": "research"},
+        agent_role="investigator",
+    )
+    assert result.verdict == "EXECUTION_ERROR"
+    assert "exit 1" in result.summary
+    assert "(empty)" in result.summary
+
+
+def test_assess_claim_substance_falls_back_when_cli_fails():
+    """The seed wizard's substance check must not crash on CLI failure;
+    fall through to is_substantive=True so the user can still proceed."""
+    provider = _RaisingStubProvider(exit_code=1, stderr="auth expired")
+    result = provider.assess_claim_substance("a real claim")
+    assert result == {
+        "is_substantive": True,
+        "reason": "",
+        "suggested_rewrite": "",
+    }
+
+
+def test_generate_clarifying_questions_returns_empty_when_cli_fails():
+    """Clarifying-question generation falls through to an empty list on
+    CLI failure so the seed wizard can proceed without the wizard step."""
+    provider = _RaisingStubProvider(exit_code=1, stderr="model not found")
+    questions = provider.generate_clarifying_questions("a claim")
+    assert questions == []
+
+
+def test_claude_cli_error_message_includes_exit_code_and_stderr():
+    """ClaudeCLIError's __str__ must include both the exit code and a
+    stderr preview so logs surface the full context."""
+    error = ClaudeCLIError(
+        exit_code=2,
+        stderr="Error: prompt exceeds max context (200000 tokens)",
+        stdout="partial",
+    )
+    text = str(error)
+    assert "exited 2" in text
+    assert "200000" in text
+
+
+def test_claude_cli_error_empty_stderr_shows_empty_marker():
+    error = ClaudeCLIError(exit_code=1, stderr="", stdout="")
+    text = str(error)
+    assert "exited 1" in text
+    assert "(empty)" in text
 
 
 # ── allowed_tools / _build_claude_command ───────────────────────────────

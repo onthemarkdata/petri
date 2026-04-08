@@ -103,6 +103,30 @@ def _coerce_str(value: object) -> str:
     return str(value) if value else ""
 
 
+class ClaudeCLIError(RuntimeError):
+    """Raised when the ``claude`` subprocess exits with a non-zero code.
+
+    Carries the exit code, captured stderr, and any partial stdout so
+    callers can build informative error messages instead of silently
+    swallowing the failure.
+    """
+
+    def __init__(
+        self,
+        *,
+        exit_code: int,
+        stderr: str,
+        stdout: str = "",
+    ) -> None:
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.stdout = stdout
+        stderr_preview = stderr.strip()[:300] or "(empty)"
+        super().__init__(
+            f"claude CLI exited {exit_code}. stderr: {stderr_preview}"
+        )
+
+
 def _parse_verdict(text: str, valid_verdicts: list[str]) -> str:
     upper = text.upper()
     for verdict in valid_verdicts:
@@ -206,9 +230,13 @@ class ClaudeCodeProvider:
                 "Install: https://docs.anthropic.com/en/docs/claude-code"
             ) from None
         if result.returncode != 0:
-            stderr = result.stderr.strip()
+            stderr = (result.stderr or "").strip()
+            stdout = (result.stdout or "").strip()
             logger.warning(
-                "claude CLI error (exit %d): %s", result.returncode, stderr[:1000]
+                "claude CLI error (exit %d). stderr=%r stdout=%r",
+                result.returncode,
+                stderr[:500],
+                stdout[:500],
             )
             if "model" in stderr.lower() and "not found" in stderr.lower():
                 logger.warning(
@@ -216,6 +244,11 @@ class ClaudeCodeProvider:
                     "Verify the model name and your Claude Code authentication.",
                     self.model,
                 )
+            raise ClaudeCLIError(
+                exit_code=result.returncode,
+                stderr=stderr,
+                stdout=stdout,
+            )
         return result.stdout.strip()
 
     def _ask_streaming(
@@ -280,10 +313,17 @@ class ClaudeCodeProvider:
                     stderr = proc.stderr.read() or ""
                 except Exception:
                     stderr = ""
+            partial_stdout = "".join(buffer).strip()
             logger.warning(
-                "claude CLI streaming error (exit %d): %s",
+                "claude CLI streaming error (exit %d). stderr=%r stdout=%r",
                 proc.returncode,
-                stderr.strip()[:1000],
+                stderr.strip()[:500],
+                partial_stdout[:500],
+            )
+            raise ClaudeCLIError(
+                exit_code=proc.returncode,
+                stderr=stderr.strip(),
+                stdout=partial_stdout,
             )
 
         return "".join(buffer).strip()
@@ -316,7 +356,13 @@ class ClaudeCodeProvider:
             '  "suggested_rewrite": "tighter rephrasing, or empty string"\n'
             "}\n"
         )
-        raw = self._ask(prompt, on_progress=on_progress)
+        try:
+            raw = self._ask(prompt, on_progress=on_progress)
+        except ClaudeCLIError:
+            # Subprocess failed — fall through to the wizard rather than
+            # block the user. The seed flow will surface the error if
+            # subsequent calls also fail.
+            return {"is_substantive": True, "reason": "", "suggested_rewrite": ""}
         parsed = _extract_json(raw)
         if not isinstance(parsed, dict):
             # Treat parse failure as substantive — fall through to the wizard
@@ -345,7 +391,12 @@ class ClaudeCodeProvider:
             "Return ONLY a JSON array: "
             '[{"question": "...", "options": ["...", "..."]}, ...]'
         )
-        raw = self._ask(prompt, on_progress=on_progress)
+        try:
+            raw = self._ask(prompt, on_progress=on_progress)
+        except ClaudeCLIError:
+            # Subprocess failed — return no questions and let the seed
+            # flow proceed without the wizard step.
+            return []
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, list):
@@ -522,7 +573,23 @@ class ClaudeCodeProvider:
             f"Return ONLY the JSON."
         )
 
-        raw = self._ask(prompt)
+        try:
+            raw = self._ask(prompt)
+        except ClaudeCLIError as cli_error:
+            # Subprocess failure — surface the real stderr in the summary
+            # so the user can see WHY claude failed (auth, rate limit,
+            # model name, prompt too long, etc.) instead of a generic
+            # "execution error". Truncate aggressively to keep the row
+            # readable in the multi-spinner UI.
+            stderr_excerpt = (cli_error.stderr or "").strip()[:400] or "(empty)"
+            return AssessmentResult(
+                agent=agent_role,
+                verdict="EXECUTION_ERROR",
+                summary=(
+                    f"claude CLI failed (exit {cli_error.exit_code}). "
+                    f"stderr: {stderr_excerpt}"
+                ),
+            )
         parsed = _extract_json(raw)
 
         if parsed and "verdict" in parsed:
