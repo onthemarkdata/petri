@@ -25,28 +25,47 @@ from petri.engine.grow_loop import (
 def register(app: typer.Typer) -> None:
     @app.command()
     def grow(
-        cells: Optional[list[str]] = typer.Argument(None, help="Cell IDs to grow"),
-        colony_name: Optional[str] = typer.Option(
-            None, "--colony", help="Grow all in colony"
+        cell: Optional[list[str]] = typer.Option(
+            None,
+            "--cell",
+            "-c",
+            help=(
+                "Cell ID to grow (repeat for multiple: --cell a --cell b). "
+                "If omitted, every eligible cell across all colonies is "
+                "processed."
+            ),
         ),
-        all_cells: bool = typer.Option(False, "--all", help="Grow all eligible"),
+        colony_name: Optional[str] = typer.Option(
+            None, "--colony", help="Grow all cells in a specific colony"
+        ),
         max_concurrent: int = typer.Option(
             MAX_CONCURRENT, "--max-concurrent", help="Max parallel cells"
         ),
         dry_run: bool = typer.Option(
-            False, "--dry-run", help="Show what would process"
+            False, "--dry-run", help="Show what would process without running"
         ),
     ) -> None:
-        """Enqueue cells and process through validation pipeline.
+        """Run the validation pipeline.
 
-        Loops calling ``process_queue`` until every queue entry is in a
+        By default, every eligible cell across every colony is processed.
+        Scope to a subset with ``--cell`` (repeatable) or ``--colony``.
+
+        Internally loops ``process_queue`` until every queue entry is in a
         terminal state, the cross-process stop sentinel appears, or two
-        consecutive passes make no progress at all.  A daemon status thread
+        consecutive passes make no progress.  A daemon status thread
         prints periodic progress lines above a persistent spinner.
         """
         import threading
 
         petri_dir = find_petri_dir()
+
+        # The processor's process_queue API still takes three orthogonal
+        # knobs — cell_ids, colony_filter, all_cells — and we keep using
+        # them unchanged. We just no longer expose --all on the CLI
+        # surface because it's the default: all_cells is true exactly
+        # when the user didn't scope to a specific cell or colony.
+        selected_cells: Optional[list[str]] = cell or None
+        all_cells: bool = not selected_cells and not colony_name
 
         # Preflight: check claude CLI before attempting processing
         from petri.engine.preflight import check_claude_cli
@@ -82,7 +101,7 @@ def register(app: typer.Typer) -> None:
                     petri_dir=petri_dir,
                     provider=provider,
                     max_concurrent=max_concurrent,
-                    cell_ids=cells,
+                    cell_ids=selected_cells,
                     colony_filter=colony_name,
                     all_cells=all_cells,
                     dry_run=True,
@@ -175,7 +194,7 @@ def register(app: typer.Typer) -> None:
                         petri_dir=petri_dir,
                         provider=provider,
                         max_concurrent=max_concurrent,
-                        cell_ids=cells,
+                        cell_ids=selected_cells,
                         colony_filter=colony_name,
                         all_cells=all_cells,
                         dry_run=False,

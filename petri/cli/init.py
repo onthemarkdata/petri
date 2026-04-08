@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +18,153 @@ from petri.config import (
 )
 
 DEFAULTS_DIR = Path(__file__).parent.parent / "defaults"
+
+
+@dataclass
+class DishCreationResult:
+    """Record of what create_petri_dish actually did on disk.
+
+    Lets callers report accurate "created" vs "repaired" vs "already
+    complete" state to the user instead of guessing.
+    """
+
+    petri_dir: Path
+    created_root: bool
+    created_defaults: bool
+    created_config: bool
+    created_constitution: bool
+    created_dishes_dir: bool
+    created_queue: bool
+
+    @property
+    def any_created(self) -> bool:
+        return any(
+            [
+                self.created_root,
+                self.created_defaults,
+                self.created_config,
+                self.created_constitution,
+                self.created_dishes_dir,
+                self.created_queue,
+            ]
+        )
+
+    @property
+    def fully_fresh(self) -> bool:
+        """True iff we created every piece from nothing."""
+        return all(
+            [
+                self.created_root,
+                self.created_defaults,
+                self.created_config,
+                self.created_dishes_dir,
+                self.created_queue,
+            ]
+        )
+
+
+def create_petri_dish(
+    petri_dir: Path,
+    *,
+    dish_name: str,
+    model_name: str = LLM_INFERENCE_MODEL,
+    max_concurrent: int = MAX_CONCURRENT,
+    max_iterations: int = MAX_ITERATIONS,
+) -> DishCreationResult:
+    """Idempotently create or repair a petri dish directory.
+
+    Only missing pieces are created — existing files are never
+    overwritten, so this is safe to call against a partially
+    initialized ``.petri/`` (e.g. one where sqlite exists but
+    ``defaults/petri.yaml`` was deleted, or vice versa).
+
+    This helper is shared by three call sites:
+
+    * ``petri init`` CLI — creates a brand-new dish after the
+      interactive questionary wizard collects answers.
+    * ``petri launch`` CLI — auto-heals the dish on startup so the
+      dashboard always boots against a consistent filesystem state.
+    * ``POST /api/init`` — the web onboarding wizard's init step.
+
+    All three pass their own ``dish_name`` / ``model_name`` / concurrency
+    / iteration values; the defaults here match ``petri init --no-
+    questions``.
+    """
+    result = DishCreationResult(
+        petri_dir=petri_dir,
+        created_root=False,
+        created_defaults=False,
+        created_config=False,
+        created_constitution=False,
+        created_dishes_dir=False,
+        created_queue=False,
+    )
+
+    if not petri_dir.exists():
+        result.created_root = True
+    petri_dir.mkdir(parents=True, exist_ok=True)
+
+    defaults_dest = petri_dir / "defaults"
+    if not defaults_dest.exists():
+        result.created_defaults = True
+    defaults_dest.mkdir(exist_ok=True)
+
+    config_path = defaults_dest / "petri.yaml"
+    if not config_path.exists():
+        result.created_config = True
+        src_config = DEFAULTS_DIR / "petri.yaml"
+        if src_config.exists():
+            try:
+                import yaml
+
+                with open(src_config) as f:
+                    config = yaml.safe_load(f) or {}
+                config["name"] = dish_name
+                config.setdefault("model", {})["name"] = model_name
+                config["max_concurrent"] = max_concurrent
+                config["max_iterations"] = max_iterations
+                with open(config_path, "w") as f:
+                    f.write("# Petri Dish Configuration\n")
+                    f.write(f"# Initialized for dish: {dish_name}\n\n")
+                    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            except ImportError:
+                config_path.write_text(
+                    f"name: {dish_name}\n"
+                    f"model:\n  name: {model_name}\n"
+                    f"max_concurrent: {max_concurrent}\n"
+                    f"max_iterations: {max_iterations}\n",
+                    encoding="utf-8",
+                )
+        else:
+            config_path.write_text(
+                f"name: {dish_name}\n"
+                f"model:\n  name: {model_name}\n"
+                f"max_concurrent: {max_concurrent}\n"
+                f"max_iterations: {max_iterations}\n",
+                encoding="utf-8",
+            )
+
+    constitution_dest = defaults_dest / "constitution.md"
+    if not constitution_dest.exists():
+        src_constitution = DEFAULTS_DIR / "constitution.md"
+        if src_constitution.exists():
+            shutil.copy2(src_constitution, constitution_dest)
+            result.created_constitution = True
+
+    dishes_dir = petri_dir / "petri-dishes"
+    if not dishes_dir.exists():
+        result.created_dishes_dir = True
+    dishes_dir.mkdir(exist_ok=True)
+
+    queue_path = petri_dir / "queue.json"
+    if not queue_path.exists():
+        result.created_queue = True
+        queue_data = {"version": 1, "last_updated": None, "entries": {}}
+        queue_path.write_text(
+            json.dumps(queue_data, indent=2) + "\n", encoding="utf-8"
+        )
+
+    return result
 
 
 def register(app: typer.Typer) -> None:
@@ -130,46 +278,12 @@ def register(app: typer.Typer) -> None:
 
         # ── Create Dish ──────────────────────────────────────────────────
         try:
-            petri_dir.mkdir(parents=True)
-
-            defaults_dest = petri_dir / "defaults"
-            defaults_dest.mkdir()
-
-            # Load package defaults and apply wizard choices
-            src_config = DEFAULTS_DIR / "petri.yaml"
-            if src_config.exists():
-                import yaml
-
-                with open(src_config) as f:
-                    config = yaml.safe_load(f)
-                config["name"] = dish_name
-                config.setdefault("model", {})["name"] = model_name
-                config["max_concurrent"] = max_concurrent
-                config["max_iterations"] = max_iterations
-                with open(defaults_dest / "petri.yaml", "w") as f:
-                    f.write("# Petri Dish Configuration\n")
-                    f.write(f"# Initialized for dish: {dish_name}\n\n")
-                    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-            else:
-                (defaults_dest / "petri.yaml").write_text(
-                    f"name: {dish_name}\nmodel:\n  name: {model_name}\n"
-                    f"max_concurrent: {max_concurrent}\nmax_iterations: {max_iterations}\n",
-                    encoding="utf-8",
-                )
-
-            # Copy constitution.md
-            src_constitution = DEFAULTS_DIR / "constitution.md"
-            if src_constitution.exists():
-                shutil.copy2(src_constitution, defaults_dest / "constitution.md")
-
-            # Create petri-dishes directory
-            (petri_dir / "petri-dishes").mkdir()
-
-            # Create queue.json
-            queue_data = {"version": 1, "last_updated": None, "entries": {}}
-            queue_path = petri_dir / "queue.json"
-            queue_path.write_text(
-                json.dumps(queue_data, indent=2) + "\n", encoding="utf-8"
+            create_petri_dish(
+                petri_dir,
+                dish_name=dish_name,
+                model_name=model_name,
+                max_concurrent=max_concurrent,
+                max_iterations=max_iterations,
             )
 
             typer.echo(f"Initialized petri dish '{dish_name}' at {target}")

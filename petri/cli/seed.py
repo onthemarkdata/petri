@@ -243,10 +243,19 @@ def register(app: typer.Typer) -> None:
         # to distinguish "no TTY" from "TTY but questionary missing" in
         # order to reproduce the original warning-only-on-import-failure
         # behaviour.
+        #
+        # `interactive` controls whether the questionary wizard runs —
+        # that's a stdin concern. `force_plain_spinner` controls whether
+        # the Spinner uses its animated braille output — that's a
+        # stdout concern and must be decoupled, otherwise launching
+        # `petri seed` with stdin redirected (or from the dashboard's
+        # PTY bridge where stdin=DEVNULL but stdout is a PTY slave)
+        # silently falls back to the plain `→` fallback even though
+        # the terminal is perfectly capable of rendering the animation.
         import sys
 
         interactive = sys.stdin.isatty() and not no_questions
-        force_plain_spinner = not interactive
+        force_plain_spinner = not sys.stdout.isatty()
         questionary = None
         if interactive:
             try:
@@ -259,7 +268,6 @@ def register(app: typer.Typer) -> None:
                     err=True,
                 )
                 interactive = False
-                force_plain_spinner = True
 
         # ── Agentic substance check ──
         skip_wizard = no_questions

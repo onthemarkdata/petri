@@ -129,6 +129,7 @@ def register(app: typer.Typer) -> None:
 
         import uvicorn
 
+        from petri.cli.init import create_petri_dish
         from petri.dashboard.api import create_app
         from petri.dashboard.migrate import init_db, rebuild_sqlite
 
@@ -136,18 +137,40 @@ def register(app: typer.Typer) -> None:
         # doesn't block us. The sqlite index is disposable — killing is safe.
         _free_port_or_exit(port)
 
-        petri_dir = Path.cwd() / ".petri"
+        project_dir = Path.cwd()
+        petri_dir = project_dir / ".petri"
         db_path = petri_dir / "petri.sqlite"
 
-        if petri_dir.exists():
-            typer.echo("Building event index...")
-            count = rebuild_sqlite(petri_dir, db_path)
-            typer.echo(f"Indexed {count} events.")
-        else:
-            # No dish yet -- the Computer tab will run the onboarding wizard.
-            # Ensure the db directory + schema exist so SSE works.
-            petri_dir.mkdir(parents=True, exist_ok=True)
-            init_db(db_path)
+        # Auto-heal the dish: if `.petri/` is missing OR partially
+        # initialized (e.g. user deleted defaults/petri.yaml but left
+        # everything else), create every missing piece from package
+        # defaults. create_petri_dish() is idempotent and only writes
+        # files that don't already exist, so this is safe to call
+        # unconditionally — existing dish state is untouched.
+        default_dish_name = project_dir.name
+        creation = create_petri_dish(petri_dir, dish_name=default_dish_name)
+        if creation.fully_fresh:
+            typer.echo(
+                f"Initialized new petri dish '{default_dish_name}' at "
+                f"{petri_dir} (using package defaults)."
+            )
+        elif creation.any_created:
+            repaired = []
+            if creation.created_config:
+                repaired.append("defaults/petri.yaml")
+            if creation.created_constitution:
+                repaired.append("defaults/constitution.md")
+            if creation.created_dishes_dir:
+                repaired.append("petri-dishes/")
+            if creation.created_queue:
+                repaired.append("queue.json")
+            typer.echo(
+                "Repaired petri dish — added missing: " + ", ".join(repaired)
+            )
+
+        typer.echo("Building event index...")
+        count = rebuild_sqlite(petri_dir, db_path)
+        typer.echo(f"Indexed {count} events.")
 
         dashboard_app = create_app(petri_dir, db_path)
 

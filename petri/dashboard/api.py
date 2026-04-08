@@ -384,9 +384,16 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
 
     @app.post("/api/init")
     def post_init(body: dict):
-        """Run petri init logic from the web UI."""
-        import shutil
+        """Run petri init logic from the web UI.
 
+        Delegates to the shared ``create_petri_dish`` helper so the
+        skeleton-creation logic lives in exactly one place (used by
+        ``petri init``, ``petri launch`` auto-heal, and this endpoint).
+        Preserves the ``already_exists`` short-circuit so the web
+        wizard running twice in one session doesn't silently wipe
+        user customizations.
+        """
+        from petri.cli.init import create_petri_dish
         from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
 
         dish_name = body.get("name", petri_dir.parent.name)
@@ -394,55 +401,18 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         max_concurrent = int(body.get("max_concurrent", MAX_CONCURRENT))
         max_iterations = int(body.get("max_iterations", MAX_ITERATIONS))
 
-        defaults_dir = Path(__file__).parent.parent / "defaults"
-
-        # Check for proper initialization (not just directory existence)
         config_exists = (petri_dir / "defaults" / "petri.yaml").exists()
         if config_exists:
             return {"status": "already_exists", "dish_id": dish_name}
 
         try:
-            petri_dir.mkdir(parents=True, exist_ok=True)
-            defaults_dest = petri_dir / "defaults"
-            defaults_dest.mkdir(exist_ok=True)
-
-            src_config = defaults_dir / "petri.yaml"
-            if src_config.exists():
-                try:
-                    import yaml
-
-                    with open(src_config) as f_cfg:
-                        config = yaml.safe_load(f_cfg)
-                    config["name"] = dish_name
-                    config.setdefault("model", {})["name"] = model_name
-                    config["max_concurrent"] = max_concurrent
-                    config["max_iterations"] = max_iterations
-                    with open(defaults_dest / "petri.yaml", "w") as f_out:
-                        f_out.write("# Petri Dish Configuration\n")
-                        f_out.write(f"# Initialized for dish: {dish_name}\n\n")
-                        yaml.dump(config, f_out, default_flow_style=False, sort_keys=False)
-                except ImportError:
-                    (defaults_dest / "petri.yaml").write_text(
-                        f"name: {dish_name}\nmodel:\n  name: {model_name}\n"
-                        f"max_concurrent: {max_concurrent}\nmax_iterations: {max_iterations}\n",
-                    )
-            else:
-                (defaults_dest / "petri.yaml").write_text(
-                    f"name: {dish_name}\nmodel:\n  name: {model_name}\n"
-                    f"max_concurrent: {max_concurrent}\nmax_iterations: {max_iterations}\n",
-                )
-
-            src_constitution = defaults_dir / "constitution.md"
-            if src_constitution.exists():
-                shutil.copy2(src_constitution, defaults_dest / "constitution.md")
-
-            (petri_dir / "petri-dishes").mkdir(exist_ok=True)
-
-            queue_data = {"version": 1, "last_updated": None, "entries": {}}
-            (petri_dir / "queue.json").write_text(
-                json.dumps(queue_data, indent=2) + "\n",
+            create_petri_dish(
+                petri_dir,
+                dish_name=dish_name,
+                model_name=model_name,
+                max_concurrent=max_concurrent,
+                max_iterations=max_iterations,
             )
-
             return {"status": "ok", "dish_id": dish_name}
         except OSError as exc:
             raise HTTPException(500, f"Init failed: {exc}")
@@ -545,161 +515,6 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 for c in cells
             ],
         }
-
-    # ── Seed (streaming) ─────────────────────────────────────────────
-    #
-    # The onboarding wizard (Computer tab, CRT view) opens an EventSource
-    # against this endpoint so the user sees live progress while the
-    # decomposer runs instead of staring at a frozen spinner for ~30 s.
-    # Mirrors the CLI seed's on_progress + on_cell_created callback UX.
-
-    @app.get("/api/seed/stream")
-    async def seed_stream(
-        claim: str,
-        colony: Optional[str] = None,
-    ):
-        if not claim.strip():
-            raise HTTPException(400, "claim is required")
-
-        from datetime import datetime, timezone
-
-        from petri.cli._bootstrap import resolve_provider
-        from petri.graph.colony import ColonyGraph, serialize_colony
-        from petri.models import Colony
-        from petri.reasoning.decomposer import (
-            decompose_claim,
-            generate_colony_name,
-        )
-        from petri.storage.event_log import append_event
-
-        dish_id = _get_dish_id(petri_dir)
-        provider = resolve_provider(petri_dir)
-        if provider is None:
-            raise HTTPException(
-                500,
-                "Could not resolve inference provider: petri.yaml is missing a model entry.",
-            )
-
-        colony_name = colony or generate_colony_name(claim)
-
-        # The decomposer runs in a worker thread (it makes blocking LLM
-        # calls). Its callbacks fire on that worker thread, so we
-        # marshal every event back onto the asyncio loop via
-        # loop.call_soon_threadsafe before putting it on the async
-        # queue the SSE generator drains.
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue = asyncio.Queue()
-
-        def on_progress(text: str) -> None:
-            loop.call_soon_threadsafe(
-                queue.put_nowait, ("progress", {"text": text})
-            )
-
-        def on_cell_created(cell, new_edges) -> None:
-            loop.call_soon_threadsafe(
-                queue.put_nowait,
-                (
-                    "cell_created",
-                    {
-                        "id": cell.id,
-                        "claim_text": cell.claim_text,
-                        "level": cell.level,
-                        "parents": [edge.from_cell for edge in new_edges],
-                    },
-                ),
-            )
-
-        async def run_decompose() -> None:
-            try:
-                result = await asyncio.to_thread(
-                    decompose_claim,
-                    claim=claim,
-                    clarifications=[],
-                    dish_id=dish_id,
-                    colony_name=colony_name,
-                    provider=provider,
-                    on_progress=on_progress,
-                    on_cell_created=on_cell_created,
-                )
-
-                # Mirror the serialization logic from POST /api/seed.
-                now = datetime.now(timezone.utc).isoformat()
-                colony_id = f"{dish_id}-{colony_name}"
-
-                graph = ColonyGraph(colony_id=colony_id)
-                for cell in result.cells:
-                    graph.add_cell(cell)
-                for edge in result.edges:
-                    graph.add_edge(edge)
-
-                center_cell_id = result.cells[0].id if result.cells else ""
-                colony_model = Colony(
-                    id=colony_id,
-                    dish=dish_id,
-                    center_claim=claim,
-                    center_cell_id=center_cell_id,
-                    clarifications=[],
-                    created_at=now,
-                )
-
-                colony_path = petri_dir / "petri-dishes" / colony_name
-                await asyncio.to_thread(
-                    serialize_colony, graph, colony_model, colony_path
-                )
-
-                for cell in result.cells:
-                    child_ids = [
-                        e.from_cell for e in result.edges if e.to_cell == cell.id
-                    ]
-                    cell_rel_path = colony_model.cell_paths.get(
-                        cell.id,
-                        f"{cell.id.split('-')[-2]}-{cell.id.split('-')[-1]}",
-                    )
-                    events_path = colony_path / cell_rel_path / "events.jsonl"
-                    append_event(
-                        events_path=events_path,
-                        cell_id=cell.id,
-                        event_type="decomposition_created",
-                        agent="decomposition_lead",
-                        iteration=0,
-                        data={
-                            "parent_cell_id": cell.id,
-                            "child_cell_ids": child_ids,
-                        },
-                    )
-
-                queue.put_nowait(
-                    (
-                        "done",
-                        {
-                            "status": "ok",
-                            "colony_id": colony_id,
-                            "colony_name": colony_name,
-                            "cell_count": len(result.cells),
-                            "cells": [
-                                {
-                                    "id": c.id,
-                                    "claim_text": c.claim_text,
-                                    "level": c.level,
-                                }
-                                for c in result.cells
-                            ],
-                        },
-                    )
-                )
-            except Exception as exc:  # noqa: BLE001 - surface to client
-                queue.put_nowait(("error", {"message": str(exc)}))
-
-        asyncio.create_task(run_decompose())
-
-        async def generate():
-            while True:
-                kind, payload = await queue.get()
-                yield {"event": kind, "data": json.dumps(payload)}
-                if kind in ("done", "error"):
-                    return
-
-        return EventSourceResponse(generate())
 
     # ── Events ────────────────────────────────────────────────────────
 

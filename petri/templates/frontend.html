@@ -164,29 +164,14 @@ body {
   border: 1px solid #00ccff;
   overflow: hidden;
 }
-.crt-screen {
-  position: absolute;
-  inset: 10px;
-  background: #000800;
-  border-radius: 4px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 22px 26px;
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--green);
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-}
-/* When the command input row is present the screen shrinks to leave room. */
-.crt-frame.has-input .crt-screen { bottom: 52px; }
-.crt-frame.has-input .crt-xterm  { bottom: 52px; }
-
-/* xterm.js mount — fills the screen area when command mode is active.
-   Positioned absolute inside .crt-frame just like .crt-screen so the
-   scanlines overlay still floats on top. */
+/* xterm.js mount — the ONLY display surface inside .crt-frame. The
+   onboarding wizard and command mode both write here; there is no
+   longer a separate static-DOM CRT output div. The scanlines overlay
+   still floats on top via z-index. Leaves 52px at the bottom for the
+   persistent command-input row. */
 .crt-xterm {
   position: absolute;
-  top: 10px; left: 10px; right: 10px; bottom: 10px;
+  top: 10px; left: 10px; right: 10px; bottom: 62px;
   background: #000800;
   border-radius: 4px;
   padding: 8px 10px;
@@ -1349,12 +1334,11 @@ body {
   </div>
   <div class="hud-corners"><div class="hud-corner-b"></div><div class="hud-corner-c"></div></div>
   <div class="crt-frame" id="crt-frame">
-    <div class="crt-screen" id="crt-output"></div>
-    <div class="crt-xterm" id="crt-xterm" style="display:none"></div>
-    <div class="crt-input-row" id="crt-input-row" style="display:none">
+    <div class="crt-xterm" id="crt-xterm"></div>
+    <div class="crt-input-row" id="crt-input-row">
       <span class="crt-prompt">PETRI $</span>
       <input type="text" class="crt-cmd" id="term-cmd"
-             placeholder='type: petri check  ·  petri seed "claim"  ·  petri grow --all'
+             placeholder='type: petri check  ·  petri seed "claim"  ·  petri grow'
              autocomplete="off" spellcheck="false" />
       <button id="term-detach-btn" title="Run detached (don't stream output)">DETACH</button>
       <button id="term-stop-btn" class="stop" disabled>STOP</button>
@@ -1681,13 +1665,9 @@ function connectSSE() {
     if (State.currentView === 'cell' && State.currentCell === data.cell_id) loadCellDetail(State.currentCell);
     // Interleave live events as dim lines in the Computer terminal when
     // it's idle — same vibe as a background `tail -f` next to your shell.
-    if (State.currentView === 'computer' && TerminalState.mode === 'idle') {
+    if (State.currentView === 'computer' && TerminalState.mode === 'idle' && XTERM) {
       var line = '[' + (data.type || '?') + '] ' + (data.cell_id || '') + ' · ' + (data.agent || '');
-      if (XTERM) {
-        XTERM.writeln(ANSI.grey + ANSI.dim + line + ANSI.reset);
-      } else {
-        termAppend('event', line);
-      }
+      XTERM.writeln(ANSI.grey + ANSI.dim + line + ANSI.reset);
     }
   });
 
@@ -2629,134 +2609,185 @@ function renderCellLogRow(evt) {
   return row;
 }
 
-// ── CRT Onboarding Terminal ─────────────────────────────────────────────
+// ── Onboarding wizard (runs inline inside xterm) ───────────────────────
+//
+// The wizard and the command mode share a single xterm.js surface —
+// there is no separate static-DOM "CRT" layer anymore. Typed boot
+// messages, prompts, and command output all write into the same xterm.
+// User input happens through the persistent bottom input row, which
+// dispatches to one of:
+//   - a pending wizard prompt callback (TerminalState.pendingPrompt)
+//   - the command runner (termRun) in the default/idle case.
+
+function xtermSleep(ms) {
+  return new Promise(function(r) { setTimeout(r, ms); });
+}
+
+// Type text character-by-character into xterm with the given color
+// (keys from the ANSI helper). Returns a Promise that resolves when
+// the whole line has been written plus a trailing CRLF.
+function xtermTypeLine(text, color) {
+  return new Promise(function(resolve) {
+    if (!XTERM) { resolve(); return; }
+    var prefix = color && ANSI[color] ? ANSI[color] : '';
+    var suffix = prefix ? ANSI.reset : '';
+    XTERM.write(prefix);
+    var idx = 0;
+    function step() {
+      if (idx >= text.length) {
+        XTERM.write(suffix + '\r\n');
+        resolve();
+        return;
+      }
+      XTERM.write(text.charAt(idx));
+      idx++;
+      setTimeout(step, 15);
+    }
+    step();
+  });
+}
+
+// Instant-write a line with color (no typing animation).
+function xtermInstantLine(text, color) {
+  if (!XTERM) return;
+  var prefix = color && ANSI[color] ? ANSI[color] : '';
+  var suffix = prefix ? ANSI.reset : '';
+  XTERM.writeln(prefix + text + suffix);
+}
+
+// Prompt the user for a text answer inside xterm. Writes the prompt
+// line, focuses the bottom input with the default value preselected,
+// and resolves when the user presses Enter. The user's answer is
+// echoed back into xterm so it stays as part of the wizard history.
+function xtermPromptText(promptStr, defaultVal) {
+  return new Promise(function(resolve) {
+    if (XTERM) {
+      XTERM.write(ANSI.yellow + promptStr + ' ' + ANSI.reset);
+    }
+    var input = document.getElementById('term-cmd');
+    var oldPlaceholder = input ? input.placeholder : '';
+    if (input) {
+      input.value = defaultVal || '';
+      input.placeholder = '';
+      input.focus();
+      input.select();
+    }
+    TerminalState.pendingPrompt = function(raw) {
+      var finalVal = (raw || '').trim() || defaultVal || '';
+      if (XTERM) {
+        XTERM.write(ANSI.white + finalVal + ANSI.reset + '\r\n');
+      }
+      if (input) input.placeholder = oldPlaceholder;
+      resolve(finalVal);
+    };
+  });
+}
+
+// Prompt the user to pick one of several options. Renders the options
+// as styled lines in xterm, uses arrow keys captured on the bottom
+// input to move a ▸ marker, and resolves when the user presses Enter.
+// Redraws are done via ANSI cursor-up + clear-line sequences, so the
+// option block updates in place instead of scrolling.
+function xtermPromptSelect(promptStr, options, defaultIdx) {
+  return new Promise(function(resolve) {
+    var selected = defaultIdx || 0;
+    var n = options.length;
+
+    if (XTERM) {
+      XTERM.writeln(ANSI.yellow + promptStr + ANSI.reset);
+    }
+
+    function renderLine(idx, isSelected) {
+      var marker = isSelected ? (ANSI.green + '▸ ' + ANSI.reset) : '  ';
+      var style = isSelected ? (ANSI.green + ANSI.bold) : ANSI.grey;
+      return marker + style + options[idx].label + ANSI.reset;
+    }
+
+    if (XTERM) {
+      options.forEach(function(opt, idx) {
+        XTERM.writeln(renderLine(idx, idx === selected));
+      });
+    }
+
+    function redraw() {
+      if (!XTERM) return;
+      // Move cursor up n lines, then rewrite each option in place.
+      XTERM.write('\x1b[' + n + 'A');
+      for (var i = 0; i < n; i++) {
+        XTERM.write('\r\x1b[2K' + renderLine(i, i === selected) + '\r\n');
+      }
+    }
+
+    var input = document.getElementById('term-cmd');
+    var oldPlaceholder = input ? input.placeholder : '';
+    if (input) {
+      input.value = '';
+      input.placeholder = 'use ↑↓ to select, enter to confirm';
+      input.focus();
+    }
+
+    TerminalState.pendingArrowHandler = function(direction) {
+      if (direction === 'up') selected = Math.max(0, selected - 1);
+      else if (direction === 'down') selected = Math.min(n - 1, selected + 1);
+      redraw();
+    };
+    TerminalState.pendingPrompt = function() {
+      TerminalState.pendingArrowHandler = null;
+      if (input) input.placeholder = oldPlaceholder;
+      if (XTERM) {
+        XTERM.writeln(ANSI.grey + '  selected: ' + options[selected].label + ANSI.reset);
+      }
+      resolve(options[selected].value);
+    };
+  });
+}
 
 function startOnboarding() {
-  var output = document.getElementById('crt-output');
-  output.textContent = '';
+  // The wizard drives the same xterm that command mode uses. xterm
+  // must already be mounted by loadComputer() before this runs.
+  if (!XTERM) termInitXterm();
 
   var config = { name: '', model: 'claude-sonnet-4-6', max_concurrent: 4, max_iterations: 3 };
 
-  function addLine(text, className) {
-    return new Promise(function(resolve) {
-      var line = buildEl('div', { className: 'term-line' + (className ? ' ' + className : '') });
-      output.appendChild(line);
-      typeText(line, text, 0, resolve);
-      output.scrollTop = output.scrollHeight;
-    });
-  }
-
-  function addLineInstant(text, className) {
-    var line = buildEl('div', { className: 'term-line' + (className ? ' ' + className : '') }, text);
-    output.appendChild(line);
-    output.scrollTop = output.scrollHeight;
-  }
-
-  function typeText(el, text, idx, resolve) {
-    if (idx < text.length) {
-      el.textContent = text.substring(0, idx + 1);
-      setTimeout(function() { typeText(el, text, idx + 1, resolve); }, 15);
-    } else if (resolve) resolve();
-  }
-
-  function waitFor(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
-
-  function promptText(promptStr, defaultVal) {
-    return new Promise(function(resolve) {
-      var wrap = buildEl('div', { className: 'term-input-wrap' });
-      var prompt = buildEl('span', { className: 'term-prompt' }, promptStr + ' ');
-      var input = buildEl('input', { className: 'term-input', type: 'text', value: defaultVal || '' });
-      wrap.appendChild(prompt);
-      wrap.appendChild(input);
-      output.appendChild(wrap);
-      output.scrollTop = output.scrollHeight;
-      input.focus();
-      input.addEventListener('keydown', function(evt) {
-        if (evt.key === 'Enter') {
-          var val = input.value.trim() || defaultVal || '';
-          input.disabled = true;
-          input.style.color = '#66ffbb';
-          resolve(val);
-        }
-      });
-    });
-  }
-
-  function promptSelect(promptStr, options, defaultIdx) {
-    return new Promise(function(resolve) {
-      addLineInstant(promptStr, 'bright');
-      var selected = defaultIdx || 0;
-      var optEls = [];
-
-      options.forEach(function(opt, idx) {
-        var optEl = buildEl('div', { className: 'term-option' + (idx === selected ? ' selected' : '') });
-        optEl.textContent = opt.label;
-        optEl.addEventListener('click', function() { cleanup(); resolve(opt.value); });
-        optEls.push(optEl);
-        output.appendChild(optEl);
-      });
-
-      function updateSelection() {
-        optEls.forEach(function(el, idx) { el.classList.toggle('selected', idx === selected); });
-        output.scrollTop = output.scrollHeight;
-      }
-
-      function handleKey(evt) {
-        if (evt.key === 'ArrowUp') { evt.preventDefault(); selected = Math.max(0, selected - 1); updateSelection(); }
-        else if (evt.key === 'ArrowDown') { evt.preventDefault(); selected = Math.min(options.length - 1, selected + 1); updateSelection(); }
-        else if (evt.key === 'Enter') { evt.preventDefault(); cleanup(); resolve(options[selected].value); }
-      }
-
-      function cleanup() {
-        document.removeEventListener('keydown', handleKey);
-        optEls.forEach(function(el) { el.style.pointerEvents = 'none'; });
-      }
-
-      document.addEventListener('keydown', handleKey);
-      output.scrollTop = output.scrollHeight;
-    });
-  }
-
   (async function runOnboarding() {
-    await addLine('PETRI RESEARCH OS $petri_version', 'bright');
-    await waitFor(300);
-    await addLine('Initializing subsystems...', 'dim');
-    await waitFor(200);
-    addLineInstant('[OK] Event log engine', 'dim');
-    await waitFor(150);
-    addLineInstant('[OK] Queue state machine (13 states)', 'dim');
-    await waitFor(150);
-    addLineInstant('[OK] Agent roster (13 agents)', 'dim');
-    await waitFor(150);
-    addLineInstant('[OK] Convergence checker', 'dim');
-    await waitFor(150);
-    addLineInstant('[OK] Colony graph engine', 'dim');
-    await waitFor(400);
-    addLineInstant('');
-    await addLine('No petri dish detected. Starting initialization...', 'bright');
-    addLineInstant('');
-    await addLine('$ petri init', 'bright');
-    addLineInstant('');
+    await xtermTypeLine('PETRI RESEARCH OS $petri_version', 'green');
+    await xtermSleep(300);
+    await xtermTypeLine('Initializing subsystems...', 'grey');
+    await xtermSleep(200);
+    xtermInstantLine('[OK] Event log engine', 'grey');
+    await xtermSleep(150);
+    xtermInstantLine('[OK] Queue state machine (13 states)', 'grey');
+    await xtermSleep(150);
+    xtermInstantLine('[OK] Agent roster (13 agents)', 'grey');
+    await xtermSleep(150);
+    xtermInstantLine('[OK] Convergence checker', 'grey');
+    await xtermSleep(150);
+    xtermInstantLine('[OK] Colony graph engine', 'grey');
+    await xtermSleep(400);
+    xtermInstantLine('');
+    await xtermTypeLine('No petri dish detected. Starting initialization...', 'green');
+    xtermInstantLine('');
+    await xtermTypeLine('$ petri init', 'yellow');
+    xtermInstantLine('');
 
-    config.name = await promptText('Dish name [my-research]:', 'my-research');
-    addLineInstant('');
+    config.name = await xtermPromptText('Dish name [my-research]:', 'my-research');
+    xtermInstantLine('');
 
-    config.model = await promptSelect('Inference model:', [
+    config.model = await xtermPromptSelect('Inference model:', [
       { label: 'claude-sonnet-4-6  (fast, cost-effective)', value: 'claude-sonnet-4-6' },
       { label: 'claude-opus-4-6  (most capable, higher cost)', value: 'claude-opus-4-6' },
     ], 0);
-    addLineInstant('  Selected: ' + config.model, 'dim');
-    addLineInstant('');
+    xtermInstantLine('');
 
-    var concStr = await promptText('Max concurrent agents [4]:', '4');
+    var concStr = await xtermPromptText('Max concurrent agents [4]:', '4');
     config.max_concurrent = parseInt(concStr, 10) || 4;
-    addLineInstant('');
+    xtermInstantLine('');
 
-    var iterStr = await promptText('Max iterations per cycle [3]:', '3');
+    var iterStr = await xtermPromptText('Max iterations per cycle [3]:', '3');
     config.max_iterations = parseInt(iterStr, 10) || 3;
-    addLineInstant('');
+    xtermInstantLine('');
 
-    await addLine('Initializing petri dish...', 'bright');
+    await xtermTypeLine('Initializing petri dish...', 'green');
 
     try {
       var initRes = await fetch(API + '/api/init', {
@@ -2766,107 +2797,34 @@ function startOnboarding() {
       });
       var initData = await initRes.json();
       if (initData.status === 'ok' || initData.status === 'already_exists') {
-        addLineInstant('[OK] Dish "' + config.name + '" initialized', 'bright');
+        xtermInstantLine('[OK] Dish "' + config.name + '" initialized', 'green');
       } else {
-        addLineInstant('[ERROR] ' + JSON.stringify(initData), 'error');
+        xtermInstantLine('[ERROR] ' + JSON.stringify(initData), 'red');
       }
     } catch (err) {
-      addLineInstant('[ERROR] Init failed: ' + err.message, 'error');
+      xtermInstantLine('[ERROR] Init failed: ' + err.message, 'red');
     }
 
-    addLineInstant('');
-    await waitFor(500);
+    xtermInstantLine('');
+    await xtermSleep(400);
 
     var starterClaim = '$starter_claim';
-    await addLine('$ petri seed "' + starterClaim + '"', 'bright');
-    addLineInstant('');
-    await addLine('Decomposing claim into colony structure...', 'dim');
-    await addLine('This may take a moment (LLM inference)...', 'dim');
-    addLineInstant('');
+    await xtermTypeLine('Seeding starter colony...', 'grey');
+    xtermInstantLine('');
+    await xtermSleep(300);
 
-    // Stream the decomposition via SSE so the user sees live progress
-    // instead of a frozen spinner. /api/seed/stream pipes the
-    // decomposer's on_progress and on_cell_created callbacks through
-    // as 'progress' and 'cell_created' SSE events, then a final 'done'
-    // (or 'error') event once the colony has been serialized.
-    await new Promise(function(resolve) {
-      var url = API + '/api/seed/stream?claim=' + encodeURIComponent(starterClaim);
-      var source = new EventSource(url);
-
-      // The decomposer's on_progress fires with incremental LLM text
-      // chunks. To avoid spamming a new line per token we buffer chunks
-      // into a single "live" line and flush on newlines / bursts.
-      var liveLine = null;
-      function appendProgress(text) {
-        if (!text) return;
-        if (liveLine === null) {
-          liveLine = buildEl('div', { className: 'term-line dim' });
-          document.getElementById('crt-output').appendChild(liveLine);
-        }
-        // Truncate a single line to ~300 chars so long paragraphs
-        // don't blow out the CRT width.
-        var next = (liveLine.textContent + text).slice(-300);
-        liveLine.textContent = next;
-        var out = document.getElementById('crt-output');
-        out.scrollTop = out.scrollHeight;
-        // If the chunk ended a paragraph, seal the current line so
-        // the next progress event starts fresh.
-        if (/\n\s*$/.test(text)) liveLine = null;
-      }
-
-      source.addEventListener('progress', function(evt) {
-        try { appendProgress(JSON.parse(evt.data).text || ''); } catch (e) {}
-      });
-
-      source.addEventListener('cell_created', function(evt) {
-        try {
-          var cell = JSON.parse(evt.data);
-          // Seal any in-progress live line so cells list cleanly.
-          liveLine = null;
-          var prefix = '[+] L' + cell.level + ' ';
-          var claim = (cell.claim_text || '').substring(0, 72);
-          addLineInstant(prefix + claim, 'bright');
-        } catch (e) {}
-      });
-
-      source.addEventListener('done', function(evt) {
-        try {
-          var payload = JSON.parse(evt.data);
-          liveLine = null;
-          addLineInstant('');
-          addLineInstant('[OK] Colony "' + payload.colony_name + '" created with ' + payload.cell_count + ' cells', 'bright');
-        } catch (e) {
-          addLineInstant('[OK] Colony created', 'bright');
-        }
-        source.close();
-        resolve();
-      });
-
-      source.addEventListener('error', function(evt) {
-        liveLine = null;
-        // SSE 'error' comes both from the server (via yield event: error)
-        // and from the browser on connection drop. Only the former has
-        // JSON data. If the stream closed before 'done', surface it.
-        if (evt && evt.data) {
-          try {
-            var errPayload = JSON.parse(evt.data);
-            addLineInstant('[ERROR] ' + (errPayload.message || 'seed failed'), 'error');
-          } catch (e) {
-            addLineInstant('[ERROR] seed failed', 'error');
-          }
-        } else if (source.readyState === EventSource.CLOSED) {
-          addLineInstant('[WARN] Seed stream closed unexpectedly. You can seed later via CLI.', 'error');
-        }
-        source.close();
-        resolve();
-      });
-    });
-
-    addLineInstant('');
-    await waitFor(800);
-    await addLine('Initialization complete. Switching to command mode.', 'bright');
-    await waitFor(800);
+    // Transition into command mode. termEnterCommandMode() is now a
+    // tiny no-op-ish state flip that writes the command-mode banner —
+    // the user stays inside the same xterm surface the wizard was
+    // already driving, so the handoff is invisible.
     termEnterCommandMode();
+
+    // Kick off seed as a real subprocess via the PTY path that also
+    // powers `petri grow` in command mode.
+    setTimeout(function() {
+      var escapedClaim = starterClaim.replace(/"/g, '\\"');
+      termRun('petri seed "' + escapedClaim + '"');
+    }, 100);
   })();
 }
 
@@ -2880,6 +2838,11 @@ var TerminalState = {
   historyIndex: -1,
   detachNext: false,
   inputHandlerBound: false,
+  // Wizard dispatch slots — set by xtermPromptText / xtermPromptSelect
+  // so the shared bottom input can hand user input back to the
+  // currently-active wizard prompt instead of calling termRun.
+  pendingPrompt: null,
+  pendingArrowHandler: null,
 };
 
 var XTERM = null;
@@ -2982,28 +2945,10 @@ function xtermWriteRaw(chunkBytes) {
 }
 
 function xtermWriteLine(text, color) {
-  if (!XTERM) {
-    termAppend('stdout', text);
-    return;
-  }
+  if (!XTERM) return;
   var prefix = color ? ANSI[color] : '';
   var suffix = color ? ANSI.reset : '';
   XTERM.writeln(prefix + text + suffix);
-}
-
-function termOutput() { return document.getElementById('crt-output'); }
-
-function termAppend(kind, text) {
-  // Before command mode, and for the onboarding wizard, output still
-  // flows into the static #crt-output div as styled HTML lines.
-  var output = termOutput();
-  if (!output) return;
-  var line = buildEl('div', { className: 'term-line ' + kind });
-  line.textContent = text;
-  output.appendChild(line);
-  var nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 120;
-  if (nearBottom) output.scrollTop = output.scrollHeight;
-  while (output.children.length > 2000) output.removeChild(output.firstChild);
 }
 
 function termSetRunning(running) {
@@ -3037,15 +2982,34 @@ function termBindInputHandlers() {
   TerminalState.inputHandlerBound = true;
 
   input.addEventListener('keydown', function(evt) {
+    // Wizard prompt dispatch: when the onboarding wizard has
+    // registered a pendingPrompt callback, Enter hands the current
+    // input value off to it and clears. Arrow keys dispatch to the
+    // pendingArrowHandler (for select-style menus). This keeps the
+    // wizard and command mode sharing one input surface.
     if (evt.key === 'Enter') {
       evt.preventDefault();
-      var raw = input.value.trim();
-      if (raw.length === 0) return;
-      TerminalState.history.push(raw);
-      TerminalState.historyIndex = -1;
+      var raw = input.value;
       input.value = '';
-      termRun(raw);
-    } else if (evt.key === 'ArrowUp') {
+      if (TerminalState.pendingPrompt) {
+        var cb = TerminalState.pendingPrompt;
+        TerminalState.pendingPrompt = null;
+        cb(raw);
+        return;
+      }
+      var trimmed = raw.trim();
+      if (trimmed.length === 0) return;
+      TerminalState.history.push(trimmed);
+      TerminalState.historyIndex = -1;
+      termRun(trimmed);
+      return;
+    }
+    if (evt.key === 'ArrowUp') {
+      if (TerminalState.pendingArrowHandler) {
+        evt.preventDefault();
+        TerminalState.pendingArrowHandler('up');
+        return;
+      }
       if (TerminalState.history.length === 0) return;
       evt.preventDefault();
       if (TerminalState.historyIndex === -1) {
@@ -3054,7 +3018,14 @@ function termBindInputHandlers() {
         TerminalState.historyIndex--;
       }
       input.value = TerminalState.history[TerminalState.historyIndex];
-    } else if (evt.key === 'ArrowDown') {
+      return;
+    }
+    if (evt.key === 'ArrowDown') {
+      if (TerminalState.pendingArrowHandler) {
+        evt.preventDefault();
+        TerminalState.pendingArrowHandler('down');
+        return;
+      }
       if (TerminalState.historyIndex === -1) return;
       evt.preventDefault();
       if (TerminalState.historyIndex < TerminalState.history.length - 1) {
@@ -3064,7 +3035,9 @@ function termBindInputHandlers() {
         TerminalState.historyIndex = -1;
         input.value = '';
       }
-    } else if ((evt.ctrlKey || evt.metaKey) && evt.key === 'c' && TerminalState.mode === 'running') {
+      return;
+    }
+    if ((evt.ctrlKey || evt.metaKey) && evt.key === 'c' && TerminalState.mode === 'running') {
       evt.preventDefault();
       termStop();
     }
@@ -3078,41 +3051,22 @@ function termBindInputHandlers() {
 }
 
 function termEnterCommandMode() {
+  // Unified-surface version: xterm is already mounted by loadComputer()
+  // at page-load time, and the command input row is always visible.
+  // This function's only job now is to flip the mode flag and write
+  // the command-mode banner into the same xterm the wizard was
+  // driving. There is no layer switch.
   TerminalState.mode = 'idle';
-  var frame = document.getElementById('crt-frame');
-  var inputRow = document.getElementById('crt-input-row');
-  var output = document.getElementById('crt-output');
-  if (frame) frame.classList.add('has-input');
-  if (inputRow) inputRow.style.display = 'flex';
-
-  // Hide the static onboarding output and bring xterm.js up.
-  if (output) output.style.display = 'none';
-  var term = termInitXterm();
-
-  if (term) {
-    // Boot banner inside xterm so it renders with the same font/colors
-    // that command output will use.
-    term.writeln('');
-    term.writeln(ANSI.green + ANSI.bold + '─── PETRI COMPUTER · command mode ───' + ANSI.reset);
-    term.writeln(ANSI.grey + 'type full commands:  ' + ANSI.yellow + 'petri check' + ANSI.grey +
-                 '   ·   ' + ANSI.yellow + 'petri seed "your claim"' + ANSI.reset);
-    term.writeln(ANSI.grey + 'subcommands: ' + PETRI_SUBCOMMANDS.join(' ') + ANSI.reset);
-    term.writeln(ANSI.grey + 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right' + ANSI.reset);
-    term.writeln('');
-    // Refit once the terminal is actually mounted and sized.
+  if (XTERM) {
+    XTERM.writeln('');
+    XTERM.writeln(ANSI.green + ANSI.bold + '─── PETRI COMPUTER · command mode ───' + ANSI.reset);
+    XTERM.writeln(ANSI.grey + 'type full commands:  ' + ANSI.yellow + 'petri check' + ANSI.grey +
+                  '   ·   ' + ANSI.yellow + 'petri seed "your claim"' + ANSI.reset);
+    XTERM.writeln(ANSI.grey + 'subcommands: ' + PETRI_SUBCOMMANDS.join(' ') + ANSI.reset);
+    XTERM.writeln(ANSI.grey + 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right' + ANSI.reset);
+    XTERM.writeln('');
     if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
-  } else {
-    // xterm.js failed to load — keep using the static HTML fallback.
-    if (output) output.style.display = 'block';
-    termAppend('system', '');
-    termAppend('error', '[xterm.js failed to load — falling back to plain text streaming]');
-    termAppend('bright', '─── command mode ───');
-    termAppend('dim', 'type full commands like:  petri check   ·   petri seed "your claim"');
-    termAppend('dim', 'subcommands: ' + PETRI_SUBCOMMANDS.join(' '));
-    termAppend('dim', 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right');
-    termAppend('system', '');
   }
-
   termBindInputHandlers();
   setTimeout(function() {
     var input = document.getElementById('term-cmd');
@@ -3120,18 +3074,16 @@ function termEnterCommandMode() {
   }, 30);
 }
 
-// Write a line to whichever output layer is active — xterm if mounted,
-// otherwise the static #crt-output fallback.
+// Write a line to xterm with a semantic color class. All output flows
+// here now — there is no DOM fallback because xterm is the only
+// display surface.
 function termEcho(kind, text) {
-  if (XTERM) {
-    var color = {
-      cmd: 'yellow', stdout: 'white', stderr: 'red',
-      system: 'cyan', dim: 'grey', bright: 'green', event: 'grey',
-    }[kind] || 'white';
-    xtermWriteLine(text, color);
-  } else {
-    termAppend(kind, text);
-  }
+  if (!XTERM) return;
+  var color = {
+    cmd: 'yellow', stdout: 'white', stderr: 'red',
+    system: 'cyan', dim: 'grey', bright: 'green', event: 'grey',
+  }[kind] || 'white';
+  xtermWriteLine(text, color);
 }
 
 function termRun(raw) {
@@ -3194,25 +3146,15 @@ function termStreamOutput(streamId) {
   var source = new EventSource(API + '/api/proc/stream/' + encodeURIComponent(streamId));
   TerminalState.eventSource = source;
 
-  // The backend wraps every PTY chunk as {"line": "<base64>"}. Decode into
-  // raw bytes and hand them straight to xterm.write — escape sequences and
-  // carriage-return animations pass through untouched.
+  // The backend wraps every PTY chunk as {"line": "<base64>"}. Decode
+  // into raw bytes and hand them straight to xterm.write so ANSI
+  // escapes, carriage-return animations, and the multi-spinner all
+  // pass through untouched.
   function onChunk(evt) {
     var payload;
     try { payload = JSON.parse(evt.data); } catch (e) { return; }
     var raw = payload.line || '';
-    if (XTERM) {
-      xtermWriteRaw(termDecodeB64Chunk(raw));
-    } else {
-      // Fallback path: no xterm, so decode + strip ANSI for plain display.
-      try {
-        var bytes = termDecodeB64Chunk(raw);
-        var text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-        text.split('\n').forEach(function(line) {
-          if (line.length) termAppend('stdout', line.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''));
-        });
-      } catch (e) {}
-    }
+    if (XTERM) xtermWriteRaw(termDecodeB64Chunk(raw));
   }
   source.addEventListener('stdout', onChunk);
   source.addEventListener('stderr', onChunk);
@@ -3227,10 +3169,6 @@ function termStreamOutput(streamId) {
     if (XTERM) {
       var color = code === 0 ? ANSI.green : ANSI.red;
       XTERM.writeln('\r\n' + color + '[done ' + code + ']' + ANSI.reset);
-    } else {
-      var line = buildEl('div', { className: 'term-line done' + (code === 0 ? '' : ' fail') });
-      line.textContent = '[done ' + code + ']';
-      termOutput().appendChild(line);
     }
     source.close();
     TerminalState.eventSource = null;
@@ -3253,11 +3191,15 @@ function termStop() {
 }
 
 function loadComputer() {
-  // Re-entry to the Computer tab: if we were already in command mode,
-  // just refocus the input and refit xterm to the (possibly changed)
-  // viewport. Otherwise check for dishes and decide whether to run
-  // onboarding or drop straight into command mode.
-  if (TerminalState.mode === 'idle' || TerminalState.mode === 'running') {
+  // xterm is the only display surface — mount it lazily on first
+  // entry to the Computer tab so the onboarding wizard and command
+  // mode both share the exact same terminal instance.
+  if (!XTERM) termInitXterm();
+  termBindInputHandlers();
+
+  // Re-entry: if we're already in a live mode, just refocus + refit.
+  // The wizard already wrote its history to xterm; don't restart it.
+  if (TerminalState.mode === 'idle' || TerminalState.mode === 'running' || TerminalState.mode === 'onboarding') {
     setTimeout(function() {
       var input = document.getElementById('term-cmd');
       if (input) input.focus();
@@ -3265,21 +3207,9 @@ function loadComputer() {
     }, 30);
     return;
   }
-  if (TerminalState.mode === 'onboarding') {
-    // Wizard still running; don't restart.
-    return;
-  }
 
-  // Fresh entry — make sure we're showing the onboarding layer, not
-  // xterm (which only comes up after we know we're in command mode).
-  var output = termOutput();
-  if (output) {
-    output.style.display = 'block';
-    output.textContent = '';
-  }
-  var xtermMount = document.getElementById('crt-xterm');
-  if (xtermMount) xtermMount.style.display = 'none';
-
+  // Fresh entry — decide whether to run the wizard or drop straight
+  // into command mode based on whether any dishes exist.
   fetch(API + '/api/dishes').then(function(res) { return res.json(); }).then(function(dishes) {
     if (Array.isArray(dishes) && dishes.length > 0) {
       termEnterCommandMode();
@@ -3293,7 +3223,9 @@ function loadComputer() {
     TerminalState.mode = 'onboarding';
     startOnboarding();
   }).catch(function(err) {
-    termAppend('error', 'Could not reach /api/dishes: ' + err.message);
+    if (XTERM) {
+      XTERM.writeln(ANSI.red + 'Could not reach /api/dishes: ' + err.message + ANSI.reset);
+    }
     termEnterCommandMode();
   });
 }

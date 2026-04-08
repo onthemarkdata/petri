@@ -36,7 +36,7 @@ uv run pytest tests/unit/test_queue.py::TestStateTransitions
 petri init              # Initialize .petri/ directory
 petri seed <claim>      # Decompose a claim into a colony DAG
 petri check             # Show cell statuses
-petri grow --all        # Run validation pipeline
+petri grow              # Run validation pipeline (all eligible cells)
 petri stop              # Gracefully halt processing
 petri feed <source>     # Feed new evidence
 petri graph             # Visualize colony structure

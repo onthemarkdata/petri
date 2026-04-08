@@ -99,8 +99,8 @@ petri check
 # → Shows a table of all cells with status PENDING
 
 # 4. Grow cells through the validation pipeline
-petri grow --all
-# → Processes cells bottom-up: Socratic → Research → Critique → Red Team → Evaluation
+petri grow
+# → Processes every eligible cell bottom-up: Socratic → Research → Critique → Red Team → Evaluation
 
 # 5. Feed new evidence (requires cells that have completed validation)
 petri feed https://arxiv.org/abs/2026.12345
@@ -130,7 +130,7 @@ petri --help
 | `petri init` | Create `.petri/` directory with defaults | `--name` |
 | `petri seed <claim>` | Decompose a claim into a colony DAG | `--no-questions`, `--colony` |
 | `petri check` | Show cell statuses across colonies | `--colony`, `--cell`, `--json` |
-| `petri grow` | Run cells through the validation pipeline | `--all`, `--colony`, `--dry-run`, `--max-concurrent` |
+| `petri grow` | Run cells through the validation pipeline (defaults to all eligible) | `--cell`, `--colony`, `--dry-run`, `--max-concurrent` |
 | `petri feed <source>` | Ingest new evidence and flag affected cells | `--colony`, `--auto-reopen` |
 | `petri graph` | Render the colony DAG as text tree or DOT | `--format`, `--colony` |
 | `petri scan` | Run the contradiction scanner | `--fix`, `--loop` |
@@ -143,13 +143,13 @@ petri --help
 
 1. `petri init` -- one-time setup
 2. `petri seed "your claim"` -- decompose into a colony
-3. `petri grow --all` -- validate bottom-up (leaf cells first, then parents)
+3. `petri grow` -- validate bottom-up (leaf cells first, then parents)
 4. `petri check` -- inspect progress
 5. `petri feed <url>` -- add evidence, re-open affected cells
-6. `petri grow --all` -- re-validate impacted cells
+6. `petri grow` -- re-validate impacted cells
 7. `petri graph` -- view the final colony structure
 
-> **Note:** `petri grow --all` processes all currently eligible cells. For multi-level colonies, run it multiple times until all levels are resolved — leaf cells validate first, unlocking their parents.
+> **Note:** `petri grow` with no flags processes every currently eligible cell. For multi-level colonies, run it multiple times until all levels are resolved — leaf cells validate first, unlocking their parents. Scope to a subset with `--cell <id>` (repeatable) or `--colony <name>`.
 
 ## How It Works
 
