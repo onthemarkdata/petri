@@ -113,6 +113,15 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def launch(
         port: int = typer.Option(8090, "--port", help="Dashboard port"),
+        host: str = typer.Option(
+            "127.0.0.1",
+            "--host",
+            help=(
+                "Bind address. Defaults to 127.0.0.1 because the Computer tab "
+                "can run arbitrary petri commands. Pass --host 0.0.0.0 to "
+                "expose the dashboard on the LAN (opt-in only)."
+            ),
+        ),
     ) -> None:
         """Launch the Petri Lab dashboard in your browser."""
         import threading
@@ -135,15 +144,23 @@ def register(app: typer.Typer) -> None:
             count = rebuild_sqlite(petri_dir, db_path)
             typer.echo(f"Indexed {count} events.")
         else:
-            # No dish yet -- frontend will show onboarding.
+            # No dish yet -- the Computer tab will run the onboarding wizard.
             # Ensure the db directory + schema exist so SSE works.
             petri_dir.mkdir(parents=True, exist_ok=True)
             init_db(db_path)
 
         dashboard_app = create_app(petri_dir, db_path)
 
+        # The browser always opens localhost even when we're also bound on
+        # a wider interface, because localhost is always reachable from the
+        # same machine and avoids surprising redirects to LAN addresses.
         url = f"http://localhost:{port}"
-        typer.echo(f"Launching Petri Lab at {url}")
+        typer.echo(f"Launching Petri Lab at {url}  (bound on {host}:{port})")
+        if host == "0.0.0.0":
+            typer.echo(
+                "WARNING: --host 0.0.0.0 exposes the Computer tab's command "
+                "runner to anything that can reach this machine on the LAN."
+            )
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
 
-        uvicorn.run(dashboard_app, host="0.0.0.0", port=port, log_level="warning")
+        uvicorn.run(dashboard_app, host=host, port=port, log_level="warning")

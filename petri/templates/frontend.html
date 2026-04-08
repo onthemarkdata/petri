@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Petri Lab</title>
+<!-- xterm.js: full VT100 emulator for the Computer tab so rich's live
+     multi-spinner, ANSI colors, and cursor control all render correctly. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <style>
 /* ── Reset & Base ──────────────────────────────────────────────────── */
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -132,6 +137,25 @@ body {
 }
 /* When the command input row is present the screen shrinks to leave room. */
 .crt-frame.has-input .crt-screen { bottom: 54px; }
+.crt-frame.has-input .crt-xterm  { bottom: 54px; }
+
+/* xterm.js mount — fills the screen area when command mode is active.
+   Positioned absolute inside .crt-frame just like .crt-screen so the
+   scanlines + glow overlays still float on top. */
+.crt-xterm {
+  position: absolute;
+  top: 12px; left: 12px; right: 12px; bottom: 12px;
+  background: #000800;
+  border-radius: 10px;
+  padding: 8px 10px;
+  z-index: 1;
+  overflow: hidden;
+}
+.crt-xterm .xterm { height: 100%; }
+.crt-xterm .xterm .xterm-viewport { background: transparent !important; }
+.crt-xterm .xterm .xterm-screen { background: transparent !important; }
+.crt-xterm .xterm-viewport::-webkit-scrollbar { width: 4px; }
+.crt-xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--green-dark); border-radius: 2px; }
 .crt-screen::-webkit-scrollbar { width: 4px; }
 .crt-screen::-webkit-scrollbar-track { background: transparent; }
 .crt-screen::-webkit-scrollbar-thumb { background: var(--green-dark); border-radius: 2px; }
@@ -699,6 +723,7 @@ body {
   </div>
   <div class="crt-frame" id="crt-frame">
     <div class="crt-screen" id="crt-output"></div>
+    <div class="crt-xterm" id="crt-xterm" style="display:none"></div>
     <div class="crt-input-row" id="crt-input-row" style="display:none">
       <span class="crt-prompt">PETRI $</span>
       <input type="text" class="crt-cmd" id="term-cmd"
@@ -1022,7 +1047,12 @@ function connectSSE() {
     // Interleave live events as dim lines in the Computer terminal when
     // it's idle — same vibe as a background `tail -f` next to your shell.
     if (State.currentView === 'computer' && TerminalState.mode === 'idle') {
-      termAppend('event', '[' + (data.type || '?') + '] ' + (data.cell_id || '') + ' · ' + (data.agent || ''));
+      var line = '[' + (data.type || '?') + '] ' + (data.cell_id || '') + ' · ' + (data.agent || '');
+      if (XTERM) {
+        XTERM.writeln(ANSI.grey + ANSI.dim + line + ANSI.reset);
+      } else {
+        termAppend('event', line);
+      }
     }
   });
 
@@ -1994,14 +2024,120 @@ var TerminalState = {
   inputHandlerBound: false,
 };
 
+var XTERM = null;
+var XTERM_FIT = null;
+var XTERM_DECODER = null;
+
 var PETRI_SUBCOMMANDS = [
   'init', 'seed', 'grow', 'check', 'feed', 'stop',
   'scan', 'graph', 'connect', 'inspect', 'launch',
 ];
 
+// ANSI SGR color helpers for system/banner/event lines written to xterm.
+var ANSI = {
+  reset:    '\x1b[0m',
+  dim:      '\x1b[2m',
+  bold:     '\x1b[1m',
+  red:      '\x1b[91m',
+  green:    '\x1b[92m',
+  yellow:   '\x1b[93m',
+  blue:     '\x1b[94m',
+  magenta:  '\x1b[95m',
+  cyan:     '\x1b[96m',
+  white:    '\x1b[97m',
+  grey:     '\x1b[90m',
+};
+
+function termInitXterm() {
+  if (XTERM) return XTERM;
+  if (typeof Terminal === 'undefined') {
+    return null;  // xterm.js CDN failed to load — caller falls back
+  }
+  var mount = document.getElementById('crt-xterm');
+  if (!mount) return null;
+  mount.style.display = 'block';
+
+  XTERM = new Terminal({
+    cursorBlink: true,
+    fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+    fontSize: 13,
+    lineHeight: 1.2,
+    scrollback: 5000,
+    convertEol: true,
+    theme: {
+      background: '#000800',
+      foreground: '#00ff88',
+      cursor: '#00ff88',
+      cursorAccent: '#000800',
+      selectionBackground: 'rgba(0, 255, 136, 0.35)',
+      black:         '#000800',
+      red:           '#ff6b6b',
+      green:         '#00ff88',
+      yellow:        '#ffcc00',
+      blue:          '#00ccff',
+      magenta:       '#ff3399',
+      cyan:          '#66ffbb',
+      white:         '#e0f0ff',
+      brightBlack:   '#116644',
+      brightRed:     '#ff9999',
+      brightGreen:   '#66ffbb',
+      brightYellow:  '#ffee66',
+      brightBlue:    '#66ccff',
+      brightMagenta: '#ff66bb',
+      brightCyan:    '#99ffdd',
+      brightWhite:   '#ffffff',
+    },
+  });
+
+  if (typeof FitAddon !== 'undefined') {
+    XTERM_FIT = new FitAddon.FitAddon();
+    XTERM.loadAddon(XTERM_FIT);
+  }
+  XTERM.open(mount);
+  if (XTERM_FIT) {
+    try { XTERM_FIT.fit(); } catch (e) {}
+  }
+  // Refit on viewport changes so the terminal grows with the window.
+  window.addEventListener('resize', function() {
+    if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
+  });
+
+  XTERM_DECODER = (typeof TextDecoder !== 'undefined')
+    ? new TextDecoder('utf-8', { fatal: false })
+    : null;
+
+  return XTERM;
+}
+
+// Decode a base64-encoded byte chunk from the backend PTY into a form
+// xterm.write can consume. Prefer Uint8Array so escape bytes survive
+// untouched; fall back to a string if TextDecoder is unavailable.
+function termDecodeB64Chunk(b64) {
+  var bin = atob(b64);
+  var arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+function xtermWriteRaw(chunkBytes) {
+  if (XTERM) XTERM.write(chunkBytes);
+}
+
+function xtermWriteLine(text, color) {
+  if (!XTERM) {
+    termAppend('stdout', text);
+    return;
+  }
+  var prefix = color ? ANSI[color] : '';
+  var suffix = color ? ANSI.reset : '';
+  XTERM.writeln(prefix + text + suffix);
+}
+
 function termOutput() { return document.getElementById('crt-output'); }
 
 function termAppend(kind, text) {
+  // Before command mode, and for the onboarding wizard, output still
+  // flows into the static #crt-output div as styled HTML lines.
   var output = termOutput();
   if (!output) return;
   var line = buildEl('div', { className: 'term-line ' + kind });
@@ -2087,15 +2223,37 @@ function termEnterCommandMode() {
   TerminalState.mode = 'idle';
   var frame = document.getElementById('crt-frame');
   var inputRow = document.getElementById('crt-input-row');
+  var output = document.getElementById('crt-output');
   if (frame) frame.classList.add('has-input');
   if (inputRow) inputRow.style.display = 'flex';
 
-  termAppend('system', '');
-  termAppend('bright', '─── command mode ───');
-  termAppend('dim', 'type full commands like:  petri check   ·   petri seed "your claim"');
-  termAppend('dim', 'subcommands: ' + PETRI_SUBCOMMANDS.join(' '));
-  termAppend('dim', 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right');
-  termAppend('system', '');
+  // Hide the static onboarding output and bring xterm.js up.
+  if (output) output.style.display = 'none';
+  var term = termInitXterm();
+
+  if (term) {
+    // Boot banner inside xterm so it renders with the same font/colors
+    // that command output will use.
+    term.writeln('');
+    term.writeln(ANSI.green + ANSI.bold + '─── PETRI COMPUTER · command mode ───' + ANSI.reset);
+    term.writeln(ANSI.grey + 'type full commands:  ' + ANSI.yellow + 'petri check' + ANSI.grey +
+                 '   ·   ' + ANSI.yellow + 'petri seed "your claim"' + ANSI.reset);
+    term.writeln(ANSI.grey + 'subcommands: ' + PETRI_SUBCOMMANDS.join(' ') + ANSI.reset);
+    term.writeln(ANSI.grey + 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right' + ANSI.reset);
+    term.writeln('');
+    // Refit once the terminal is actually mounted and sized.
+    if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
+  } else {
+    // xterm.js failed to load — keep using the static HTML fallback.
+    if (output) output.style.display = 'block';
+    termAppend('system', '');
+    termAppend('error', '[xterm.js failed to load — falling back to plain text streaming]');
+    termAppend('bright', '─── command mode ───');
+    termAppend('dim', 'type full commands like:  petri check   ·   petri seed "your claim"');
+    termAppend('dim', 'subcommands: ' + PETRI_SUBCOMMANDS.join(' '));
+    termAppend('dim', 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right');
+    termAppend('system', '');
+  }
 
   termBindInputHandlers();
   setTimeout(function() {
@@ -2104,9 +2262,23 @@ function termEnterCommandMode() {
   }, 30);
 }
 
+// Write a line to whichever output layer is active — xterm if mounted,
+// otherwise the static #crt-output fallback.
+function termEcho(kind, text) {
+  if (XTERM) {
+    var color = {
+      cmd: 'yellow', stdout: 'white', stderr: 'red',
+      system: 'cyan', dim: 'grey', bright: 'green', event: 'grey',
+    }[kind] || 'white';
+    xtermWriteLine(text, color);
+  } else {
+    termAppend(kind, text);
+  }
+}
+
 function termRun(raw) {
   if (TerminalState.mode === 'running') {
-    termAppend('system', '(a command is already running — press STOP first)');
+    termEcho('system', '(a command is already running — press STOP first)');
     return;
   }
   var tokens = termTokenize(raw);
@@ -2114,23 +2286,23 @@ function termRun(raw) {
 
   // Enforce `petri <subcommand> [args]` so the UX matches the real CLI.
   if (tokens[0] !== 'petri') {
-    termAppend('stderr', 'Commands must start with "petri". Try: petri ' + (tokens[0] || 'check'));
+    termEcho('stderr', 'Commands must start with "petri". Try: petri ' + (tokens[0] || 'check'));
     return;
   }
   if (tokens.length < 2) {
-    termAppend('stderr', 'Missing subcommand. Try: petri check');
+    termEcho('stderr', 'Missing subcommand. Try: petri check');
     return;
   }
   var command = tokens[1];
   var args = tokens.slice(2);
 
   if (PETRI_SUBCOMMANDS.indexOf(command) === -1) {
-    termAppend('stderr', 'Unknown petri subcommand: ' + command);
-    termAppend('dim', 'Allowed: ' + PETRI_SUBCOMMANDS.join(', '));
+    termEcho('stderr', 'Unknown petri subcommand: ' + command);
+    termEcho('dim', 'Allowed: ' + PETRI_SUBCOMMANDS.join(', '));
     return;
   }
 
-  termAppend('cmd', '$ ' + raw);
+  termEcho('cmd', '$ ' + raw);
   var detach = !!TerminalState.detachNext;
 
   fetch(API + '/api/proc/start', {
@@ -2141,21 +2313,21 @@ function termRun(raw) {
     return res.json().then(function(data) { return { ok: res.ok, data: data }; });
   }).then(function(wrap) {
     if (!wrap.ok) {
-      termAppend('stderr', 'start failed: ' + ((wrap.data && wrap.data.detail) || 'unknown'));
+      termEcho('stderr', 'start failed: ' + ((wrap.data && wrap.data.detail) || 'unknown'));
       return;
     }
     TerminalState.sessionId = wrap.data.stream_id;
     termSetRunning(true);
 
     if (detach) {
-      termAppend('dim', '[detached; running in background as PID ' + wrap.data.pid + ']');
+      termEcho('dim', '[detached; running in background as PID ' + wrap.data.pid + ']');
       TerminalState.sessionId = null;
       termSetRunning(false);
       return;
     }
     termStreamOutput(wrap.data.stream_id);
   }).catch(function(err) {
-    termAppend('stderr', 'start failed: ' + err.message);
+    termEcho('stderr', 'start failed: ' + err.message);
   });
 }
 
@@ -2164,14 +2336,44 @@ function termStreamOutput(streamId) {
   var source = new EventSource(API + '/api/proc/stream/' + encodeURIComponent(streamId));
   TerminalState.eventSource = source;
 
-  source.addEventListener('stdout', function(evt) { termAppend('stdout', JSON.parse(evt.data).line); });
-  source.addEventListener('stderr', function(evt) { termAppend('stderr', JSON.parse(evt.data).line); });
-  source.addEventListener('system', function(evt) { termAppend('system', JSON.parse(evt.data).line); });
+  // The backend wraps every PTY chunk as {"line": "<base64>"}. Decode into
+  // raw bytes and hand them straight to xterm.write — escape sequences and
+  // carriage-return animations pass through untouched.
+  function onChunk(evt) {
+    var payload;
+    try { payload = JSON.parse(evt.data); } catch (e) { return; }
+    var raw = payload.line || '';
+    if (XTERM) {
+      xtermWriteRaw(termDecodeB64Chunk(raw));
+    } else {
+      // Fallback path: no xterm, so decode + strip ANSI for plain display.
+      try {
+        var bytes = termDecodeB64Chunk(raw);
+        var text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+        text.split('\n').forEach(function(line) {
+          if (line.length) termAppend('stdout', line.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''));
+        });
+      } catch (e) {}
+    }
+  }
+  source.addEventListener('stdout', onChunk);
+  source.addEventListener('stderr', onChunk);
+  source.addEventListener('system', function(evt) {
+    try { termEcho('system', JSON.parse(evt.data).line); } catch (e) {}
+  });
+
   source.addEventListener('done', function(evt) {
-    var payload = JSON.parse(evt.data);
-    var line = buildEl('div', { className: 'term-line done' + (payload.code === 0 ? '' : ' fail') });
-    line.textContent = '[done ' + payload.code + ']';
-    termOutput().appendChild(line);
+    var payload = {};
+    try { payload = JSON.parse(evt.data); } catch (e) {}
+    var code = payload.code;
+    if (XTERM) {
+      var color = code === 0 ? ANSI.green : ANSI.red;
+      XTERM.writeln('\r\n' + color + '[done ' + code + ']' + ANSI.reset);
+    } else {
+      var line = buildEl('div', { className: 'term-line done' + (code === 0 ? '' : ' fail') });
+      line.textContent = '[done ' + code + ']';
+      termOutput().appendChild(line);
+    }
     source.close();
     TerminalState.eventSource = null;
     TerminalState.sessionId = null;
@@ -2194,12 +2396,14 @@ function termStop() {
 
 function loadComputer() {
   // Re-entry to the Computer tab: if we were already in command mode,
-  // just refocus the input. Otherwise check for dishes and decide whether
-  // to run onboarding or drop straight into command mode.
+  // just refocus the input and refit xterm to the (possibly changed)
+  // viewport. Otherwise check for dishes and decide whether to run
+  // onboarding or drop straight into command mode.
   if (TerminalState.mode === 'idle' || TerminalState.mode === 'running') {
     setTimeout(function() {
       var input = document.getElementById('term-cmd');
       if (input) input.focus();
+      if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
     }, 30);
     return;
   }
@@ -2208,14 +2412,24 @@ function loadComputer() {
     return;
   }
 
+  // Fresh entry — make sure we're showing the onboarding layer, not
+  // xterm (which only comes up after we know we're in command mode).
   var output = termOutput();
-  if (output) output.textContent = '';
+  if (output) {
+    output.style.display = 'block';
+    output.textContent = '';
+  }
+  var xtermMount = document.getElementById('crt-xterm');
+  if (xtermMount) xtermMount.style.display = 'none';
 
   fetch(API + '/api/dishes').then(function(res) { return res.json(); }).then(function(dishes) {
     if (Array.isArray(dishes) && dishes.length > 0) {
-      termAppend('bright', 'PETRI COMPUTER · localhost');
-      termAppend('dim', 'Dishes: ' + dishes.map(function(d) { return d.id; }).join(', '));
       termEnterCommandMode();
+      if (XTERM) {
+        XTERM.writeln(ANSI.green + 'PETRI COMPUTER · localhost' + ANSI.reset);
+        XTERM.writeln(ANSI.grey + 'Dishes: ' + dishes.map(function(d) { return d.id; }).join(', ') + ANSI.reset);
+        XTERM.writeln('');
+      }
       return;
     }
     TerminalState.mode = 'onboarding';

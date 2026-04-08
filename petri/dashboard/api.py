@@ -8,10 +8,18 @@ into SQLite automatically via ``incremental_sync``.
 from __future__ import annotations
 
 import asyncio
+import base64
+import errno
 import json
+import os
+import pty
+import signal
 import sqlite3
+import sys
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +33,101 @@ from petri.storage.event_log import rollup_to_combined
 from petri.storage.queue import list_queue, load_queue
 
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
+
+
+# ── Petri subprocess execution (for the Computer tab terminal) ───────────
+
+# The set of petri subcommands the Computer tab is allowed to spawn. Frozen
+# at import time; any unknown command is rejected at the endpoint boundary.
+_PETRI_SUBCOMMANDS = frozenset(
+    {
+        "init",
+        "seed",
+        "grow",
+        "check",
+        "feed",
+        "stop",
+        "scan",
+        "graph",
+        "connect",
+        "inspect",
+        "launch",
+    }
+)
+
+# Safety caps: see /api/proc/start for the specific defenses each one enforces.
+_MAX_LIVE_SESSIONS = 4
+_MAX_ARGS = 64
+_MAX_ARG_LEN = 4096
+
+# Local alias for asyncio's argv-list subprocess spawner. This is the
+# execFile-equivalent pattern (argv list, no shell interpretation) — the
+# rename is a local convention, not a behavioral change.
+_spawn_argv_subprocess = asyncio.create_subprocess_exec
+
+
+@dataclass
+class _ProcSession:
+    """One running (or just-finished) petri subprocess invocation.
+
+    Output is streamed through a PTY so rich/typer see a real terminal and
+    emit their live multi-spinner + ANSI colors. Raw bytes (including
+    escape sequences) flow through the session's queue as base64 strings
+    and get rendered by xterm.js on the frontend.
+    """
+
+    stream_id: str
+    process: asyncio.subprocess.Process
+    queue: asyncio.Queue  # items are (kind: str, text: str) tuples
+    master_fd: int = -1  # PTY master side; -1 when not using a PTY
+    detach: bool = False
+    finished: bool = False
+
+
+# Keyed by stream_id. Lives at module scope so the /start endpoint can hand
+# off a stream_id that the /stream endpoint picks up on a separate request.
+_proc_sessions: Dict[str, _ProcSession] = {}
+
+
+async def _drain_pty(master_fd: int, queue: asyncio.Queue) -> None:
+    """Copy raw bytes from the PTY master into the session's queue.
+
+    Chunks are base64-encoded so SSE JSON transport is binary-safe —
+    ANSI escape sequences and UTF-8 multi-byte characters survive
+    intact. The frontend decodes each chunk and feeds it to xterm.js
+    for rendering.
+
+    On Linux, reading from a PTY master whose slave was closed raises
+    OSError(EIO) instead of returning b''. Both are treated as EOF.
+    """
+    loop = asyncio.get_running_loop()
+    chunk_size = 4096
+    while True:
+        try:
+            chunk = await loop.run_in_executor(
+                None, os.read, master_fd, chunk_size
+            )
+        except OSError as exc:
+            if exc.errno == errno.EIO:
+                return  # slave closed
+            raise
+        if not chunk:
+            return
+        await queue.put(("stdout", base64.b64encode(chunk).decode("ascii")))
+
+
+async def _await_exit(session: _ProcSession) -> None:
+    """Wait for the subprocess to finish, then emit the terminal 'done'
+    marker and close the PTY master fd."""
+    code = await session.process.wait()
+    await session.queue.put(("done", str(code)))
+    session.finished = True
+    if session.master_fd >= 0:
+        try:
+            os.close(session.master_fd)
+        except OSError:
+            pass
+        session.master_fd = -1
 
 
 # ── SQLite connection ─────────────────────────────────────────────────────
@@ -95,6 +198,173 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     @app.get("/api/health")
     def health():
         return {"status": "ok"}
+
+    # ── Petri subprocess spawning (Computer tab) ─────────────────────
+    #
+    # Nine defenses layered here:
+    #   1. argv list (no shell) — no substring interpretation
+    #   2. frozen subcommand whitelist
+    #   3. arg type validation (list of strings)
+    #   4. argv[0..2] hardcoded to sys.executable / -m / petri
+    #   5. cwd pinned to the project root
+    #   6. localhost bind default (enforced in cli/launch.py)
+    #   7. concurrent session cap
+    #   8. arg count + length caps
+    #   9. cleanup on disconnect via finally + killpg
+
+    @app.post("/api/proc/start")
+    async def proc_start(body: dict):
+        command = body.get("command")
+        args = body.get("args") or []
+        detach = bool(body.get("detach"))
+
+        # Defense 2: subcommand whitelist.
+        if command not in _PETRI_SUBCOMMANDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown petri subcommand: {command!r}",
+            )
+        # Defense 3: arg type validation.
+        if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+            raise HTTPException(
+                status_code=400,
+                detail="args must be a list of strings",
+            )
+        # Defense 8: arg count + length caps.
+        if len(args) > _MAX_ARGS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"too many args (max {_MAX_ARGS})",
+            )
+        if any(len(a) > _MAX_ARG_LEN for a in args):
+            raise HTTPException(
+                status_code=400,
+                detail=f"arg too long (max {_MAX_ARG_LEN} chars)",
+            )
+        # Defense 7: concurrent session cap.
+        live_count = sum(1 for s in _proc_sessions.values() if not s.finished)
+        if live_count >= _MAX_LIVE_SESSIONS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"too many live sessions (max {_MAX_LIVE_SESSIONS})",
+            )
+
+        # Defense 4: argv[0..2] hardcoded; argv[3] is whitelisted; argv[4:]
+        # are user-supplied strings (already validated by defense 3).
+        argv = [sys.executable, "-m", "petri", command, *args]
+
+        # Allocate a PTY so the child process (rich/typer) thinks it's
+        # talking to a real terminal and emits its live multi-spinner +
+        # ANSI colors. Without this, rich detects non-TTY and silently
+        # downgrades to boring single-line output.
+        master_fd, slave_fd = pty.openpty()
+
+        # Give the child a sensible terminal environment. Inheriting the
+        # dashboard's env keeps PATH / HOME / CLAUDE_* intact; the keys we
+        # set force color + unbuffered output even through whatever
+        # buffering layers might still exist.
+        child_env = os.environ.copy()
+        child_env.update(
+            {
+                "TERM": "xterm-256color",
+                "PYTHONUNBUFFERED": "1",
+                "FORCE_COLOR": "1",
+                "COLORTERM": "truecolor",
+                "COLUMNS": "120",
+                "LINES": "40",
+            }
+        )
+
+        # Defense 1: argv-list spawn (execFile-equivalent) — no shell in
+        # between. Defense 5: cwd pinned to the parent of .petri.
+        # stdin = DEVNULL means interactive prompts (petri init without
+        # --no-questions) will hang and need to be stopped with STOP.
+        # That's fine for v1; the Computer tab is not a full TTY.
+        try:
+            process = await _spawn_argv_subprocess(
+                *argv,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=str(petri_dir.parent),
+                env=child_env,
+                start_new_session=True,  # new process group for clean SIGTERM
+                close_fds=True,
+            )
+        except Exception:
+            os.close(master_fd)
+            os.close(slave_fd)
+            raise
+
+        # The parent no longer needs the slave end; closing it lets the
+        # master read return EOF cleanly when the child exits.
+        os.close(slave_fd)
+
+        stream_id = uuid.uuid4().hex
+        queue: asyncio.Queue = asyncio.Queue()
+        session = _ProcSession(
+            stream_id=stream_id,
+            process=process,
+            queue=queue,
+            master_fd=master_fd,
+            detach=detach,
+        )
+        _proc_sessions[stream_id] = session
+
+        asyncio.create_task(_drain_pty(master_fd, queue))
+        asyncio.create_task(_await_exit(session))
+
+        return {
+            "stream_id": stream_id,
+            "pid": process.pid,
+            "argv": argv,
+        }
+
+    @app.get("/api/proc/stream/{stream_id}")
+    async def proc_stream(stream_id: str):
+        session = _proc_sessions.get(stream_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="unknown stream_id")
+        if session.detach:
+            raise HTTPException(status_code=400, detail="stream detached")
+
+        async def generate():
+            try:
+                while True:
+                    kind, text = await session.queue.get()
+                    if kind == "done":
+                        yield {
+                            "event": "done",
+                            "data": json.dumps({"code": int(text)}),
+                        }
+                        return
+                    yield {
+                        "event": kind,
+                        "data": json.dumps({"line": text}),
+                    }
+            finally:
+                # Defense 9: drop the session once the consumer disconnects
+                # AND the subprocess has exited.
+                if session.finished:
+                    _proc_sessions.pop(stream_id, None)
+
+        return EventSourceResponse(generate())
+
+    @app.post("/api/proc/stop/{stream_id}")
+    async def proc_stop(stream_id: str):
+        session = _proc_sessions.get(stream_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="unknown stream_id")
+        if session.process.returncode is not None:
+            return {"status": "already_done", "code": session.process.returncode}
+
+        # SIGTERM the whole process group so any petri-spawned children
+        # (e.g. the claude CLI) get cleaned up too.
+        try:
+            os.killpg(os.getpgid(session.process.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        return {"status": "stopping", "pid": session.process.pid}
 
     # ── Dishes ────────────────────────────────────────────────────────
 
