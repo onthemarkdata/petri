@@ -70,6 +70,39 @@ def test_parse_verdict_raises_when_no_match():
 # ── assess_cell error handling ────────────────────────────────────────────
 
 
+def test_assess_cell_prompt_injects_todays_date_and_websearch_directive():
+    """Regression for 0.3.4: agents were citing 2024-era URLs because the
+    prompt never told them to search. The rendered prompt must contain
+    today's UTC date and mandate WebSearch/WebFetch use, and it must
+    warn the model not to cite from memory."""
+    from datetime import datetime, timezone
+
+    provider = StubProvider(
+        '{"verdict": "EVIDENCE_SUFFICIENT", "summary": "ok"}'
+    )
+    provider.assess_cell(
+        cell_id="test-dish-colony-001-001",
+        claim_text="A sample claim",
+        context={},
+        agent_role="investigator",
+    )
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    assert provider.last_prompt is not None
+    assert today_iso in provider.last_prompt, (
+        "Today's UTC date must appear in the rendered prompt so the "
+        "model knows its training data is stale"
+    )
+    assert "WebSearch" in provider.last_prompt, (
+        "Prompt must mandate WebSearch use"
+    )
+    assert "WebFetch" in provider.last_prompt, (
+        "Prompt must mandate WebFetch for URL verification"
+    )
+    assert "from memory" in provider.last_prompt, (
+        "Prompt must warn the model not to cite URLs from memory"
+    )
+
+
 def test_assess_cell_returns_execution_error_on_unparseable_output():
     """When ``_ask`` returns unparseable text, verdict must be EXECUTION_ERROR.
 

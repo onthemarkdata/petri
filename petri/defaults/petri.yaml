@@ -131,10 +131,11 @@ agents:
     verdicts_block: []
     redirect_on_block: null
     instruction: >
-      Lead adversarial disproval. Number each counter-argument with a
-      contradicting source and URL. Each source must have
-      supports_or_contradicts='contradicts'. Summary: strongest single
-      disproval argument in 1-2 sentences.
+      Lead adversarial disproval. Use WebSearch to surface current
+      contradicting sources — do not cite from memory. Number each
+      counter-argument with a contradicting source and URL. Each source
+      must have supports_or_contradicts='contradicts'. Summary: strongest
+      single disproval argument in 1-2 sentences.
 
   # === Phase 1 Agents (Research) ===
 
@@ -148,9 +149,12 @@ agents:
     verdicts_block: [NEEDS_MORE_EVIDENCE, CANNOT_DETERMINE]
     redirect_on_block: null
     instruction: >
-      Seek primary sources for this claim. Minimum 3 sources, each with a
-      valid URL, hierarchy level, and 1-2 sentence finding. Trace evidence
-      to its origin — do not accept surface-level support.
+      Seek primary sources for this claim. Use WebSearch to find them —
+      do not cite URLs from memory. Use WebFetch on each candidate URL to
+      verify it resolves and to read the actual content before citing it.
+      Minimum 3 sources, each with a valid URL, hierarchy level, and 1-2
+      sentence finding. Trace evidence to its origin — do not accept
+      surface-level support.
       Summary: 1-3 sentences stating evidence sufficiency with specific
       source counts and dimensions covered.
 
@@ -164,10 +168,13 @@ agents:
     verdicts_block: [MATERIALLY_STALE]
     redirect_on_block: null
     instruction: >
-      For each source in prior evidence, verify currency. Cite the source
-      URL, note its publication date, and assess staleness risk
-      (NONE/LOW/MEDIUM/HIGH). Summary: 1 sentence on overall evidence
-      currency with count of stale sources.
+      For each source in prior evidence, verify currency. Use WebFetch on
+      each cited URL to read the actual publication date from the page
+      metadata — do not infer the date from the title string or trust
+      what a prior agent claimed. Cite the source URL, note its
+      publication date, and assess staleness risk (NONE/LOW/MEDIUM/HIGH).
+      Summary: 1 sentence on overall evidence currency with count of
+      stale sources.
 
   dependency_auditor:
     display_name: Dependency Auditor
@@ -196,9 +203,11 @@ agents:
     verdicts_block: [CRITICAL_FLAW_FOUND, UNADDRESSED_COUNTERARGUMENT]
     redirect_on_block: null
     instruction: >
-      Build the strongest case AGAINST. Number each adversarial argument
-      (1-2 sentences each). For each, cite a contradicting source with URL.
-      Include falsification conditions — what would prove this claim false.
+      Build the strongest case AGAINST. Use WebSearch to find current
+      contradicting evidence — do not cite from memory. Number each
+      adversarial argument (1-2 sentences each). For each, cite a
+      contradicting source with URL. Include falsification conditions —
+      what would prove this claim false.
       Summary: single strongest reason to doubt this claim.
 
   champion:
@@ -211,9 +220,11 @@ agents:
     verdicts_block: [CANNOT_DEFEND]
     redirect_on_block: null
     instruction: >
-      Build the strongest case FOR. Cite supporting sources ranked by
-      hierarchy level (strongest first). Include rebuttals to likely
-      skeptic objections, each backed by a source with URL.
+      Build the strongest case FOR. Use WebSearch to find current
+      supporting sources — do not cite from memory. Cite supporting
+      sources ranked by hierarchy level (strongest first). Include
+      rebuttals to likely skeptic objections, each backed by a source
+      with URL.
       Summary: single strongest reason to believe, with source count.
 
   pragmatist:
@@ -226,9 +237,10 @@ agents:
     verdicts_block: [WOULD_NOT_SHIP_THIS]
     redirect_on_block: null
     instruction: >
-      Evaluate practical significance. Cite real-world implementations,
-      case studies, or failures with URLs. Assess whether this matters
-      if true or false. Summary: 1-2 sentences on practical relevance.
+      Evaluate practical significance. Use WebSearch to find real-world
+      implementations, case studies, or failures — do not cite from
+      memory. Cite them with URLs. Assess whether this matters if true
+      or false. Summary: 1-2 sentences on practical relevance.
 
   simplifier:
     display_name: Simplifier
@@ -286,7 +298,10 @@ agents:
     instruction: >
       Final determination. Produce a source inventory: count sources by
       hierarchy level, supporting vs contradicting. Weigh all evidence
-      from investigation, critique, and red team phases.
+      from investigation, critique, and red team phases. Use WebSearch
+      and WebFetch to spot-check any source whose hierarchy level seems
+      inflated or whose publication date looks suspiciously old given
+      today's date.
       Summary: 1-3 sentences with verdict reasoning and confidence.
 
   # === Phase 0 (Exploratory, non-blocking) ===
@@ -302,5 +317,8 @@ agents:
     redirect_on_block: null
     instruction: >
       Ask Socratic questions to surface hidden assumptions, define terms,
-      and map the evidence space before research begins. This agent is
-      exploratory — it does not block convergence.
+      and map the evidence space before research begins. When the claim
+      references specific numbers, versions, released products, or recent
+      events, use WebSearch to ground the question in current facts
+      rather than training-data recollections. This agent is exploratory
+      — it does not block convergence.
