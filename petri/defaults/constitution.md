@@ -17,8 +17,8 @@ The Red Team builds the strongest case against each node — independent of the 
 ### V. Autonomous Agents, Human Merge
 Agents run the full validation pipeline autonomously. The queue drives execution. The only human gate is the final decision — agents recommend, humans decide.
 
-### VI. Harness-Agnostic Core
-The core library imports only stdlib + Pydantic. Adapters bridge to specific harnesses (Claude Code, etc.). `petri.yaml` is the configuration surface.
+### VI. Claude Code Native
+Petri is built on top of the Claude Code CLI as its agent harness. Claude Code is a hard dependency — `petri inspect` verifies it, every agent invocation shells out to it, and the dashboard's Computer tab runs petri commands through it. The `adapters/` layer exists for internal separation of concerns (keeping core logic free of Claude-specific coupling), not to enable swapping in other harnesses. `petri.yaml` is the configuration surface.
 
 ### VII. Simplicity as Default
 JSONL files, JSON queue with file locking, SQLite as a disposable read index. No external infrastructure, no message queues, no Docker required.
