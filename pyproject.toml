@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "petri-grow"
-version = "0.3.1"
+version = "0.3.2"
 description = "An agent orchestration framework to grow your AI's context."
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -49,5 +49,6 @@ petri = [
     "defaults/*.yaml",
     "defaults/*.md",
     "templates/*.txt",
+    "templates/*.html",
     "assets/**/*",
 ]
