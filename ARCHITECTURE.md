@@ -244,7 +244,7 @@ All non-title screens share a CRT/HUD chrome with cut-corner panels, phosphor-gr
 
 ### The Computer tab is one xterm surface
 
-The Computer screen is the most architecturally interesting piece. It is **one xterm.js terminal** that hosts two modes interchangeably:
+The Computer screen is **one xterm.js terminal** that hosts two modes interchangeably:
 
 1. **Onboarding wizard** — for first-run users with no `.petri/`, the wizard prompts (dish name, model, concurrency, iterations) are written into xterm via ANSI sequences and answered through the persistent bottom `#term-cmd` input. Arrow-key selects redraw in place via `\x1b[<n>A` cursor-up + `\r\x1b[2K` clear-line escapes.
 
