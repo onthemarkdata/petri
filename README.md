@@ -8,10 +8,14 @@
 
 An agent orchestration framework to grow your AI's context via Claude Code. Decomposes claims into DAGs of logical units and validates them bottom-up through a multi-agent adversarial review pipeline.
 
+What results are a repository of curated information, citations, and URLs, organized by concepts, how they relate to each other, and the nuances of the claims. This is quite useful for AI agents to have pre-loaded context assets available for reference.
+
+Petri includes both a CLI tool intended for AI agents and an interactive UI mode to help keep track of all active agents within Petri and to review the context, reasoning, and citations curated by the AI agents.
+
 ## Demo
 https://github.com/user-attachments/assets/ef47dc07-741d-4ac5-9f35-2afb12fc9046
 
-## Cost Warning
+## ⚠️ Cost Warning ⚠️
 
 **Petri uses Claude via Claude Code, which costs money.** Each cell goes through 13 agents across multiple iterations, generating significant token usage. A single colony with 10+ cells can produce **thousands of LLM calls** across Socratic analysis, research, critique, debate, red team, and evaluation phases.
 
@@ -23,6 +27,8 @@ model:
 ```
 
 **Monitor your usage.** Start with small claims to understand the cost profile before running large colonies.
+
+Alternatively, you can [use an open-source model in Claude Code via Ollama, by following this documentation](https://docs.ollama.com/integrations/claude-code). But this requires a bit of setup on your side, and you need hardware capable of running a model locally.
 
 ## Setup
 
@@ -65,11 +71,6 @@ petri inspect
 ```
 
 This reports any missing pieces (Python version, Claude Code login, PATH issues) without modifying your system.
-
-## Breaking changes
-
-**Next release:** `petri analyze` has been removed. Use `petri launch` (was `--dashboard`),
-`petri scan` (was `--scan`), `petri graph` (was `--graph`), and `petri connect` (was `--connect`).
 
 ## Quickstart
 
