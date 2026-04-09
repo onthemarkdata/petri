@@ -86,7 +86,7 @@ petri/
 
 ## Active Technologies
 
-- Python 3.14+ / Core: stdlib + Pydantic / CLI: Typer / Dashboard: FastAPI + SSE
+- Python 3.11+ / Core: stdlib + Pydantic / CLI: Typer / Dashboard: FastAPI + SSE
 - Storage: JSONL (event logs, append-only), JSON (queue, file-locked), SQLite (disposable dashboard index)
 - Testing: pytest
 - Config generation: stdlib string.Template (no Jinja2)

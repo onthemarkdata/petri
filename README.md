@@ -3,7 +3,7 @@
 # Petri
 
 [![PyPI version](https://img.shields.io/pypi/v/petri-grow)](https://pypi.org/project/petri-grow/)
-[![Python 3.14+](https://img.shields.io/pypi/pyversions/petri-grow)](https://pypi.org/project/petri-grow/)
+[![Python 3.11+](https://img.shields.io/pypi/pyversions/petri-grow)](https://pypi.org/project/petri-grow/)
 [![License](https://img.shields.io/pypi/l/petri-grow)](https://github.com/onthemarkdata/petri/blob/main/LICENSE)
 
 An agent orchestration framework to grow your AI's context via Claude Code. Decomposes claims into DAGs of logical units and validates them bottom-up through a multi-agent adversarial review pipeline.
@@ -32,7 +32,7 @@ Alternatively, you can [use an open-source model in Claude Code via Ollama, by f
 
 ## Setup
 
-Petri needs **Python 3.14+** and the **Claude Code CLI** (which provides the LLM inference). The cleanest path is to install both into a fresh [uv](https://docs.astral.sh/uv/) environment.
+Petri needs **Python 3.11+** and the **Claude Code CLI** (which provides the LLM inference). The cleanest path is to install both into a fresh [uv](https://docs.astral.sh/uv/) environment.
 
 ### 1. Install uv
 
@@ -40,10 +40,10 @@ Petri needs **Python 3.14+** and the **Claude Code CLI** (which provides the LLM
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. Create and activate a Python 3.14 virtual environment
+### 2. Create and activate a Python 3.11+ virtual environment
 
 ```bash
-uv venv --python 3.14 .venv
+uv venv --python 3.11 .venv
 source .venv/bin/activate          # macOS / Linux
 # .venv\Scripts\activate           # Windows PowerShell
 ```
@@ -74,6 +74,19 @@ This reports any missing pieces (Python version, Claude Code login, PATH issues)
 
 ## Quickstart
 
+Petri has two modes. Start with **Interactive Mode** — it's the fastest path from zero to a running colony.
+
+### Interactive Mode (recommended)
+
+```bash
+mkdir my-research && cd my-research
+petri launch
+```
+
+`petri launch` auto-creates `.petri/` from defaults, opens the Petri Lab dashboard at http://127.0.0.1:8090, and walks you through dish setup, seeding, growing, and inspection in the browser. No other commands required.
+
+### CLI Mode (AI-agent friendly)
+
 Petri is designed to be AI agent first for UX. It's highly recommended to have a Claude Code session already started and pass this README file link (https://github.com/onthemarkdata/petri/blob/main/README.md) directly to Claude Code to set up.
 
 ```bash
@@ -82,10 +95,6 @@ mkdir my-research && cd my-research
 petri init
 # → Initialized petri dish 'my-research' at /path/to/my-research
 #   Model: claude-sonnet-4-6
-#
-# Skip step 1 if you'd rather use the web onboarding wizard:
-# `petri launch` creates `.petri/` from defaults the first time it
-# runs and walks you through dish setup in the browser.
 
 # 2. Seed a colony from a claim
 petri seed "Open source models will catch up to current frontier models in the next 6 months."
@@ -171,7 +180,7 @@ Every action is logged as an immutable event in the cell's JSONL file, identifie
 - **Multi-agent pipeline**: lead orchestrators + specialists (blocking and advisory)
 - **Event sourcing**: append-only JSONL per cell, rolled up to SQLite for the dashboard
 - **Queue state machine**: enforced transitions, file-locked for concurrency
-- **Harness-agnostic**: core uses only stdlib + Pydantic; adapters bridge to Claude Code and future harnesses
+- **Claude Code native**: Petri runs on top of the Claude Code CLI as its agent harness — Claude Code is a hard dependency, not a pluggable option. The `adapters/` layer exists for internal separation of concerns, not to enable other harnesses.
 - **Live dashboard**: single-file SPA with PTY-backed terminal, interactive colony DAG, and per-cell detail pages
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, state machine diagram, and agent details.
