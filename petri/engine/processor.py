@@ -915,8 +915,17 @@ def _run_socratic_phase(
         # Render any cited sources from this Socratic step inline so
         # URLs show up in evidence.md (previously: sources were
         # persisted to events.jsonl via the provider but never
-        # surfaced in the human-readable file).
+        # surfaced in the human-readable file). Dedup by URL within
+        # this step so a single paper cited by the Socratic questioner
+        # multiple times collapses into one entry — matches the 0.3.3
+        # dedup policy of "within a phase block, not across."
+        seen_socratic_urls: set[str] = set()
         for source_dict in _iter_verdict_sources(result):
+            url = source_dict.get("url") or source_dict.get("url_or_name") or ""
+            if url and url in seen_socratic_urls:
+                continue
+            if url:
+                seen_socratic_urls.add(url)
             lines.append(_render_source_line(len(lines), source_dict))
         lines.append("")
 

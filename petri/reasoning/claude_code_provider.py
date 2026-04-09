@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from petri.config import AGENT_TOOLS, LLM_INFERENCE_MODEL
@@ -729,7 +730,19 @@ class ClaudeCodeProvider:
                 f"Build on the evidence above. Focus on new insights and gaps.\n"
             )
 
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        freshness_directive = (
+            f"IMPORTANT — Today's date is {today_iso}. Your training data is "
+            f"stale relative to this date. You MUST use the WebSearch tool to "
+            f"find current sources and WebFetch to verify that each URL you "
+            f"cite actually exists before including it. Do NOT cite URLs from "
+            f"memory — they will be treated as fabricated. Prefer sources "
+            f"published within the last 12 months unless the claim is "
+            f"explicitly about historical events.\n\n"
+        )
+
         prompt = (
+            f"{freshness_directive}"
             f"You are the {agent_role} agent in a research validation pipeline.\n\n"
             f"{role_instruction}\n\n"
             f"Cell: {cell_id}\n"
