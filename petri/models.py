@@ -57,6 +57,7 @@ class EventType(str, Enum):
     freshness_checked = "freshness_checked"
     verdict_issued = "verdict_issued"
     evidence_appended = "evidence_appended"
+    evidence_summarized = "evidence_summarized"
     debate_mediated = "debate_mediated"
     convergence_checked = "convergence_checked"
     cell_reopened = "cell_reopened"
@@ -135,6 +136,13 @@ class EvidenceAppendedData(BaseModel):
     summary: str
 
 
+class EvidenceSummarizedData(BaseModel):
+    """Audit-log payload written when `summary.md` is regenerated at the end of an iteration."""
+
+    summary_length: int = Field(ge=0)
+    evidence_length: int = Field(ge=0)
+
+
 class DebateMediatedData(BaseModel):
     from_agent: str
     to_agent: str
@@ -194,6 +202,7 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "freshness_checked": FreshnessCheckedData,
     "verdict_issued": VerdictIssuedData,
     "evidence_appended": EvidenceAppendedData,
+    "evidence_summarized": EvidenceSummarizedData,
     "debate_mediated": DebateMediatedData,
     "convergence_checked": ConvergenceCheckedData,
     "cell_reopened": CellReopenedData,

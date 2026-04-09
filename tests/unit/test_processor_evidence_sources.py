@@ -370,3 +370,112 @@ def test_render_source_line_handles_missing_url():
     assert "Contradicts claim." in line
     # No "— https..." segment should appear.
     assert "https" not in line
+
+
+# ── Citation dedup (regression for 0.3.3) ───────────────────────────────
+# When two agents cite the same URL with slightly different titles within
+# a single phase block, the formatter must render the URL exactly once.
+# See screenshot in 0.3.3 release notes: arxiv.org/abs/2203.02155 was
+# showing twice in the dashboard because one agent called it "OpenAI,
+# Training language models..." and another called it "ArXiv, Training
+# language models... (InstructGPT)". Dedup key is URL, not title.
+
+
+def _paper(url: str, title: str) -> SourceCitation:
+    return SourceCitation(
+        url=url,
+        title=title,
+        hierarchy_level=1,
+        finding="relevant to the claim",
+        supports_or_contradicts="supports",
+    )
+
+
+def test_format_phase1_evidence_dedups_same_url_across_agents():
+    shared_url = "https://arxiv.org/abs/2203.02155"
+    verdict_a = AssessmentResult(
+        agent="socratic_clarify",
+        verdict="EVIDENCE_SUFFICIENT",
+        summary="Socratic clarify found the paper.",
+        sources_cited=[_paper(shared_url, "OpenAI, Training language models (2022)")],
+    )
+    verdict_b = AssessmentResult(
+        agent="socratic_challenge_assumptions",
+        verdict="EVIDENCE_SUFFICIENT",
+        summary="Challenge-assumptions found the same paper.",
+        sources_cited=[_paper(shared_url, "ArXiv, Training language models... (InstructGPT) (2022)")],
+    )
+    rendered = _format_phase1_evidence([verdict_a, verdict_b], iteration=1)
+    assert rendered.count(shared_url) == 1
+
+
+def test_format_phase2_evidence_dedups_same_url_across_agents():
+    shared_url = "https://arxiv.org/abs/2203.02155"
+    verdict_a = AssessmentResult(
+        agent="skeptic",
+        verdict="CHALLENGED",
+        summary="Skeptic challenge.",
+        sources_cited=[_paper(shared_url, "Skeptic's title")],
+    )
+    verdict_b = AssessmentResult(
+        agent="pragmatist",
+        verdict="SUPPORTED",
+        summary="Pragmatist view.",
+        sources_cited=[_paper(shared_url, "Pragmatist's title")],
+    )
+    rendered = _format_phase2_evidence([verdict_a, verdict_b], debates=[], iteration=1)
+    assert rendered.count(shared_url) == 1
+
+
+def test_format_red_team_evidence_dedups_same_url():
+    shared_url = "https://arxiv.org/abs/2203.02155"
+    red_team = AssessmentResult(
+        agent="red_team",
+        verdict="REFUTED",
+        summary="Red team cites the same paper twice.",
+        sources_cited=[
+            _paper(shared_url, "First framing"),
+            _paper(shared_url, "Second framing"),
+        ],
+    )
+    rendered = _format_red_team_evidence(red_team, iteration=1)
+    assert rendered.count(shared_url) == 1
+
+
+def test_format_evaluation_evidence_dedups_across_list_and_table():
+    shared_url = "https://arxiv.org/abs/2203.02155"
+    evaluation = AssessmentResult(
+        agent="evaluator",
+        verdict="VALIDATED",
+        summary="Evaluator.",
+        sources_cited=[
+            _paper(shared_url, "Title A"),
+            _paper(shared_url, "Title B"),
+            _paper("https://lmsys.org/blog/2025-02-arena", "Arena leaderboard"),
+        ],
+    )
+    rendered = _format_evaluation_evidence(
+        evaluation, source_validation={}, iteration=1,
+    )
+    # Shared URL appears once in the numbered list and once in the
+    # inventory table = 2 total. The second unique URL also appears once
+    # in each = 2 total. Without dedup we'd see the shared URL 4x.
+    assert rendered.count(shared_url) == 2
+    assert rendered.count("https://lmsys.org/blog/2025-02-arena") == 2
+
+
+def test_format_phase1_evidence_keeps_sources_without_url():
+    """Sources without a URL (e.g. book citations by name) must still
+    render — dedup only kicks in when a URL is present."""
+    verdict = {
+        "agent": "investigator",
+        "verdict": "EVIDENCE_SUFFICIENT",
+        "summary": "Two book citations, no URL.",
+        "sources_cited": [
+            {"title": "Book A", "finding": "a", "supports_or_contradicts": "supports"},
+            {"title": "Book B", "finding": "b", "supports_or_contradicts": "supports"},
+        ],
+    }
+    rendered = _format_phase1_evidence([verdict], iteration=1)
+    assert "Book A" in rendered
+    assert "Book B" in rendered

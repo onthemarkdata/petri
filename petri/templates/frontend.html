@@ -2441,9 +2441,22 @@ function renderCellDetail(cell) {
   container.appendChild(evidenceSection);
 
   // ── 6. Citations (source_reviewed events with URL + finding) ──
+  // Dedup by URL across all iterations/phases/agents within this cell.
+  // The same URL cited by multiple agents with slightly different titles
+  // (e.g. one agent calls it "OpenAI, InstructGPT" and another calls it
+  // "ArXiv, Training language models...") should render as ONE card,
+  // crediting the first agent who surfaced it.
   container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Citations'));
   var citationsSection = buildEl('div', { className: 'citations-section' });
-  var sourceEvents = events.filter(function(evt) { return evt.type === 'source_reviewed' && evt.data && evt.data.url; });
+  var sourceEvents = [];
+  var seenUrls = Object.create(null);
+  events.forEach(function(evt) {
+    if (evt.type !== 'source_reviewed' || !evt.data || !evt.data.url) return;
+    var url = evt.data.url;
+    if (seenUrls[url]) return;
+    seenUrls[url] = true;
+    sourceEvents.push(evt);
+  });
   if (sourceEvents.length > 0) {
     var citationsList = buildEl('div', { className: 'citations-list' });
     sourceEvents.forEach(function(evt) {

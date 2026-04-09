@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from petri.models import (
+    EVENT_DATA_MODELS,
     Cell,
     CellStatus,
     DecompositionResult,
@@ -159,6 +160,13 @@ class TestValidateEventData:
         )
         assert result["parent_cell_id"] == "p1"
 
+    def test_valid_evidence_summarized(self):
+        result = validate_event_data(
+            "evidence_summarized",
+            {"summary_length": 123, "evidence_length": 4567},
+        )
+        assert result == {"summary_length": 123, "evidence_length": 4567}
+
     def test_unknown_event_type_raises(self):
         with pytest.raises(ValueError, match="Unknown event type"):
             validate_event_data("nonexistent_event", {})
@@ -172,6 +180,47 @@ class TestValidateEventData:
             validate_event_data(
                 "search_executed", {"query": "q", "sources_found": -1}
             )
+
+
+class TestEventTypeCallSiteAudit:
+    """Every ``event_type="..."`` string literal in the source tree must be
+    registered in both ``EventType`` and ``EVENT_DATA_MODELS``. Regression
+    guard for the 0.3.3 incident where ``evidence_summarized`` shipped
+    without a model mapping and crashed the pipeline at convergence time.
+    """
+
+    def test_all_call_site_event_types_are_registered(self):
+        import pathlib
+        import re
+
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        petri_root = repo_root / "petri"
+        pattern = re.compile(r'event_type="([a-z_]+)"')
+
+        referenced: set[str] = set()
+        for py_file in petri_root.rglob("*.py"):
+            text = py_file.read_text(encoding="utf-8")
+            for match in pattern.finditer(text):
+                referenced.add(match.group(1))
+
+        assert referenced, (
+            "Audit found no event_type call sites — is the regex still correct?"
+        )
+
+        enum_values = {member.value for member in EventType}
+        dispatch_keys = set(EVENT_DATA_MODELS.keys())
+
+        unregistered_enum = sorted(referenced - enum_values)
+        unregistered_dispatch = sorted(referenced - dispatch_keys)
+
+        assert not unregistered_enum, (
+            "event types referenced in call sites but missing from "
+            f"EventType enum: {unregistered_enum}"
+        )
+        assert not unregistered_dispatch, (
+            "event types referenced in call sites but missing from "
+            f"EVENT_DATA_MODELS dispatch: {unregistered_dispatch}"
+        )
 
 
 # ── Composite Key Utility Tests ──────────────────────────────────────────
