@@ -507,17 +507,23 @@ def _write_summary(
         )
         return
 
-    append_event(
-        events_path=_events_path(petri_dir, cell_id, dish_id),
-        cell_id=cell_id,
-        event_type="evidence_summarized",
-        agent="cell_lead",
-        iteration=iteration,
-        data={
-            "summary_length": len(summary_md),
-            "evidence_length": len(evidence_md),
-        },
-    )
+    try:
+        append_event(
+            events_path=_events_path(petri_dir, cell_id, dish_id),
+            cell_id=cell_id,
+            event_type="evidence_summarized",
+            agent="cell_lead",
+            iteration=iteration,
+            data={
+                "summary_length": len(summary_md),
+                "evidence_length": len(evidence_md),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — audit log is best-effort per docstring
+        logger.warning(
+            "could not log evidence_summarized event for cell %s: %s",
+            cell_id, exc,
+        )
 
 
 def _format_phase1_evidence(verdicts: list, iteration: int) -> str:
@@ -526,11 +532,16 @@ def _format_phase1_evidence(verdicts: list, iteration: int) -> str:
     ``verdicts`` may contain ``AssessmentResult`` Pydantic objects OR
     dicts; every source is normalized via ``_source_to_dict`` before
     rendering so Pydantic instances can't be silently skipped.
+
+    Sources are deduplicated by URL within this phase block so two
+    agents citing the same paper with different titles collapse into
+    a single numbered entry, crediting the first agent that surfaced it.
     """
     lines = [f"### Iteration {iteration} — Phase 1 Research\n"]
 
     # Collect all sources across phase 1 agents into a numbered list.
     source_num = 0
+    seen_urls: set[str] = set()
     agent_summaries: dict[str, tuple[str, str]] = {}  # agent -> (verdict, summary)
 
     for verdict_entry in verdicts:
@@ -540,6 +551,11 @@ def _format_phase1_evidence(verdicts: list, iteration: int) -> str:
         agent_summaries[agent_name] = (verdict_value, summary_text)
 
         for source_dict in _iter_verdict_sources(verdict_entry):
+            url = source_dict.get("url") or source_dict.get("url_or_name") or ""
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
             source_num += 1
             lines.append(_render_source_line(source_num, source_dict))
             lines.append("")
@@ -573,9 +589,16 @@ def _format_phase2_evidence(
     lines = [f"### Iteration {iteration} — Phase 2 Critique\n"]
 
     # Collect all sources across phase 2 agents into a numbered list.
+    # Dedup by URL so multiple agents citing the same paper render once.
     source_num = 0
+    seen_urls: set[str] = set()
     for verdict_entry in verdicts:
         for source_dict in _iter_verdict_sources(verdict_entry):
+            url = source_dict.get("url") or source_dict.get("url_or_name") or ""
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
             source_num += 1
             lines.append(_render_source_line(source_num, source_dict))
             lines.append("")
@@ -618,9 +641,15 @@ def _format_red_team_evidence(result: object, iteration: int) -> str:
 
     lines = [f"### Red Team Review (Iteration {iteration})\n"]
 
-    # Numbered counter-arguments from sources
+    # Numbered counter-arguments from sources (deduped by URL).
     source_num = 0
+    seen_urls: set[str] = set()
     for source_dict in _iter_verdict_sources(result):
+        url = source_dict.get("url") or source_dict.get("url_or_name") or ""
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
         source_num += 1
         lines.append(_render_source_line(source_num, source_dict))
         lines.append("")
@@ -653,13 +682,25 @@ def _format_evaluation_evidence(
 
     lines = [f"### Evidence Evaluation (Iteration {iteration})\n"]
 
+    # Materialize a deduped source list (by URL) once so the numbered list
+    # and the inventory table below render the same entries in the same
+    # order. Sources without a URL are always kept (rare but possible).
+    deduped_sources: list[dict] = []
+    seen_urls: set[str] = set()
+    for source_dict in _iter_verdict_sources(result):
+        url = source_dict.get("url") or source_dict.get("url_or_name") or ""
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+        deduped_sources.append(source_dict)
+
     # Full source list with URLs (numbered, same format as the other
     # phases so a user can copy-paste citations between phases).
-    source_num = 0
-    for source_dict in _iter_verdict_sources(result):
-        source_num += 1
-        lines.append(_render_source_line(source_num, source_dict))
+    for source_index, source_dict in enumerate(deduped_sources, 1):
+        lines.append(_render_source_line(source_index, source_dict))
         lines.append("")
+    source_num = len(deduped_sources)
 
     if source_num == 0:
         lines.append("_No sources cited by evidence evaluator._")
@@ -670,9 +711,7 @@ def _format_evaluation_evidence(
     if source_num > 0:
         lines.append("| # | Source | URL | Level | Direction | Finding |")
         lines.append("|---|--------|-----|-------|-----------|---------|")
-        for table_index, source_dict in enumerate(
-            _iter_verdict_sources(result), 1
-        ):
+        for table_index, source_dict in enumerate(deduped_sources, 1):
             title = source_dict.get("title") or "Unknown"
             source_url = (
                 source_dict.get("url") or source_dict.get("url_or_name") or ""
