@@ -133,6 +133,9 @@ def _make_cell_created_callback(
     spinner,
     log_event: Callable[[str, str, dict], None],
 ) -> Callable:
+    if colony_path.exists():
+        typer.echo(f"Error: Colony '{colony_path.name}' already exists. Aborting.", err=True)
+        raise typer.Exit(1)
     """Return a callback for ``decompose_claim`` that persists each new cell.
 
     The callback adds the cell + edges to the graph, re-serializes the
