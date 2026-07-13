@@ -20,7 +20,6 @@ from petri.cli.launch import register as register_launch
 from petri.cli.scan import register as register_scan
 from petri.cli.seed import register as register_seed
 from petri.cli.stop import register as register_stop
-from petri.cli.agents import register as register_agents
 
 app = typer.Typer(
     name="petri",
@@ -40,6 +39,7 @@ _COMMAND_REGISTRARS = (
     register_scan,
     register_graph,
     register_connect,
+    register_agents,
 )
 
 for register_command in _COMMAND_REGISTRARS:
