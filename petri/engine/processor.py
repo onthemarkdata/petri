@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +22,6 @@ from petri.analysis.convergence import (
     check_convergence,
     compute_circuit_breaker,
     evaluate_short_circuits,
-    identify_weakest_link,
     load_agent_roles,
 )
 from petri.reasoning.debate import load_debate_pairings, log_debate, mediate_debate
@@ -38,9 +37,7 @@ from petri.models import (
 )
 from petri.storage.queue import (
     add_to_queue,
-    get_next,
     list_queue,
-    new_cycle,
     set_focused_directive,
     set_iteration,
     set_weakest_link,

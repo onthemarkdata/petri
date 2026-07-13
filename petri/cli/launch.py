@@ -131,7 +131,7 @@ def register(app: typer.Typer) -> None:
 
         from petri.cli.init import create_petri_dish
         from petri.dashboard.api import create_app
-        from petri.dashboard.migrate import init_db, rebuild_sqlite
+        from petri.dashboard.migrate import rebuild_sqlite
 
         # Free the port first so a stale dashboard from a prior session
         # doesn't block us. The sqlite index is disposable — killing is safe.

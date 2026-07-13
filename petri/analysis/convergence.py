@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 from petri.config import MAX_ITERATIONS
-from petri.models import AgentRole, ConvergenceCheckResult, Debate, ShortCircuitCondition, Verdict
+from petri.models import AgentRole, ConvergenceCheckResult, ShortCircuitCondition, Verdict
 
 # ── Defaults ──────────────────────────────────────────────────────────────
 

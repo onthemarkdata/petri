@@ -29,7 +29,6 @@ from petri.engine.processor import (
     process_queue,
     reset_stop,
 )
-from petri.storage.queue import update_state
 
 
 @pytest.fixture(autouse=True)

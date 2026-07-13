@@ -9,7 +9,7 @@ import pytest
 
 from petri.graph.colony import ColonyGraph, serialize_colony
 from petri.storage.event_log import append_event, load_events
-from petri.models import CellStatus, Colony, build_cell_key
+from petri.models import CellStatus, Colony
 from petri.engine.propagation import get_impact_report, propagate_upward, reopen_cell
 from petri.storage.queue import add_to_queue, load_queue
 

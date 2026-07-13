@@ -24,7 +24,7 @@ if sys.platform == "win32":
     )
 import fcntl
 
-from petri.models import QueueEntry, QueueState
+from petri.models import QueueEntry
 
 # ── Valid State Transitions ─────────────────────────────────────────────
 

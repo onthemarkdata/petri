@@ -94,7 +94,6 @@ def scan(
     # Scanner functions expect these as separate dicts — extract sections
     defaults_agents = {"agents": petri_yaml.get("agents", {})}
     defaults_source_hierarchy = petri_yaml.get("source_hierarchy", {})
-    defaults_debates = {"debates": petri_yaml.get("debates", [])}
 
     # 1. Agent names consistency
     issues.extend(

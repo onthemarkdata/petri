@@ -18,7 +18,6 @@ from tests.conftest import CANONICAL_CELL_IDS
 
 from petri.storage.queue import (
     TERMINAL_STATES,
-    VALID_TRANSITIONS,
     add_to_queue,
     get_next,
     get_state_summary,

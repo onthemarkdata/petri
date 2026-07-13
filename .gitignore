@@ -214,3 +214,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Private working notes (not part of the public docs corpus)
+docs/v2/BLOG_PART2_NOTES.md

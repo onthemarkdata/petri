@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in Petri broke or behaved unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! The more detail you can give, the faster it gets fixed.
+  - type: input
+    id: version
+    attributes:
+      label: Petri version
+      description: Output of `pip show petri-grow | grep Version` (or `uv pip show petri-grow`)
+      placeholder: "0.3.4"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.12.1"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15.2 / Ubuntu 24.04 / Windows 11"
+    validations:
+      required: true
+  - type: input
+    id: backend
+    attributes:
+      label: Inference backend
+      description: Which backend were you using? (e.g. Claude Code CLI + model name)
+      placeholder: "Claude Code CLI · claude-sonnet-4-6"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, and what actually happened?
+      placeholder: |
+        1. Ran `petri seed "..."`
+        2. Expected the colony to be created
+        3. Instead got ...
+    validations:
+      required: true
+  - type: textarea
+    id: inspect
+    attributes:
+      label: Output of `petri inspect`
+      description: Paste the output — it captures your environment's prerequisite state.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Terminal output, tracebacks, or event-log excerpts. Redact anything sensitive.
+      render: text

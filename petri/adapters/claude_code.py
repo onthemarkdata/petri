@@ -21,12 +21,10 @@ from petri.adapters.generators import (
     generate_data_model_rule,
     generate_evidence_format_rule,
     generate_feedback_loop_rule,
-    generate_petri_yaml,
     generate_research_methodology_rule,
     generate_skill,
 )
 from petri.analysis.convergence import load_agent_roles
-from petri.models import AgentRole, PetriConfig
 
 # Skills to generate
 _SKILL_NAMES = [

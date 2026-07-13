@@ -13,7 +13,6 @@ from petri.analysis.convergence import (
     identify_weakest_link,
     load_agent_roles,
 )
-from petri.models import AgentRole, Verdict
 
 from tests.conftest import make_verdict
 
