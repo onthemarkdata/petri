@@ -52,3 +52,7 @@ petri = [
     "templates/*.html",
     "assets/**/*",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

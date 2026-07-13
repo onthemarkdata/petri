@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Want to help with the v2 migration?
+    url: https://github.com/onthemarkdata/petri/blob/main/docs/v2/MIGRATION_PLAN.md
+    about: The v2 roadmap — 7 milestones of scoped, claimable issues. Look for the "good first issue" label.

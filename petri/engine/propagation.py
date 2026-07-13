@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from petri.graph.colony import ColonyGraph, deserialize_colony
+from petri.graph.colony import ColonyGraph
 from petri.storage.event_log import append_event
 from petri.models import CellStatus
 from petri.storage.queue import add_to_queue, load_queue

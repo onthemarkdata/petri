@@ -14,7 +14,10 @@ import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
+
+if TYPE_CHECKING:
+    from petri.models import AssessmentResult
 
 from petri.config import AGENT_TOOLS, LLM_INFERENCE_MODEL
 

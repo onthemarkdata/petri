@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from petri.analysis.scanner import ScanIssue, auto_fix, scan, scan_loop
 

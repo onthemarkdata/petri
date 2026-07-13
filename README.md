@@ -5,6 +5,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/petri-grow)](https://pypi.org/project/petri-grow/)
 [![Python 3.11+](https://img.shields.io/pypi/pyversions/petri-grow)](https://pypi.org/project/petri-grow/)
 [![License](https://img.shields.io/pypi/l/petri-grow)](https://github.com/onthemarkdata/petri/blob/main/LICENSE)
+[![CI](https://github.com/onthemarkdata/petri/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/onthemarkdata/petri/actions/workflows/ci.yml)
 
 An agent orchestration framework to grow your AI's context via Claude Code. Decomposes claims into DAGs of logical units and validates them bottom-up through a multi-agent adversarial review pipeline.
 
@@ -191,6 +192,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, state machine diagra
 uv pip install -e ".[all]"
 uv run pytest tests/
 ```
+
+## Contributing
+
+Petri is mid-flight on its **v2 migration** — re-platforming onto Pydantic AI, pydantic-graph,
+and DBOS while staying zero-infrastructure. The roadmap lives in
+[docs/v2/MIGRATION_PLAN.md](docs/v2/MIGRATION_PLAN.md), broken into milestone epics with scoped,
+claimable issues — including
+[good first issues](https://github.com/onthemarkdata/petri/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+that need no prior context. See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch model
+(`dev` for PRs, `main` for releases), setup, and how to claim an issue.
 
 ## Credit
 - Image Credits: Gemini Pro, April 2026

@@ -17,7 +17,7 @@ import signal
 import sqlite3
 import sys
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from petri.dashboard.frontend import build_frontend_html
-from petri.dashboard.migrate import incremental_sync, rebuild_sqlite
+from petri.dashboard.migrate import incremental_sync
 from petri.storage.event_log import rollup_to_combined
 from petri.storage.queue import list_queue, load_queue
 

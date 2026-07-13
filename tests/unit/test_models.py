@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from petri.models import (
     EVENT_DATA_MODELS,
     Cell,
-    CellStatus,
     DecompositionResult,
     Edge,
     Event,

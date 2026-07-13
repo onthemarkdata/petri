@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 
 import pytest
 
@@ -123,8 +122,8 @@ class TestRebuildSqlite:
     def test_idempotent_rebuild(self, dashboard_env):
         """INSERT OR IGNORE means rebuilding twice doesn't duplicate."""
         env = dashboard_env
-        count1 = rebuild_sqlite(env["petri_dir"], env["db_path"])
-        count2 = rebuild_sqlite(env["petri_dir"], env["db_path"])
+        rebuild_sqlite(env["petri_dir"], env["db_path"])
+        rebuild_sqlite(env["petri_dir"], env["db_path"])
 
         # Second rebuild may insert 0 (OR IGNORE) or same count
         # but total in DB should still be 5
