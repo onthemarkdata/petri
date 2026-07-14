@@ -7,6 +7,19 @@
 > decisions is indexed in [docs/field-reports.md](field-reports.md) (issues cite its entries as
 > `#N` field-report numbers in code spans).
 
+## Before / after at a glance
+
+**Before** — `petri-grow` v0.3.4, the hand-rolled runtime (a 14-state fcntl-locked queue, an
+adaptive load balancer, a subprocess stream parser, and a JSONL-plus-SQLite read path):
+
+![Petri v0.3.4 hand-rolled runtime: the CLI drives a grow loop, processor, fcntl queue, and load balancer; a ~900-line provider shells out to the Claude Code CLI; JSONL logs feed a disposable SQLite index for the dashboard.](v2/images/architecture-before.jpeg)
+
+**After** — Petri v2, typed agents on a durable substrate (a typed pydantic-graph pipeline run as
+durable DBOS workflows behind a swappable seam, one `petri.sqlite` per dish, OpenTelemetry
+throughout):
+
+![Petri v2 target: the unchanged CLI drives a colony workflow and DBOS queue behind an ExecutionBackend seam; a pydantic-graph per-cell pipeline runs typed agents through a pi-default harness; all domain data lives in one petri.sqlite per dish, with text exported as a derived artifact.](v2/images/architecture-after.jpeg)
+
 ## 1. The decision record (D1–D10)
 
 Settled 2026-07-12 by the maintainer; issues must not re-litigate these.
