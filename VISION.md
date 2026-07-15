@@ -532,5 +532,4 @@ Orchestration is not merely glue around a model. It is an independently developa
 
 - [Petri repository](https://github.com/onthemarkdata/petri)
 - [Petri v2 migration plan](https://github.com/onthemarkdata/petri/blob/main/docs/v2/MIGRATION_PLAN.md)
-- [Agent & Harness & Micro-Orchestrator, Oh My!](https://scalingdataops.substack.com/p/agent-and-harness-and-micro-orchestrator)
-- [Mark Freeman](https://markfreeman.dev/about/)
+- [Blog: Agent & Harness & Micro-Orchestrator, Oh My!](https://scalingdataops.substack.com/p/agent-and-harness-and-micro-orchestrator)
