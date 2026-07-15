@@ -6,6 +6,8 @@ keeping the zero-infrastructure, local-first design.
 
 ## Where to start
 
+- **Vision:** [VISION.md](VISION.md). The durable, model-independent research runtime Petri is growing
+  into, and the thinking behind it.
 - **Roadmap:** [docs/v2/MIGRATION_PLAN.md](docs/v2/MIGRATION_PLAN.md). Seven milestones, each with a
   tracking epic issue and a set of scoped, independently landable issues.
 - **Good first issues:** [filter the tracker](https://github.com/onthemarkdata/petri/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
