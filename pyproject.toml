@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=68.0", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "petri-grow"
-version = "0.3.4"
+dynamic = ["version"]
 description = "An agent orchestration framework to grow your AI's context."
 requires-python = ">=3.11"
 license = "Apache-2.0"
-authors = [{name = "On the Mark Data LLC", email = "mark@onthemarkdata.com"}]
+authors = [{name = "On the Mark Data LLC"}]
 readme = "README.md"
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -56,3 +56,6 @@ petri = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
