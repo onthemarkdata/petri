@@ -31,8 +31,9 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = ["pypdf>=4.0"]
-test = ["pytest>=7.0", "pytest-asyncio>=0.21", "httpx>=0.24"]
-all = ["petri-grow[pdf,test]"]
+test = ["pytest>=7.0", "pytest-asyncio>=0.21", "httpx>=0.24", "pytest-cov>=5.0"]
+dev = ["mypy>=1.11", "pre-commit>=3.7"]
+all = ["petri-grow[pdf,test,dev]"]
 
 [project.scripts]
 petri = "petri.cli:app"
@@ -59,3 +60,13 @@ line-length = 100
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0"
+
+[tool.mypy]
+# Intentionally lenient on a largely untyped codebase; tightened per-module over time.
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
