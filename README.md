@@ -13,6 +13,8 @@ What results are a repository of curated information, citations, and URLs, organ
 
 Petri includes both a CLI tool intended for AI agents and an interactive UI mode to help keep track of all active agents within Petri and to review the context, reasoning, and citations curated by the AI agents.
 
+> **📖 [Read the Petri Vision →](VISION.md)** — where Petri is headed: durable, auditable, model-independent deep research you own and can reshape.
+
 ## Demo
 https://github.com/user-attachments/assets/ef47dc07-741d-4ac5-9f35-2afb12fc9046
 
