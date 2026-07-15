@@ -43,11 +43,10 @@ jobs:
       # ruff pinned to match .pre-commit-config.yaml so local and CI results agree; bump both together
       - run: uvx ruff@0.15.21 check --output-format=github .
 
-  # Advisory only: this job is non-blocking (continue-on-error) and must NOT be
-  # added to the branch-protection required-status-checks list.
+  # Required, blocking check: mypy must pass. Included in the branch-protection
+  # required status checks for main and dev (see scripts/apply_rulesets.py).
   typecheck:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
         with:
