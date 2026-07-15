@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional, cast
+from typing import TYPE_CHECKING, Callable, Optional
 
 import typer
 
@@ -21,8 +21,31 @@ from petri.storage.paths import (
     parse_cell_id,
 )
 
+if TYPE_CHECKING:
+    from petri.models import ClarifyingQuestion
+
 
 # ── Module-private helpers (extracted from nested closures) ──────────────
+
+
+def _clarifications_to_models(clarifications: list[dict]) -> list[ClarifyingQuestion]:
+    """Convert stored clarification dicts into ClarifyingQuestion models.
+
+    seed persists clarifications as plain dicts (Colony.clarifications is
+    list[dict]), but decompose_claim consumes ClarifyingQuestion objects and
+    reads .question/.answer/.options. Passing raw dicts raised AttributeError
+    once a user answered a clarifying question; converting here fixes that.
+    """
+    from petri.models import ClarifyingQuestion
+
+    return [
+        ClarifyingQuestion(
+            question=clar.get("question", ""),
+            answer=clar.get("answer"),
+            options=clar.get("options", []),
+        )
+        for clar in clarifications
+    ]
 
 
 def _run_substance_check(
@@ -420,11 +443,7 @@ def register(app: typer.Typer) -> None:
                     )
                     result = decompose_claim(
                         claim=claim,
-                        # seed persists clarifications as dicts (Colony.clarifications
-                        # is list[dict]), but decompose_claim expects ClarifyingQuestion
-                        # objects. This cast keeps type-checking honest without changing
-                        # behavior; reconciling the two is a separate bug fix.
-                        clarifications=cast(list, clarifications),
+                        clarifications=_clarifications_to_models(clarifications),
                         dish_id=dish_id,
                         colony_name=colony_name,
                         provider=provider,
