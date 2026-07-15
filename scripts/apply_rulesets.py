@@ -63,6 +63,7 @@ STATUS_CHECK_CONTEXTS = (
     "test (3.14)",
     "lint",
     "build",
+    "typecheck",
 )
 
 # Desired parameters for the rules the dev ruleset must contain. Order here is
@@ -145,21 +146,31 @@ def _upsert_rule(rules: list[dict], rule_type: str, parameters: dict) -> None:
 
 
 def mutate_main(ruleset: dict) -> None:
-    """Require one approving review with code-owner review and stale dismissal.
+    """Require one approving review with code-owner review and stale dismissal,
+    and keep the required status checks (including typecheck) in sync.
 
-    Touches only the pull_request rule's parameters; every other rule
-    (deletion, non_fast_forward, creation, update, required_linear_history,
-    required_status_checks) and bypass_actors are left exactly as-is.
+    Touches the pull_request rule's parameters and the required_status_checks
+    rule's context list; the checks' strict policy and every other rule
+    (deletion, non_fast_forward, creation, update, required_linear_history) and
+    bypass_actors are left exactly as-is.
     """
+    saw_pull_request = False
     for rule in ruleset.get("rules", []):
         if rule.get("type") == "pull_request":
             params = rule.setdefault("parameters", {})
             params["required_approving_review_count"] = 1
             params["require_code_owner_review"] = True
             params["dismiss_stale_reviews_on_push"] = True
-            return
-    print("FATAL: main ruleset has no pull_request rule to mutate", file=sys.stderr)
-    sys.exit(1)
+            saw_pull_request = True
+        elif rule.get("type") == "required_status_checks":
+            params = rule.setdefault("parameters", {})
+            params["required_status_checks"] = [
+                {"context": context, "integration_id": INTEGRATION_ID}
+                for context in STATUS_CHECK_CONTEXTS
+            ]
+    if not saw_pull_request:
+        print("FATAL: main ruleset has no pull_request rule to mutate", file=sys.stderr)
+        sys.exit(1)
 
 
 def mutate_dev(ruleset: dict) -> None:
