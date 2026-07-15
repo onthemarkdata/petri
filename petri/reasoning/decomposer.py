@@ -10,7 +10,7 @@ template-stamped tree.
 from __future__ import annotations
 
 import re
-from typing import Callable, Optional
+from typing import Callable, Optional, cast
 
 from petri.models import (
     Cell,
@@ -51,8 +51,16 @@ def generate_clarifying_questions(
             "the wizard is fully agentic and has no hardcoded fallback."
         )
 
-    raw = provider.generate_clarifying_questions(
-        claim, max_questions, on_progress=on_progress
+    # The InferenceProvider protocol annotates this as returning
+    # list[ClarifyingQuestion], but every concrete provider returns raw JSON
+    # dicts here — this wrapper is the dict -> ClarifyingQuestion conversion
+    # step. Cast to the true runtime type so the dict access below
+    # type-checks; cast() is a no-op at runtime and preserves behavior.
+    raw = cast(
+        "list[dict]",
+        provider.generate_clarifying_questions(
+            claim, max_questions, on_progress=on_progress
+        ),
     )
     return [
         ClarifyingQuestion(
@@ -264,12 +272,20 @@ def _provider_decompose(
         }
         for clarification in clarifications
     ]
-    raw = provider.decompose_claim(
-        claim,
-        clarification_dicts,
-        guidance=guidance,
-        max_premises=max_per_layer,
-        on_progress=on_progress,
+    # The InferenceProvider protocol annotates decompose_claim as returning
+    # DecompositionResult, but concrete providers return the raw JSON dict
+    # ({"nodes": [...], "edges": [...]}) that this function parses below via
+    # raw.get(...). Cast to the true runtime type so the dict access
+    # type-checks; cast() is a no-op at runtime and preserves behavior.
+    raw = cast(
+        "dict",
+        provider.decompose_claim(
+            claim,
+            clarification_dicts,
+            guidance=guidance,
+            max_premises=max_per_layer,
+            on_progress=on_progress,
+        ),
     )
 
     # Build Level 0 center cell — the CLI is responsible for serializing

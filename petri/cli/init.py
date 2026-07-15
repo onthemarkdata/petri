@@ -6,7 +6,7 @@ import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 
@@ -159,7 +159,7 @@ def create_petri_dish(
     queue_path = petri_dir / "queue.json"
     if not queue_path.exists():
         result.created_queue = True
-        queue_data = {"version": 1, "last_updated": None, "entries": {}}
+        queue_data: dict[str, Any] = {"version": 1, "last_updated": None, "entries": {}}
         queue_path.write_text(
             json.dumps(queue_data, indent=2) + "\n", encoding="utf-8"
         )

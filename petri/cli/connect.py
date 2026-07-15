@@ -90,6 +90,7 @@ def register(app: typer.Typer) -> None:
             print_error_and_exit(f"Cannot create edge: {exc}")
 
         # Re-serialize the colony
+        assert source_colony is not None  # narrowed by the None checks above
         colony_slug = source_colony.id.replace(f"{dish_id}-", "", 1)
         colony_path = petri_dir / "petri-dishes" / colony_slug
         serialize_colony(source_graph, source_colony, colony_path)

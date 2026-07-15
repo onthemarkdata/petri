@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
+
 import typer
 
 from petri.cli._bootstrap import find_petri_dir
@@ -23,9 +26,8 @@ def register(app: typer.Typer) -> None:
         petri_dir = find_petri_dir()
 
         # Determine generated config dir (default: .claude/ in project root)
-        generated_dir = petri_dir.parent / ".claude"
-        if not generated_dir.exists():
-            generated_dir = None
+        generated_root = petri_dir.parent / ".claude"
+        generated_dir: Optional[Path] = generated_root if generated_root.exists() else None
 
         if loop:
             issues = scan_loop(petri_dir, generated_dir)

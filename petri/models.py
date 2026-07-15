@@ -645,7 +645,7 @@ class InferenceProvider(Protocol):
     def decompose_claim(
         self,
         claim: str,
-        clarifications: list[ClarifyingQuestion],
+        clarifications: list[dict],
         guidance: str = "",
         max_premises: int = 5,
         on_progress: "Optional[Callable[[str], None]]" = None,
@@ -679,9 +679,24 @@ class InferenceProvider(Protocol):
         ...
 
     def assess_cell(
-        self, cell_id: str, claim_text: str, context: dict, agent_role: str
+        self,
+        cell_id: str,
+        claim_text: str,
+        context: dict,
+        agent_role: str,
+        on_progress: "Optional[Callable[[str], None]]" = None,
     ) -> AssessmentResult:
         """Run an agent role assessment on a cell."""
+        ...
+
+    def summarize_evidence(
+        self,
+        cell_id: str,
+        claim_text: str,
+        evidence_md: str,
+        iteration: int,
+    ) -> str:
+        """Summarize a cell's accumulated evidence into a short markdown digest."""
         ...
 
     def match_evidence(

@@ -385,6 +385,15 @@ class TestInferenceProviderProtocol:
             ) -> dict:
                 return {}
 
+            def summarize_evidence(
+                self,
+                cell_id: str,
+                claim_text: str,
+                evidence_md: str,
+                iteration: int,
+            ) -> str:
+                return ""
+
             def match_evidence(
                 self, content: str, cells: list[dict]
             ) -> list[dict]:
