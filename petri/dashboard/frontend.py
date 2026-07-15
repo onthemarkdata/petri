@@ -84,7 +84,7 @@ STARTER_CLAIM = (
 # ── Builder ──────────────────────────────────────────────────────────────
 
 
-def build_frontend_html(version: str = "0.3.0") -> str:
+def build_frontend_html(version: str | None = None) -> str:
     """Load the frontend template and substitute config values.
 
     Parameters
@@ -97,6 +97,9 @@ def build_frontend_html(version: str = "0.3.0") -> str:
     str
         Complete HTML document ready to serve.
     """
+    if version is None:
+        from petri import __version__
+        version = __version__
     template_path = _TEMPLATES_DIR / "frontend.html"
     tmpl = Template(template_path.read_text())
 
