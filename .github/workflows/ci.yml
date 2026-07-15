@@ -5,6 +5,10 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,6 +23,9 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # setuptools-scm needs git tags to compute the version when 'uv sync' installs the project
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -26,19 +33,36 @@ jobs:
       - name: Install (locked)
         run: uv sync --locked --extra test
       - name: Run tests (offline by design)
-        run: uv run pytest tests/ -q
+        run: uv run pytest tests/ -q --cov=petri --cov-report=term-missing --cov-report=xml --cov-fail-under=68
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
-      - run: uvx ruff check --output-format=github .
+      # ruff pinned to match .pre-commit-config.yaml so local and CI results agree; bump both together
+      - run: uvx ruff@0.15.21 check --output-format=github .
+
+  # Advisory only: this job is non-blocking (continue-on-error) and must NOT be
+  # added to the branch-protection required-status-checks list.
+  typecheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked --extra test --extra dev
+      - run: uv run mypy petri
 
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # setuptools-scm needs git tags to compute the version when 'uv build' runs
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
       - run: uv build
       - run: uvx twine check dist/*
