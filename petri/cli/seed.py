@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, cast
 
 import typer
 
@@ -326,6 +326,9 @@ def register(app: typer.Typer) -> None:
         # ── Phase D: Clarifying questions wizard ──
         clarifications: list[dict] = []
         if interactive and not skip_wizard:
+            # interactive is only True when the questionary import above
+            # succeeded, so narrow away the Optional for mypy.
+            assert questionary is not None
             log_for_this_run(center_id, "clarifying_questions_requested")
             try:
                 with Spinner(
@@ -417,7 +420,11 @@ def register(app: typer.Typer) -> None:
                     )
                     result = decompose_claim(
                         claim=claim,
-                        clarifications=clarifications,
+                        # seed persists clarifications as dicts (Colony.clarifications
+                        # is list[dict]), but decompose_claim expects ClarifyingQuestion
+                        # objects. This cast keeps type-checking honest without changing
+                        # behavior; reconciling the two is a separate bug fix.
+                        clarifications=cast(list, clarifications),
                         dish_id=dish_id,
                         colony_name=colony_name,
                         provider=provider,
@@ -445,6 +452,9 @@ def register(app: typer.Typer) -> None:
             if not interactive:
                 break  # non-interactive: auto-accept (used by --no-questions)
 
+            # Reaching here means interactive is True, so the questionary
+            # import above succeeded; narrow away the Optional for mypy.
+            assert questionary is not None
             action = questionary.select(
                 "What would you like to do?",
                 choices=["Accept", "Regenerate with guidance", "Abort"],

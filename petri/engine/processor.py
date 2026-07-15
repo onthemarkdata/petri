@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, Optional
 
 from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 from petri.analysis.convergence import (
@@ -27,6 +27,7 @@ from petri.analysis.convergence import (
 from petri.reasoning.debate import load_debate_pairings, log_debate, mediate_debate
 from petri.storage.event_log import append_event, get_verdicts, query_events
 from petri.models import (
+    AssessmentResult,
     CellStatus,
     ConvergenceOutcome,
     EvaluationResult,
@@ -242,7 +243,7 @@ def _to_str(value: object) -> str:
     return str(value) if value else ""
 
 
-def _get(result: object, key: str, default: str = "") -> object:
+def _get(result: object, key: str, default: Any = "") -> Any:
     """Get a field from an AssessmentResult model or a dict."""
     if hasattr(result, key):
         return getattr(result, key)
@@ -396,7 +397,8 @@ def _log_sources_from_result(
             }
         else:
             continue
-        if not data["url"].startswith(("http://", "https://")):
+        url_value = data["url"] or ""
+        if not url_value.startswith(("http://", "https://")):
             logger.warning(
                 "Source without valid URL from %s: %s",
                 agent, data.get("title", "unknown"),
@@ -866,11 +868,11 @@ def _run_socratic_phase(
         step_agent_name = f"socratic_{step_name}"
         if fire is not None:
             fire("agent", phase="socratic", agent=step_agent_name, iteration=iteration)
+        on_progress_step: Optional[Callable[[str], None]] = None
         if text_emitter is not None:
-            def on_progress_step(chunk: str, _phase="socratic", _agent=step_agent_name) -> None:
+            def _on_progress_step(chunk: str, _phase="socratic", _agent=step_agent_name) -> None:
                 text_emitter(_phase, _agent, chunk)
-        else:
-            on_progress_step = None
+            on_progress_step = _on_progress_step
         result = provider.assess_cell(
             cell_id, claim_text, context, "socratic_questioner",
             on_progress=on_progress_step,
@@ -955,11 +957,11 @@ def _run_socratic_phase(
             agent="socratic_verifier",
             iteration=iteration,
         )
+    on_progress_verify: Optional[Callable[[str], None]] = None
     if text_emitter is not None:
-        def on_progress_verify(chunk: str) -> None:
+        def _on_progress_verify(chunk: str) -> None:
             text_emitter("socratic", "socratic_verifier", chunk)
-    else:
-        on_progress_verify = None
+        on_progress_verify = _on_progress_verify
     verification = provider.assess_cell(
         cell_id, claim_text, verification_context, "socratic_questioner",
         on_progress=on_progress_verify,
@@ -1082,14 +1084,14 @@ def _run_phase1(
     queue_entry: dict,
     fire: Callable[..., None] | None = None,
     text_emitter: Callable[[str, str, str], None] | None = None,
-) -> list[dict]:
+) -> list[AssessmentResult]:
     """Phase 1: Research -- agents assigned to the research phase in config."""
     from petri.config import get_research_agents
 
     events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
     phase1_agents = get_research_agents()
-    verdicts_collected: list[dict] = []
+    verdicts_collected: list[AssessmentResult] = []
 
     prior_evidence = _load_evidence_context(petri_dir, cell_id, dish_id)
     context = {
@@ -1107,11 +1109,11 @@ def _run_phase1(
                 agent=agent_name,
                 iteration=iteration,
             )
+        on_progress_research: Optional[Callable[[str], None]] = None
         if text_emitter is not None:
-            def on_progress_research(chunk: str, _agent=agent_name) -> None:
+            def _on_progress_research(chunk: str, _agent=agent_name) -> None:
                 text_emitter("research", _agent, chunk)
-        else:
-            on_progress_research = None
+            on_progress_research = _on_progress_research
         result = provider.assess_cell(
             cell_id, claim_text, context, agent_name,
             on_progress=on_progress_research,
@@ -1158,15 +1160,15 @@ def _run_phase2(
     queue_entry: dict,
     fire: Callable[..., None] | None = None,
     text_emitter: Callable[[str, str, str], None] | None = None,
-) -> list[dict]:
+) -> list[AssessmentResult]:
     """Phase 2: Critique -- agents assigned to the critique phase in config."""
     from petri.config import get_critique_agents
 
     events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
     phase2_agents = get_critique_agents()
-    verdicts_collected: list[dict] = []
-    agent_outputs: dict[str, dict] = {}
+    verdicts_collected: list[AssessmentResult] = []
+    agent_outputs: dict[str, Any] = {}
 
     prior_evidence = _load_evidence_context(petri_dir, cell_id, dish_id)
     context = {
@@ -1184,11 +1186,11 @@ def _run_phase2(
                 agent=agent_name,
                 iteration=iteration,
             )
+        on_progress_critique: Optional[Callable[[str], None]] = None
         if text_emitter is not None:
-            def on_progress_critique(chunk: str, _agent=agent_name) -> None:
+            def _on_progress_critique(chunk: str, _agent=agent_name) -> None:
                 text_emitter("critique", _agent, chunk)
-        else:
-            on_progress_critique = None
+            on_progress_critique = _on_progress_critique
         result = provider.assess_cell(
             cell_id, claim_text, context, agent_name,
             on_progress=on_progress_critique,
@@ -1365,7 +1367,7 @@ def _run_red_team(
     agent_roles: dict,
     fire: Callable[..., None] | None = None,
     text_emitter: Callable[[str, str, str], None] | None = None,
-) -> dict:
+) -> AssessmentResult:
     """Red Team phase -- red_team_lead attempts disproval."""
     events_file = _events_path(petri_dir, cell_id, dish_id)
     queue_file = _queue_path(petri_dir)
@@ -1380,11 +1382,11 @@ def _run_red_team(
             agent="red_team_lead",
             iteration=iteration,
         )
+    on_progress_red_team: Optional[Callable[[str], None]] = None
     if text_emitter is not None:
-        def on_progress_red_team(chunk: str) -> None:
+        def _on_progress_red_team(chunk: str) -> None:
             text_emitter("red_team", "red_team_lead", chunk)
-    else:
-        on_progress_red_team = None
+        on_progress_red_team = _on_progress_red_team
     result = provider.assess_cell(
         cell_id, claim_text, context, "red_team_lead",
         on_progress=on_progress_red_team,
@@ -1446,11 +1448,11 @@ def _run_evaluation(
             agent="evidence_evaluator",
             iteration=iteration,
         )
+    on_progress_evaluator: Optional[Callable[[str], None]] = None
     if text_emitter is not None:
-        def on_progress_evaluator(chunk: str) -> None:
+        def _on_progress_evaluator(chunk: str) -> None:
             text_emitter("evaluating", "evidence_evaluator", chunk)
-    else:
-        on_progress_evaluator = None
+        on_progress_evaluator = _on_progress_evaluator
     result = provider.assess_cell(
         cell_id, claim_text, context, "evidence_evaluator",
         on_progress=on_progress_evaluator,
@@ -1866,6 +1868,10 @@ def process_queue(
     def _process_one(worker_cell_id: str) -> ProcessCellResult:
         slot_index = slot_pool.get()
         try:
+            # Invariant: process_queue raises NoProviderError above when
+            # provider is None (and the dry_run path returns early), so any
+            # cell reaching here always has a concrete provider.
+            assert provider is not None
             return process_cell(
                 worker_cell_id, petri_dir,
                 provider=provider,

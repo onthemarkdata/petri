@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Optional
 
 import typer
 
@@ -60,6 +61,8 @@ def register(app: typer.Typer) -> None:
                     # Log stop event — walk each per-colony directory looking
                     # for a matching cell dir (using the zero-padded fallback
                     # layout, which is what the cell-ID alone can reconstruct).
+                    level_int: Optional[int]
+                    seq_int: Optional[int]
                     try:
                         _, _, level_int, seq_int = parse_cell_id(cell_id)
                     except ValueError:
