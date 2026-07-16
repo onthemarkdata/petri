@@ -1,0 +1,56 @@
+[
+  {
+    "probe": "introspection",
+    "status": "ran",
+    "returncode": 0,
+    "stdout_lines": 3
+  },
+  {
+    "probe": "error_missing_key",
+    "status": "ran",
+    "returncode": 0,
+    "stdout_lines": 1
+  },
+  {
+    "probe": "error_invalid_model",
+    "status": "ran",
+    "returncode": 0,
+    "stdout_lines": 1
+  },
+  {
+    "probe": "session_multiplex",
+    "status": "ran",
+    "returncode": 0,
+    "stdout_lines": 12
+  },
+  {
+    "probe": "auto_retry_off",
+    "status": "ran",
+    "returncode": 0,
+    "stdout_lines": 11
+  },
+  {
+    "probe": "prompt_roundtrip",
+    "status": "ran",
+    "returncode": 0,
+    "stdout_lines": 11
+  },
+  {
+    "probe": "structured_output",
+    "status": "ran",
+    "returncode": 0,
+    "stdout_lines": 10
+  },
+  {
+    "probe": "fallback_print",
+    "status": "ran",
+    "returncode": 1,
+    "stdout_lines": 0
+  },
+  {
+    "probe": "fallback_json",
+    "status": "ran",
+    "returncode": 0,
+    "stdout_lines": 10
+  }
+]

@@ -1,0 +1,13 @@
+# {"_probe": "session_multiplex", "_argv": ["pi", "--mode", "rpc", "--no-session"], "_returncode": 0, "_notes": ["Inspect ordering of the two `response`/`agent_*` blocks to decide sequential vs multiplexed (drives M1-harness.6: lock to one in-flight request unless multiplexing is proven)."], "_sent": [{"id": "a", "type": "prompt", "message": "first"}, {"id": "b", "type": "prompt", "message": "second"}]}
+{"id":"a","type":"response","command":"prompt","success":true}
+{"id":"b","type":"response","command":"prompt","success":true}
+{"type":"agent_start"}
+{"type":"agent_settled"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"first"}],"timestamp":1784230842172}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"first"}],"timestamp":1784230842172}}
+{"type":"message_start","message":{"role":"assistant","content":[],"api":"bedrock-converse-stream","provider":"amazon-bedrock","model":"us.anthropic.claude-opus-4-6-v1","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","timestamp":1784230842241,"errorMessage":"UnrecognizedClientException: 403: [object Object]"}}
+{"type":"message_end","message":{"role":"assistant","content":[],"api":"bedrock-converse-stream","provider":"amazon-bedrock","model":"us.anthropic.claude-opus-4-6-v1","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","timestamp":1784230842241,"errorMessage":"UnrecognizedClientException: 403: [object Object]"}}
+{"type":"turn_end","message":{"role":"assistant","content":[],"api":"bedrock-converse-stream","provider":"amazon-bedrock","model":"us.anthropic.claude-opus-4-6-v1","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","timestamp":1784230842241,"errorMessage":"UnrecognizedClientException: 403: [object Object]"},"toolResults":[]}
+{"type":"agent_end","messages":[{"role":"user","content":[{"type":"text","text":"first"}],"timestamp":1784230842172},{"role":"assistant","content":[],"api":"bedrock-converse-stream","provider":"amazon-bedrock","model":"us.anthropic.claude-opus-4-6-v1","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","timestamp":1784230842241,"errorMessage":"UnrecognizedClientException: 403: [object Object]"}],"willRetry":false}
+{"type":"agent_settled"}

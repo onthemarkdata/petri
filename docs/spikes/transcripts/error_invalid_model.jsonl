@@ -1,0 +1,3 @@
+# {"_probe": "error_invalid_model", "_argv": ["pi", "--mode", "rpc", "--no-session", "--provider", "anthropic", "--model", "anthropic/does-not-exist-xyz"], "_returncode": 0, "_notes": [], "_sent": [{"id": "r", "type": "prompt", "message": "hi"}]}
+{"id":"r","type":"response","command":"prompt","success":false,"error":"No API key found for anthropic.\n\nUse /login to log into a provider via OAuth or API key. See:\n  /opt/node22/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md\n  /opt/node22/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md"}
+# STDERR: "Warning: Model \"does-not-exist-xyz\" not found for provider \"anthropic\". Using custom model id.\n"
