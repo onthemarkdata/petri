@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-001-005",
+  "colony_id": "scratch-demo",
+  "claim_text": "Extended regex engines (e.g., PCRE with backreferences and recursive patterns) exceed classical regular power; consequently, the claim holds strictly for classical regular expressions and must be carefully scoped when applied to real-world regex engines.",
+  "level": 1,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-000-000"
+  ],
+  "created_at": ""
+}

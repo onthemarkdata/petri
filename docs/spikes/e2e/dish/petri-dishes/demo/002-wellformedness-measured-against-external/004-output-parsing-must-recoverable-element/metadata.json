@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-002-004",
+  "colony_id": "scratch-demo",
+  "claim_text": "The output of parsing must be a recoverable element tree \u2014 a concrete data structure encoding all nodes, attributes, and nesting relationships present in the source document \u2014 and this tree must be the direct, required artifact of the parse operation.",
+  "level": 2,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-001-001"
+  ],
+  "created_at": ""
+}

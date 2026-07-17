@@ -1,0 +1,58 @@
+[
+  {
+    "url": "https://en.wikipedia.org/wiki/Pumping_lemma_for_regular_languages",
+    "title": "Wikipedia, Pumping lemma for regular languages (2026)",
+    "hierarchy_level": 2,
+    "keywords": ["pumping lemma", "regular language", "finite automata", "nesting", "balanced parentheses", "not regular", "proof", "memory", "states"],
+    "content": "The pumping lemma for regular languages states that for every regular language L there is a constant p (the pumping length) such that every string w in L with |w| >= p can be split as w = xyz with |xy| <= p, |y| >= 1, and xy^n z in L for all n >= 0. It is used to prove a language is NOT regular by contradiction: exhibit a long string whose forced middle section, when pumped, leaves the language. The canonical example is the language of balanced/properly nested parentheses (or {a^n b^n}): pumping the y section changes the count of open vs close symbols, producing an unbalanced string not in the language, so no finite automaton can recognize it. The underlying reason is that a finite automaton has only finitely many states (finite memory) and therefore cannot count unbounded nesting depth. Nested HTML tags (<div>...<div>...</div>...</div>) have exactly this balanced, unbounded-depth structure, so the set of well-nested HTML documents is not a regular language."
+  },
+  {
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3367686/",
+    "title": "Fitch & Friederici, Formal language theory: refining the Chomsky hierarchy, Phil. Trans. R. Soc. B (2012)",
+    "hierarchy_level": 2,
+    "keywords": ["chomsky hierarchy", "regular grammar", "context-free grammar", "type 2", "type 3", "strict inclusion", "pushdown automaton", "finite state automaton"],
+    "content": "The Chomsky hierarchy classifies formal grammars into four strictly nested classes: regular (Type 3), context-free (Type 2), context-sensitive (Type 1), and recursively enumerable (Type 0). Regular languages are exactly those decided by a finite-state automaton; context-free languages are exactly those accepted by a (non-deterministic) pushdown automaton, whose stack supplies the unbounded memory needed for recursion and nesting. The inclusions are strict: there exist context-free languages (e.g. balanced parentheses, a^n b^n) that are provably not regular. Arbitrary nested markup such as HTML requires the recursive/self-embedding power of a context-free grammar and therefore lies strictly above the regular languages that classical regular expressions can describe."
+  },
+  {
+    "url": "https://www.cs.cmu.edu/~janh/courses/411/24/lectures/08-parsing.pdf",
+    "title": "CMU 15-411 Compiler Design, Lecture Notes on Context-Free Grammars (2024)",
+    "hierarchy_level": 2,
+    "keywords": ["parsing", "context-free grammar", "derivation tree", "parse tree", "recognizer", "compiler", "structure", "recursion"],
+    "content": "Parsing is defined as recovering the hierarchical (tree) structure of an input string according to a formal grammar, not merely deciding membership or matching substrings. Context-free grammars generate context-free languages and admit efficient parsing algorithms (LL, LR, Earley) that build a derivation/parse tree. A recognizer that only returns accept/reject, or a matcher that returns spans/offsets, does not by itself produce this tree. Regular expressions correspond to finite automata, which are recognizers over regular languages and cannot construct the recursive derivation trees that parsing of a context-free language such as HTML requires."
+  },
+  {
+    "url": "https://www.cs.odu.edu/~toida/nerzic/390teched/regular/reg-lang/non-regularity.html",
+    "title": "Old Dominion University CS390, Non-Regular Languages (course notes)",
+    "hierarchy_level": 2,
+    "keywords": ["non-regular", "finite memory", "finite automata", "states", "cannot count", "distinguish", "infinitely many strings"],
+    "content": "Finite automata have only a finite amount of memory in the form of their states, so they cannot distinguish infinitely many distinct prefixes. Any language whose recognition requires counting an unbounded quantity (such as matching an arbitrary number of opening and closing brackets, or nesting depth) is therefore not regular. This is formalized by the pumping lemma. Because well-formed HTML permits arbitrarily deep nesting of elements, recognizing (let alone parsing) arbitrary HTML exceeds the power of any finite automaton and hence of any classical regular expression."
+  },
+  {
+    "url": "https://www.johndcook.com/blog/2013/02/21/can-regular-expressions-parse-html-or-not/",
+    "title": "John D. Cook, Can regular expressions parse HTML or not? (2013)",
+    "hierarchy_level": 5,
+    "keywords": ["regex", "html", "parse", "type 3", "type 2", "regular expression", "modern regex", "recursion", "backreferences"],
+    "content": "Classical regular expressions describe exactly the regular (Type 3) languages, while HTML with arbitrary nesting is context-free (Type 2), so classical regular expressions cannot parse arbitrary HTML. The article notes an important terminological caveat: modern 'regex' engines (PCRE, Perl) add features such as recursion and backreferences that make them strictly more powerful than mathematical regular expressions, so in the loose engineering sense one can sometimes match nested constructs. But in the formal computer-science sense of 'regular expression', the answer is a clean no."
+  },
+  {
+    "url": "https://neilmadden.blog/2019/02/24/why-you-really-can-parse-html-and-anything-else-with-regular-expressions/",
+    "title": "Neil Madden, Why you really can parse HTML (and anything else) with regular expressions (2019)",
+    "hierarchy_level": 5,
+    "keywords": ["regex", "html", "recursion", "modern regex", "counterargument", "engine", "pcre", "backreferences", "can parse"],
+    "content": "A counterpoint arguing that real-world regex engines with recursive subpatterns and backreferences exceed the classical regular-language boundary and can, in principle, match arbitrarily nested structures. This distinguishes the ENGINE feature set from the FORMAL class: the claim 'regular expressions cannot parse arbitrary HTML' is precisely true for regular expressions in the mathematical (finite-automaton) sense, and is only contestable if 'regular expression' is redefined to mean a modern recursion-capable engine. It underscores that the truth of the claim hinges on the definition of 'regular expression'."
+  },
+  {
+    "url": "https://blog.codinghorror.com/parsing-html-the-cthulhu-way/",
+    "title": "Jeff Atwood, Parsing Html The Cthulhu Way, Coding Horror (2009)",
+    "hierarchy_level": 6,
+    "keywords": ["html", "regex", "stack overflow", "cannot parse", "nested", "practical", "community"],
+    "content": "A widely cited community post (referencing the famous Stack Overflow answer) making the practical case that using regular expressions to parse HTML is a mistake because HTML is not a regular language: its nested, recursive tag structure cannot be reliably handled by regex, and one should use a real HTML parser. Community/anecdotal authority, but consistent with the formal result."
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=27098672",
+    "title": "Hacker News discussion: HTML is a Chomsky Type 2 (context-free) grammar (2021)",
+    "hierarchy_level": 6,
+    "keywords": ["html", "chomsky", "type 2", "context free", "regular", "finite nesting", "bounded depth"],
+    "content": "Community discussion noting that arbitrary nested HTML requires a Type-2 (context-free) grammar and is beyond Type-3 (regular), EXCEPT when nesting depth is bounded by a finite constant (as real browsers do), in which case the finite-depth sublanguage is technically regular though impractical to express. Reinforces the scope condition: the claim is about ARBITRARY (unbounded-depth) HTML."
+  }
+]

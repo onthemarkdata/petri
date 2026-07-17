@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-002-005",
+  "colony_id": "scratch-demo",
+  "claim_text": "The recovered element tree must be lossless and canonical with respect to the source document: no information present in the document may be discarded or approximated, since any such loss would constitute partial, not complete, structural recognition.",
+  "level": 2,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-001-001"
+  ],
+  "created_at": ""
+}

@@ -1,0 +1,298 @@
+# Petri Dish Configuration
+# Initialized for dish: scratch
+
+name: scratch
+model:
+  name: anthropic/claude-sonnet-4-6
+harness: claude-code
+agent_tools:
+- WebSearch
+- WebFetch
+- Read
+- Glob
+- Grep
+max_iterations: 3
+max_concurrent: 4
+max_decomposition_depth: 3
+max_nodes_per_layer: 5
+source_hierarchy:
+  minimum_terminal_level: 4
+  levels:
+    1:
+      name: Direct Measurement
+      description: Ran the experiment, recorded the data
+      terminal_eligible: true
+    2:
+      name: Authoritative Documentation
+      description: Official docs, published specs, pricing pages
+      terminal_eligible: true
+    3:
+      name: Derived Calculation
+      description: "Math from known inputs \u2014 show the formula"
+      terminal_eligible: true
+    4:
+      name: Corroborated Expert Consensus
+      description: Multiple independent experts agree
+      terminal_eligible: true
+    5:
+      name: Single Expert Opinion
+      description: One credible source, noted as such
+      terminal_eligible: false
+    6:
+      name: Community Report
+      description: "Reddit, forums, Discord \u2014 useful signal, not proof"
+      terminal_eligible: false
+debates:
+- pair:
+  - skeptic
+  - champion
+  rounds: 1.5
+  purpose: "Adversarial challenge \u2014 skeptic builds case against, champion defends"
+- pair:
+  - skeptic
+  - pragmatist
+  rounds: 1
+  purpose: "Practical relevance \u2014 does the skeptic's concern matter in practice?"
+- pair:
+  - simplifier
+  - impact_assessor
+  rounds: 1
+  purpose: "Scope safety \u2014 is simplification safe given the node's impact?"
+- pair:
+  - triage
+  - impact_assessor
+  rounds: 1
+  purpose: "Effort alignment \u2014 is the effort justified by the node's criticality?"
+agents:
+  decomposition_lead:
+    display_name: Decomposition Lead
+    is_lead: true
+    scope: decomposition
+    phase: null
+    blocking: false
+    verdicts_pass:
+    - DECOMPOSITION_COMPLETE
+    - DECOMPOSITION_NEEDS_REFINEMENT
+    verdicts_block: []
+    redirect_on_block: null
+  cell_lead:
+    display_name: Cell Lead
+    is_lead: true
+    scope: pipeline
+    phase: null
+    blocking: false
+    verdicts_pass:
+    - PIPELINE_COMPLETE
+    - PIPELINE_STALLED
+    verdicts_block: []
+    redirect_on_block: null
+  red_team_lead:
+    display_name: Red Team Lead
+    is_lead: true
+    scope: red_team
+    phase: null
+    blocking: false
+    verdicts_pass:
+    - STRONG_DISPROVAL_CASE
+    - WEAK_DISPROVAL_CASE
+    - NO_CONTRADICTING_EVIDENCE
+    verdicts_block: []
+    redirect_on_block: null
+    instruction: "Lead adversarial disproval. Use WebSearch to surface current contradicting\
+      \ sources \u2014 do not cite from memory. Number each counter-argument with\
+      \ a contradicting source and URL. Each source must have supports_or_contradicts='contradicts'.\
+      \ Summary: strongest single disproval argument in 1-2 sentences.\n"
+  investigator:
+    display_name: Investigator
+    is_lead: false
+    scope: null
+    phase: 1
+    blocking: true
+    verdicts_pass:
+    - EVIDENCE_SUFFICIENT
+    - EVIDENCE_CONTRADICTS
+    verdicts_block:
+    - NEEDS_MORE_EVIDENCE
+    - CANNOT_DETERMINE
+    redirect_on_block: null
+    instruction: "Seek primary sources for this claim. Use WebSearch to find them\
+      \ \u2014 do not cite URLs from memory. Use WebFetch on each candidate URL to\
+      \ verify it resolves and to read the actual content before citing it. Minimum\
+      \ 3 sources, each with a valid URL, hierarchy level, and 1-2 sentence finding.\
+      \ Trace evidence to its origin \u2014 do not accept surface-level support. Summary:\
+      \ 1-3 sentences stating evidence sufficiency with specific source counts and\
+      \ dimensions covered.\n"
+  freshness_checker:
+    display_name: Freshness Checker
+    is_lead: false
+    scope: null
+    phase: 1
+    blocking: true
+    verdicts_pass:
+    - EVIDENCE_CURRENT
+    - STALE_BUT_HOLDS
+    verdicts_block:
+    - MATERIALLY_STALE
+    redirect_on_block: null
+    instruction: "For each source in prior evidence, verify currency. Use WebFetch\
+      \ on each cited URL to read the actual publication date from the page metadata\
+      \ \u2014 do not infer the date from the title string or trust what a prior agent\
+      \ claimed. Cite the source URL, note its publication date, and assess staleness\
+      \ risk (NONE/LOW/MEDIUM/HIGH). Summary: 1 sentence on overall evidence currency\
+      \ with count of stale sources.\n"
+  dependency_auditor:
+    display_name: Dependency Auditor
+    is_lead: false
+    scope: null
+    phase: 1
+    blocking: true
+    verdicts_pass:
+    - DEPENDENCIES_CLEAN
+    verdicts_block:
+    - UNVALIDATED_DEPS
+    - CIRCULAR_REASONING
+    redirect_on_block: null
+    instruction: 'Audit the logical chain. For each dependency, cite the source that
+      validates it. Flag any circular reasoning, unvalidated assumptions, or hidden
+      premises with a URL to the gap. Summary: 1-2 sentences on chain integrity.
+
+      '
+  skeptic:
+    display_name: Skeptic
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: true
+    verdicts_pass:
+    - ARGUMENT_WITHSTANDS_CRITIQUE
+    verdicts_block:
+    - CRITICAL_FLAW_FOUND
+    - UNADDRESSED_COUNTERARGUMENT
+    redirect_on_block: null
+    instruction: "Build the strongest case AGAINST. Use WebSearch to find current\
+      \ contradicting evidence \u2014 do not cite from memory. Number each adversarial\
+      \ argument (1-2 sentences each). For each, cite a contradicting source with\
+      \ URL. Include falsification conditions \u2014 what would prove this claim false.\
+      \ Summary: single strongest reason to doubt this claim.\n"
+  champion:
+    display_name: Champion
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: true
+    verdicts_pass:
+    - STRONG_CASE
+    - DEFENSIBLE_WITH_CAVEATS
+    verdicts_block:
+    - CANNOT_DEFEND
+    redirect_on_block: null
+    instruction: "Build the strongest case FOR. Use WebSearch to find current supporting\
+      \ sources \u2014 do not cite from memory. Cite supporting sources ranked by\
+      \ hierarchy level (strongest first). Include rebuttals to likely skeptic objections,\
+      \ each backed by a source with URL. Summary: single strongest reason to believe,\
+      \ with source count.\n"
+  pragmatist:
+    display_name: Pragmatist
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: true
+    verdicts_pass:
+    - PRODUCTION_READY
+    - DIRECTIONALLY_CORRECT
+    verdicts_block:
+    - WOULD_NOT_SHIP_THIS
+    redirect_on_block: null
+    instruction: "Evaluate practical significance. Use WebSearch to find real-world\
+      \ implementations, case studies, or failures \u2014 do not cite from memory.\
+      \ Cite them with URLs. Assess whether this matters if true or false. Summary:\
+      \ 1-2 sentences on practical relevance.\n"
+  simplifier:
+    display_name: Simplifier
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: false
+    verdicts_pass:
+    - APPROPRIATELY_SCOPED
+    - COULD_BE_SIMPLER
+    verdicts_block:
+    - OVERCOMPLICATED
+    redirect_on_block: null
+    instruction: 'Check scope. Cite sources that support or challenge the scoping.
+      Summary: 1 sentence on whether scope is appropriate.
+
+      '
+  triage:
+    display_name: Triage
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: conditional
+    verdicts_pass:
+    - HIGH_VALUE
+    - MODERATE_VALUE
+    verdicts_block:
+    - LOW_VALUE_DEFER
+    redirect_on_block: DEFER_OPEN
+    instruction: 'Assess validation priority. Cite what decision this informs and
+      what changes if validated vs invalidated. Summary: 1 sentence on priority with
+      justification.
+
+      '
+  impact_assessor:
+    display_name: Impact Assessor
+    is_lead: false
+    scope: null
+    phase: 2
+    blocking: false
+    verdicts_pass:
+    - CRITICAL_PATH
+    - SUPPORTING_NOT_BLOCKING
+    - ISOLATED_LOW_IMPACT
+    verdicts_block: []
+    redirect_on_block: null
+    instruction: 'Map downstream dependencies. Cite what breaks if this claim is wrong.
+      Classify as FOUNDATION_STONE, KEYSTONE, CAPSTONE, or ISOLATED. Estimate blast
+      radius (HIGH >5, MEDIUM 2-5, LOW 0-1). Summary: 1 sentence on what breaks if
+      wrong.
+
+      '
+  evidence_evaluator:
+    display_name: Evidence Evaluator
+    is_lead: false
+    scope: null
+    phase: null
+    blocking: false
+    verdicts_pass:
+    - EVIDENCE_CONFIRMS
+    - EVIDENCE_REFUTES
+    - EVIDENCE_INCONCLUSIVE
+    verdicts_block: []
+    redirect_on_block: null
+    instruction: 'Final determination. Produce a source inventory: count sources by
+      hierarchy level, supporting vs contradicting. Weigh all evidence from investigation,
+      critique, and red team phases. Use WebSearch and WebFetch to spot-check any
+      source whose hierarchy level seems inflated or whose publication date looks
+      suspiciously old given today''s date. Summary: 1-3 sentences with verdict reasoning
+      and confidence.
+
+      '
+  socratic_questioner:
+    display_name: Socratic Questioner
+    is_lead: false
+    scope: null
+    phase: null
+    blocking: false
+    verdicts_pass:
+    - CLARIFIED
+    - ASSUMPTIONS_CHALLENGED
+    - EVIDENCE_MAPPED
+    - VERIFIED
+    verdicts_block: []
+    redirect_on_block: null
+    instruction: "Ask Socratic questions to surface hidden assumptions, define terms,\
+      \ and map the evidence space before research begins. When the claim references\
+      \ specific numbers, versions, released products, or recent events, use WebSearch\
+      \ to ground the question in current facts rather than training-data recollections.\
+      \ This agent is exploratory \u2014 it does not block convergence.\n"

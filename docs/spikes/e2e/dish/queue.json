@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "last_updated": "2026-07-17T01:13:45.954704+00:00",
+  "entries": {
+    "scratch-demo-001-002": {
+      "cell_id": "scratch-demo-001-002",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.254915+00:00",
+      "last_activity": "2026-07-17T01:12:28.639267+00:00"
+    },
+    "scratch-demo-001-003": {
+      "cell_id": "scratch-demo-001-003",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.255468+00:00",
+      "last_activity": "2026-07-17T01:13:40.718010+00:00"
+    },
+    "scratch-demo-001-004": {
+      "cell_id": "scratch-demo-001-004",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.255773+00:00",
+      "last_activity": "2026-07-17T01:13:40.958472+00:00"
+    },
+    "scratch-demo-001-005": {
+      "cell_id": "scratch-demo-001-005",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.256007+00:00",
+      "last_activity": "2026-07-17T01:13:41.534416+00:00"
+    },
+    "scratch-demo-002-002": {
+      "cell_id": "scratch-demo-002-002",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.256243+00:00",
+      "last_activity": "2026-07-17T01:13:41.954847+00:00"
+    },
+    "scratch-demo-002-003": {
+      "cell_id": "scratch-demo-002-003",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.256476+00:00",
+      "last_activity": "2026-07-17T01:13:42.454717+00:00"
+    },
+    "scratch-demo-002-004": {
+      "cell_id": "scratch-demo-002-004",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.256794+00:00",
+      "last_activity": "2026-07-17T01:13:42.951006+00:00"
+    },
+    "scratch-demo-002-005": {
+      "cell_id": "scratch-demo-002-005",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.257309+00:00",
+      "last_activity": "2026-07-17T01:13:43.453372+00:00"
+    },
+    "scratch-demo-003-001": {
+      "cell_id": "scratch-demo-003-001",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.257790+00:00",
+      "last_activity": "2026-07-17T01:13:43.959337+00:00"
+    },
+    "scratch-demo-003-002": {
+      "cell_id": "scratch-demo-003-002",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.258196+00:00",
+      "last_activity": "2026-07-17T01:13:44.455033+00:00"
+    },
+    "scratch-demo-003-003": {
+      "cell_id": "scratch-demo-003-003",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.258493+00:00",
+      "last_activity": "2026-07-17T01:13:44.955256+00:00"
+    },
+    "scratch-demo-003-004": {
+      "cell_id": "scratch-demo-003-004",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.258793+00:00",
+      "last_activity": "2026-07-17T01:13:45.453477+00:00"
+    },
+    "scratch-demo-003-005": {
+      "cell_id": "scratch-demo-003-005",
+      "queue_state": "needs_human",
+      "iteration": 3,
+      "max_iterations": 3,
+      "cycle_start_iteration": 0,
+      "weakest_link": "investigator",
+      "focused_directive": "Focus on addressing investigator concerns",
+      "entered_at": "2026-07-17T00:39:17.259115+00:00",
+      "last_activity": "2026-07-17T01:13:45.954698+00:00"
+    }
+  }
+}
