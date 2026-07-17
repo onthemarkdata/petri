@@ -1,4 +1,5 @@
-import sys, time
+import sys
+import time
 sys.path.insert(0, "/tmp/claude-0/-home-user-petri/767427e9-1a07-5e63-aad4-1e3d3de99d01/scratchpad")
 from pi_provider_scratch import pi_ask, PiAskError
 
