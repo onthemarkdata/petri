@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-003-002",
+  "colony_id": "scratch-demo",
+  "claim_text": "A grammar or rule-set derived from the very document being checked cannot serve as an independent verifier, because every document trivially satisfies the grammar induced from its own structure.",
+  "level": 3,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-002-001"
+  ],
+  "created_at": ""
+}

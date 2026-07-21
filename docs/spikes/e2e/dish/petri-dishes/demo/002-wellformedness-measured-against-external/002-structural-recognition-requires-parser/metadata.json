@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-002-002",
+  "colony_id": "scratch-demo",
+  "claim_text": "Structural recognition requires a parser to maintain and validate hierarchical context (e.g., a push-down stack or equivalent mechanism) during traversal, which is computationally unavailable to finite-state pattern matchers.",
+  "level": 2,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-001-001"
+  ],
+  "created_at": ""
+}

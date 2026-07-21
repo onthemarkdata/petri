@@ -1,0 +1,26 @@
+{
+  "id": "scratch-demo",
+  "dish": "scratch",
+  "center_claim": "Regular expressions cannot parse arbitrary HTML.",
+  "center_cell_id": "scratch-demo-000-000",
+  "clarifications": [],
+  "cell_paths": {
+    "scratch-demo-000-000": "000-regular-expressions-cannot-parse/000-regular-expressions-cannot-parse",
+    "scratch-demo-001-001": "001-parse-context-means-complete-structural/001-parse-context-means-complete-structural",
+    "scratch-demo-001-002": "001-parse-context-means-complete-structural/002-html-contextfree-language-strictly",
+    "scratch-demo-001-003": "001-parse-context-means-complete-structural/003-classical-regular-expressions",
+    "scratch-demo-001-004": "001-parse-context-means-complete-structural/004-arbitrary-html-means-any-document",
+    "scratch-demo-001-005": "001-parse-context-means-complete-structural/005-extended-regex-engines-eg-pcre",
+    "scratch-demo-002-001": "002-wellformedness-measured-against-external/001-wellformedness-measured-against-external",
+    "scratch-demo-002-002": "002-wellformedness-measured-against-external/002-structural-recognition-requires-parser",
+    "scratch-demo-002-003": "002-wellformedness-measured-against-external/003-pattern-matching-via-regular-expressions",
+    "scratch-demo-002-004": "002-wellformedness-measured-against-external/004-output-parsing-must-recoverable-element",
+    "scratch-demo-002-005": "002-wellformedness-measured-against-external/005-recovered-element-tree-must-lossless",
+    "scratch-demo-003-001": "003-wellformedness-predicate-determinate/001-wellformedness-predicate-determinate",
+    "scratch-demo-003-002": "003-wellformedness-predicate-determinate/002-grammar-ruleset-derived-very-document",
+    "scratch-demo-003-003": "003-wellformedness-predicate-determinate/003-without-external-reference-structural",
+    "scratch-demo-003-004": "003-wellformedness-predicate-determinate/004-independent-verification-different",
+    "scratch-demo-003-005": "003-wellformedness-predicate-determinate/005-standard-used-verification-must"
+  },
+  "created_at": "2026-07-17T00:37:41.931042+00:00"
+}

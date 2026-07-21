@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-003-005",
+  "colony_id": "scratch-demo",
+  "claim_text": "The standard used for verification must be temporally and logically prior to the document it governs \u2014 a standard co-constructed with or derived from the document retains the same circularity as deriving the grammar ad hoc.",
+  "level": 3,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-002-001"
+  ],
+  "created_at": ""
+}

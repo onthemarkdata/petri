@@ -1,0 +1,18 @@
+{
+  "id": "scratch-demo-001-001",
+  "colony_id": "scratch-demo",
+  "claim_text": "\"Parse\" in this context means complete structural recognition of a document \u2014 verifying well-formedness and recovering the full element tree \u2014 not merely extracting substrings via pattern matching.",
+  "level": 1,
+  "status": "NEW",
+  "dependencies": [
+    "scratch-demo-002-001",
+    "scratch-demo-002-002",
+    "scratch-demo-002-003",
+    "scratch-demo-002-004",
+    "scratch-demo-002-005"
+  ],
+  "dependents": [
+    "scratch-demo-000-000"
+  ],
+  "created_at": ""
+}

@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-003-004",
+  "colony_id": "scratch-demo",
+  "claim_text": "Independent verification by different agents converges to the same verdict only when all agents share a common, externally fixed reference; absent such a reference, verdicts are privately grounded and non-comparable.",
+  "level": 3,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-002-001"
+  ],
+  "created_at": ""
+}

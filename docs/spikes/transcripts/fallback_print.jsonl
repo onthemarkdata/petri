@@ -1,0 +1,2 @@
+# {"_probe": "fallback_print", "_argv": ["pi", "-p", "say hi", "--no-session"], "_returncode": 1, "_notes": [], "_sent": []}
+# STDERR: "UnrecognizedClientException: 403: [object Object]\n"

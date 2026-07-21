@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-002-003",
+  "colony_id": "scratch-demo",
+  "claim_text": "Pattern matching via regular expressions or similar automata operates on flat character sequences and cannot recognize recursive or nested grammatical structures, making it definitionally incapable of structural recognition as required by parsing.",
+  "level": 2,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-001-001"
+  ],
+  "created_at": ""
+}

@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-003-003",
+  "colony_id": "scratch-demo",
+  "claim_text": "Without an external reference, a structural check degenerates into a consistency check \u2014 confirming internal coherence only \u2014 which is a strictly weaker property than conformance to a standard.",
+  "level": 3,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-002-001"
+  ],
+  "created_at": ""
+}

@@ -1,0 +1,16 @@
+{
+  "id": "scratch-demo-000-000",
+  "colony_id": "scratch-demo",
+  "claim_text": "Regular expressions cannot parse arbitrary HTML.",
+  "level": 0,
+  "status": "NEW",
+  "dependencies": [
+    "scratch-demo-001-001",
+    "scratch-demo-001-002",
+    "scratch-demo-001-003",
+    "scratch-demo-001-004",
+    "scratch-demo-001-005"
+  ],
+  "dependents": [],
+  "created_at": ""
+}

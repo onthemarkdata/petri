@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-001-003",
+  "colony_id": "scratch-demo",
+  "claim_text": "Classical regular expressions are computationally equivalent to finite automata (DFA/NFA), which can recognize only regular languages and have no unbounded memory (no stack).",
+  "level": 1,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-000-000"
+  ],
+  "created_at": ""
+}

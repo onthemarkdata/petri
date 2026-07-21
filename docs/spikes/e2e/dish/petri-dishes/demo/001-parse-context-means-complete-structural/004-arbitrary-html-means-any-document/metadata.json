@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-001-004",
+  "colony_id": "scratch-demo",
+  "claim_text": "\"Arbitrary HTML\" means any document conforming to the HTML specification, including those with arbitrarily deep element nesting, so no fixed finite bound on nesting depth can be assumed.",
+  "level": 1,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-000-000"
+  ],
+  "created_at": ""
+}

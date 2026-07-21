@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-003-001",
+  "colony_id": "scratch-demo",
+  "claim_text": "A well-formedness predicate has a determinate truth value only if a formal, explicit definition of 'well-formed' exists prior to evaluation \u2014 without a definition, the predicate is semantically undefined.",
+  "level": 3,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-002-001"
+  ],
+  "created_at": ""
+}

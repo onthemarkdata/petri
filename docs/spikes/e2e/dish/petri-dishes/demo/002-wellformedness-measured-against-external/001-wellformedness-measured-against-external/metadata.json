@@ -1,0 +1,18 @@
+{
+  "id": "scratch-demo-002-001",
+  "colony_id": "scratch-demo",
+  "claim_text": "Well-formedness is measured against an external, pre-specified grammar or standard (e.g., a W3C spec or formal grammar definition), not inferred ad hoc from the document's own contents \u2014 without this, 'well-formedness verification' is circular and undefined.",
+  "level": 2,
+  "status": "NEW",
+  "dependencies": [
+    "scratch-demo-003-001",
+    "scratch-demo-003-002",
+    "scratch-demo-003-003",
+    "scratch-demo-003-004",
+    "scratch-demo-003-005"
+  ],
+  "dependents": [
+    "scratch-demo-001-001"
+  ],
+  "created_at": ""
+}

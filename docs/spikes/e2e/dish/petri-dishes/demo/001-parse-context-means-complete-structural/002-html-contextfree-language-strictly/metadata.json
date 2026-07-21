@@ -1,0 +1,12 @@
+{
+  "id": "scratch-demo-001-002",
+  "colony_id": "scratch-demo",
+  "claim_text": "HTML is a context-free language (or strictly harder in the case of HTML5 constructs such as <script> and <template>), and therefore is not a regular language.",
+  "level": 1,
+  "status": "STALLED",
+  "dependencies": [],
+  "dependents": [
+    "scratch-demo-000-000"
+  ],
+  "created_at": ""
+}
