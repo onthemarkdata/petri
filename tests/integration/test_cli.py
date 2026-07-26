@@ -181,3 +181,15 @@ class TestColonyOnDiskIntegrity:
         assert "entries" in queue
         assert "version" in queue
         assert len(queue["entries"]) == 5
+
+
+# ── version ──────────────────────────────────────────────────────────────
+
+
+class TestVersion:
+    def test_version_flag(self):
+        result = runner.invoke(app, ["--version"])
+        assert result.exit_code == 0, result.output
+        assert "petri" in result.output
+        from petri import __version__
+        assert __version__ in result.output

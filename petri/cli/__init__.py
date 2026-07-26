@@ -45,6 +45,23 @@ for register_command in _COMMAND_REGISTRARS:
     register_command(app)
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from petri import __version__
+        typer.echo(f"petri {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        None, "--version", callback=_version_callback, is_eager=True,
+        help="Show the Petri version and exit.",
+    ),
+) -> None:
+    pass
+
+
 def main() -> None:
     """Entry point for ``python -m petri``."""
     app()
