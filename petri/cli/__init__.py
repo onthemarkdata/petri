@@ -8,6 +8,7 @@ require a ``.petri/`` directory to exist.
 from __future__ import annotations
 
 import typer
+from typer import Exit
 
 from petri.cli.check import register as register_check
 from petri.cli.connect import register as register_connect
@@ -43,6 +44,23 @@ _COMMAND_REGISTRARS = (
 
 for register_command in _COMMAND_REGISTRARS:
     register_command(app)
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        from petri import __version__
+        typer.echo(f"petri {__version__}")
+        raise Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        None, "--version", callback=_version_callback, is_eager=True,
+        help="Show the Petri version and exit.",
+    ),
+) -> None:
+    pass
 
 
 def main() -> None:
