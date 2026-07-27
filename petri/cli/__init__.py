@@ -8,6 +8,7 @@ require a ``.petri/`` directory to exist.
 from __future__ import annotations
 
 import typer
+from typer import Exit
 
 from petri.cli.check import register as register_check
 from petri.cli.connect import register as register_connect
@@ -49,7 +50,7 @@ def _version_callback(value: bool) -> None:
     if value:
         from petri import __version__
         typer.echo(f"petri {__version__}")
-        raise typer.Exit()
+        raise Exit()
 
 
 @app.callback()
