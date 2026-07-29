@@ -1,11 +1,11 @@
 """Integration tests for the Petri CLI."""
-
 from __future__ import annotations
+from typer.testing import CliRunner
+from petri import __version__
 
 import json
 
 import pytest
-from typer.testing import CliRunner
 
 from petri.cli import app
 
@@ -112,9 +112,7 @@ class TestGraph:
         assert "L0" in out or "L1" in out or "L2" in out
 
     def test_graph_dot_format(self, seeded_petri_dir):
-        result = runner.invoke(
-            app, ["graph", "--format", "dot"]
-        )
+        result = runner.invoke(app, ["graph", "--format", "dot"])
         assert result.exit_code == 0, result.output
         assert "digraph" in result.output
 
@@ -181,3 +179,18 @@ class TestColonyOnDiskIntegrity:
         assert "entries" in queue
         assert "version" in queue
         assert len(queue["entries"]) == 5
+
+
+
+
+
+def test_cli_version_flag():
+    runner = CliRunner()
+    result = runner.invoke(app, ["--version"])
+
+    # Printing this out makes debugging much easier if it fails again
+    print("STDOUT:", result.stdout)
+    print("EXCEPTION:", result.exception)
+
+    assert result.exit_code == 0
+    assert f"petri {__version__}" in result.stdout
