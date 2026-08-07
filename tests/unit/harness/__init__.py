@@ -1,1 +1,1 @@
-"""Offline tests for the shared inference harness."""
+"""Offline inference harness tests."""
