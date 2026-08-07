@@ -31,7 +31,13 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = ["pypdf>=4.0"]
-test = ["pytest>=7.0", "pytest-asyncio>=0.21", "httpx>=0.24", "pytest-cov>=5.0"]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "httpx>=0.24",
+    "pytest-cov>=5.0",
+    "pydantic-ai>=2.9,<3",
+]
 dev = ["mypy>=1.11", "pre-commit>=3.7"]
 all = ["petri-grow[pdf,test,dev]"]
 
@@ -70,3 +76,6 @@ warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: may reach the real network or a real CLI; bypasses the offline guard (run explicitly with `pytest -m integration`)",
+]

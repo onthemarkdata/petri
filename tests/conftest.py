@@ -6,10 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from petri.graph.colony import ColonyGraph, serialize_colony
 from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+from petri.graph.colony import ColonyGraph, serialize_colony
 from petri.models import Cell, CellStatus, Colony, Edge, Verdict, build_cell_key
-
 
 # ── Fake InferenceProvider ───────────────────────────────────────────────
 # A dependency-injectable InferenceProvider used by unit tests. It is passed
@@ -508,3 +507,19 @@ def petri_env_with_colony(tmp_path, canonical_colony_validated_cells):
         "cell1": colony["cell1"],
         "cell2": colony["cell2"],
     }
+
+
+# ── pydantic-ai offline harness fixtures (v2) ─────────────────────────────
+# Defined in tests/harness_utils.py; importing them here registers them as
+# shared fixtures for the whole suite. See that module's docstring. Imported
+# at the bottom (not the top) so FakeProvider stays anchored at lines 21-112;
+# the suppression spans E402 (fires on ruff<0.16 for this placement) and
+# RUF100 (fires on ruff>=0.16, where E402 is off and its code reads as unused).
+
+from tests.harness_utils import (  # noqa: E402, F401, RUF100
+    assessment_test_model,
+    clarifying_questions_test_model,
+    decomposition_test_model,
+    evidence_matches_test_model,
+    scripted_assessment_model,
+)
