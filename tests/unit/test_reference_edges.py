@@ -190,3 +190,39 @@ def test_named_initial_agent_executes_pi_search_envelope(foundation, fake_pi):
                                                                 colony_id="dish-dependent"))
     assert result.nodes[0].existing_cell_id == "dish-foundation-001-001"
     assert model.round_trips == 2
+
+
+@pytest.mark.asyncio
+async def test_openai_wire_omits_json_mode_only_during_required_search(foundation):
+    import httpx
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    requests = []
+
+    def respond(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if len(requests) == 1:
+            message = {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "search-call", "type": "function", "function": {
+                    "name": "search_cells", "arguments": json.dumps({"query": "Solar panels generate electricity"}),
+                },
+            }]}
+        else:
+            message = {"role": "assistant", "content": json.dumps({"nodes": [{
+                "existing_cell_id": "dish-foundation-001-001", "reason": "Existing solar generation",
+            }]})}
+        return httpx.Response(200, json={"id": "response", "object": "chat.completion", "created": 0,
+                              "model": "local-test", "choices": [{"index": 0, "message": message,
+                              "finish_reason": "tool_calls" if len(requests) == 1 else "stop"}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        model = OpenAIChatModel("local-test", provider=OpenAIProvider(base_url="http://local.invalid/v1",
+                                api_key="test-only", http_client=client))
+        result = await run_decomposition_agent(initial_decomposer,
+                 DecompositionInput("A dependent claim", db_path=foundation, colony_id="dish-dependent"), model=model)
+    assert result.nodes[0].existing_cell_id == "dish-foundation-001-001"
+    assert requests[0]["tool_choice"] == "required"
+    assert not requests[0].get("response_format")
+    assert requests[1]["response_format"] == {"type": "json_object"}

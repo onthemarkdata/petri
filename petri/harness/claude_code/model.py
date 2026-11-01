@@ -16,7 +16,7 @@ from datetime import datetime
 from subprocess import CompletedProcess
 
 from pydantic_ai.exceptions import UserError
-from pydantic_ai.messages import ModelMessage, ModelResponse
+from pydantic_ai.messages import ToolReturnPart, ModelMessage, ModelResponse
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.settings import ModelSettings
@@ -197,7 +197,10 @@ class ClaudeCodeModel(Model):
             raise UserError("ClaudeCodeModel does not support per-request model settings.")
         if parameters.output_tools:
             raise UserError("ClaudeCodeModel supports prompted output and CLI tool allowlists.")
-        prompt = render_history(messages, parameters) + tool_instructions(parameters, required=bool(settings and settings.get("tool_choice") == "required"))
+        prompt = render_history(messages, parameters) + tool_instructions(
+            parameters, required=bool(settings and settings.get("tool_choice") == "required"),
+            completed=any(isinstance(part, ToolReturnPart) for message in messages for part in message.parts),
+        )
 
         async def invoke():
             result = await self.runner(self.command(prompt), self.timeout)
