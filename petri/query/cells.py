@@ -43,9 +43,10 @@ def list_cells(
     with read_connection(db_path) as connection:
         if connection is None or not has_table(connection, "cells"):
             return []
+        edge_table = "active_edges" if has_table(connection, "active_edges") else "edges"
         sql = (
             "SELECT c.*,"
-            "(SELECT json_group_array(to_cell) FROM (SELECT DISTINCT to_cell FROM edges WHERE from_cell=c.id ORDER BY to_cell)) AS dependencies,"
+            f"(SELECT json_group_array(to_cell) FROM (SELECT DISTINCT to_cell FROM {edge_table} WHERE from_cell=c.id ORDER BY to_cell)) AS dependencies,"
             "(SELECT json_group_array(dependent_cell_id) FROM (SELECT DISTINCT dependent_cell_id FROM dependents WHERE cell_id=c.id ORDER BY dependent_cell_id)) AS dependents "
             "FROM cells c WHERE (? IS NULL OR c.colony=?) AND (? IS NULL OR c.status=?) "
             "AND (? IS NULL OR c.level=?) AND (? IS NULL OR c.id=?) ORDER BY c.colony,c.level,c.seq,c.id"
@@ -87,8 +88,9 @@ def get_edges(
     with read_connection(db_path) as connection:
         if connection is None or not has_table(connection, "edges"):
             return []
+        edge_table = "active_edges" if has_table(connection, "active_edges") else "edges"
         rows = connection.execute(
-            "SELECT e.* FROM edges e WHERE (? IS NULL OR e.from_cell=? OR e.to_cell=?) "
+            f"SELECT e.* FROM {edge_table} e WHERE (? IS NULL OR e.from_cell=? OR e.to_cell=?) "
             "AND (? IS NULL OR EXISTS (SELECT 1 FROM cells c WHERE c.colony=? AND c.id IN (e.from_cell,e.to_cell))) "
             "ORDER BY e.from_cell,e.to_cell,e.edge_type",
             (cell_id, cell_id, cell_id, colony, colony),

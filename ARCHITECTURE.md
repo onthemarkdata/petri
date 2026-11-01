@@ -277,3 +277,16 @@ When new evidence arrives (`petri feed`):
 2. Dependents are **flagged** via BFS upward through the DAG
 3. Flagged dependents are not automatically re-opened (conservative approach -- requires explicit re-queueing)
 4. `cell_reopened` and `propagation_triggered` events are logged for audit
+
+## Dependency history
+
+`petri.storage.edge_registry.DishGraph` composes dependencies across all colonies.
+The registry checks cycles while holding the SQLite writer lock, so concurrent
+edge additions cannot each approve a cycle against an older graph.
+
+Removing an edge appends a typed tombstone for its original version; it does not
+update or delete that edge row. Version identity uses the endpoints, edge type,
+and original creation timestamp, so database maintenance cannot change the
+reference. Replaying a removed version stays removed. A later explicit addition
+can append a new version. `active_edges` and the `dependents` view expose only
+versions without a tombstone; snapshots retain the complete history.
