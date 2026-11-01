@@ -58,6 +58,7 @@ petri = [
     "templates/*.txt",
     "templates/*.html",
     "assets/**/*",
+    "storage/migrations/*.sql",
 ]
 
 [tool.ruff]
