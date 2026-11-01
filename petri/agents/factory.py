@@ -87,6 +87,7 @@ def build_agents(
             name=name.value,
             output_type=delivery,
             instructions=instructions,
+            model_settings=validated.model_settings.as_model_settings(),
             retries={"output": retries},
             defer_model_check=True,
         )

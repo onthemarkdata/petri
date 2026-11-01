@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic_ai.settings import ModelSettings
 
 from petri.analysis.analyst import AnalystConfig
 from petri.dashboard.config import DashboardConfig
@@ -87,6 +88,14 @@ class LimitsConfig(StrictContent):
     debate: UsageLimitConfig
 
 
+class ResponseSettings(StrictContent):
+    max_tokens: PositiveInt | None = None
+
+    def as_model_settings(self) -> ModelSettings:
+        """Pass an explicit response cap to the native model request."""
+        return {"max_tokens": self.max_tokens} if self.max_tokens is not None else {}
+
+
 class HarnessContent(StrictContent):
     backend: Literal["pi", "claude-code", "provider"]
     model: Nonempty | None = None
@@ -146,6 +155,7 @@ class PrePipelineContent(StrictContent):
 
 class AgentConfig(StrictContent):
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
+    model_settings: ResponseSettings = Field(default_factory=ResponseSettings)
     scheduling: SchedulingConfig = Field(default_factory=SchedulingConfig)
     analyst: AnalystConfig = Field(default_factory=AnalystConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
@@ -169,6 +179,12 @@ class AgentConfig(StrictContent):
     limits: LimitsConfig
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     prices: dict[str, ModelPrice] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_response_settings(self):
+        if self.model_settings.max_tokens is not None and self.harness.backend != "provider":
+            raise ValueError("model_settings.max_tokens requires the provider backend; configure CLI response limits in its provider.")
+        return self
 
     @field_validator("agents", mode="before")
     @classmethod

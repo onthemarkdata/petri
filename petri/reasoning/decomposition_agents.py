@@ -206,6 +206,7 @@ def validate_initial_references(context: RunContext[DecompositionInput], output:
 async def run_decomposition_agent(
     agent: Agent[DecompositionInput, Any], request: DecompositionInput, *, model: Model,
     on_progress: Progress = None, stream: bool = False,
+    model_settings: ModelSettings | None = None,
 ) -> Any:
     """Run with a caller-owned model; streaming is explicit for capable adapters."""
     async def events(_: RunContext[DecompositionInput], source: AsyncIterable[AgentStreamEvent]) -> None:
@@ -223,7 +224,8 @@ async def run_decomposition_agent(
         try:
             result = await agent.run(
                 "Apply the decomposition instructions to the supplied claim. Return only the selected result, without intermediate analysis.",
-                deps=request, model=model, event_stream_handler=events if stream else None,
+                deps=request, model=model, model_settings=model_settings,
+                event_stream_handler=events if stream else None,
             )
         except (AgentRunError, HarnessError, DecompositionError) as error:
             if on_progress:

@@ -30,6 +30,13 @@ and 20 tool calls per debate. This allows each evidence role to fetch its own
 cited sources. Packaged defaults stay unchanged. The report records the actual
 configuration and persisted usage; the source and verdict gates still apply.
 
+The probe also bounds native provider responses with `model_settings.max_tokens`
+(`--max-tokens`, default 4,096). This is a per-response generation limit, separate
+from the cumulative usage budget. Pi uses the explicitly configured `maxTokens`
+in its local provider; the probe verifies that it matches `--max-tokens`. Petri
+rejects native model settings for CLI backends rather than ignoring them.
+Truncated output must still pass the full schema and evidence validators.
+
 From the repository, with the local model already running:
 
 ```sh

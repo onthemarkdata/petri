@@ -164,6 +164,11 @@ class HarnessInferenceProvider:
             raise ValueError("retries must be nonnegative.")
         self.model = infer_model(model) if isinstance(model, str) else model
         self.config = dict(config) if config is not None else None
+        from petri.agents.config import ResponseSettings
+
+        self.model_settings = ResponseSettings.model_validate(
+            self.config.get("model_settings", {}) if self.config else {}
+        ).as_model_settings()
         self.retries = retries
         self._worker = _Worker(self.model)
         self._finalizer = weakref.finalize(self, self._worker.close)
@@ -193,6 +198,7 @@ class HarnessInferenceProvider:
             ))
         agent = Agent(
             self.model, output_type=output_type, retries={"output": self.retries},
+            model_settings=self.model_settings,
             instructions=(
                 "Return only the requested result. Perform brainstorming and ranking internally; "
                 "do not include the intermediate analysis in the response. "
@@ -264,6 +270,7 @@ class HarnessInferenceProvider:
 
         return self._worker.run(lambda: run_decomposition_agent(
             initial_decomposer, request, model=self.model, on_progress=on_progress,
+            model_settings=self.model_settings,
         ))
 
     def expand_why(self, request: DecompositionInput, on_progress: Progress = None) -> WhyExpansion:
@@ -271,6 +278,7 @@ class HarnessInferenceProvider:
 
         return self._worker.run(lambda: run_decomposition_agent(
             five_whys, request, model=self.model, on_progress=on_progress,
+            model_settings=self.model_settings,
         ))
 
     def assess_cell(self, cell_id: str, claim_text: str, context: dict, agent_role: str,
