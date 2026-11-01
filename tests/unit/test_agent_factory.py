@@ -152,7 +152,7 @@ async def test_constitution_is_resent_as_instructions(config):
         part.part_kind != "system-prompt" for msg in first.all_messages() for part in msg.parts
     )
     protocol = config.debates[0].protocol
-    assert protocol.rounds == 1
+    assert protocol.rounds == 2
     assert protocol.final_word == AgentName.SKEPTIC
 
 
