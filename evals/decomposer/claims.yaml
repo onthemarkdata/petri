@@ -6,9 +6,13 @@
     - A research workflow with source tracking and revision comparison reduces repeated review work across changing specifications.
     - A research workflow with source tracking and revision comparison reduces repeated review work across changing specifications when reviewers use the same acceptance criteria and preserve unresolved disagreements.
   layer_sizes: [[4, 7, 5], [7, 4], [5, 8, 6, 4]]
+- name: metric-calibration-exploration
+  kind: organic
+  claims: [Metric unit definitions support consistent length comparisons when measurement instruments are calibrated.]
+  layer_sizes: [[4, 7, 5]]
 - name: axiomatic-units
   kind: axiom
-  claims: [Metric unit definitions support consistent length comparisons when measurement instruments are calibrated.]
+  claims: [A kilometer is defined as one thousand meters.]
   layer_sizes: [[1]]
   axiom_texts: [A kilometer is defined as one thousand meters.]
 - name: shared-generation-premise

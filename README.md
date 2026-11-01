@@ -290,6 +290,14 @@ bedrock stops, specific cross-colony references, depth variation, and parent
 restatements. Two historical failure shapes intentionally score poorly.
 Reintroducing quota wording also fails an instruction regression check.
 
+The bedrock case supplies a unit definition directly to the typed five-whys
+agent and checks its atomic flag, stopping depth, and reason. Broad
+metric/calibration decomposition remains a separate organic case. This avoids
+requiring an unspecified kilometer sentence to appear in an open-ended claim's
+decomposition. Expanding the supplied definition or omitting its atomic reason
+still fails the bedrock check; broad live failures remain evidence of model
+quality limits.
+
 Private research stays outside this repository. To validate a local archive
 bundle, set `PETRI_PRIVATE_ARCHIVE` and run the opt-in check:
 
@@ -316,6 +324,9 @@ exact model name. The live test prints a per-case report and fails if the
 reference case does not reuse a specific non-root cell. Passing synthetic
 fixtures does not establish that a live model makes reliable decomposition
 judgments.
+Live responses are capped at 4,096 tokens by default. Set
+`PETRI_EVAL_MAX_TOKENS` for the pytest report, or `--max-tokens` with
+`python -m evals.decomposer --live`, to choose a different positive cap.
 
 ## Contributing
 

@@ -16,6 +16,8 @@ from petri.harness.legacy_bridge import HarnessInferenceProvider
 from petri.models import Cell, DecompositionResult, Edge
 from petri.reasoning.decomposer import decompose_claim
 from petri.reasoning.decomposition_settings import DecompositionSettings
+from petri.reasoning.decomposition_agents import DecompositionInput
+from petri.reasoning.decomposition_schemas import PremiseCandidate
 
 ROOT = Path(__file__).parent
 
@@ -96,6 +98,11 @@ def scripted_model(plan: dict[str, dict]) -> FunctionModel:
 def scripted_task(inputs: EvalInput) -> EvalBatch:
     if inputs.kind == "negative":
         return negative_fixture(inputs)
+    if inputs.kind == "axiom":
+        plan = {claim: {"is_atomic": True, "bedrock_reason": "This unit conversion is definitional.",
+                        "sub_premises": []} for claim in inputs.claims}
+        with HarnessInferenceProvider(scripted_model(plan)) as runner:
+            return supplied_axiom_task(inputs, runner)
     results: list[DecompositionResult] = []
     expected = set()
     with TemporaryDirectory(prefix="petri-offline-eval-") as directory:
@@ -129,10 +136,36 @@ def scripted_task(inputs: EvalInput) -> EvalBatch:
     return EvalBatch(results=results, expected_reference_ids=expected)
 
 
-def live_task(inputs: EvalInput, *, model_name: str) -> EvalBatch:
+def supplied_axiom_task(inputs: EvalInput, runner: HarnessInferenceProvider) -> EvalBatch:
+    """Test stopping on supplied definitions without requiring the model to invent one."""
+    results = []
+    for index, claim in enumerate(inputs.claims):
+        expansion = runner.expand_why(DecompositionInput(claim))
+        root = Cell(id=f"eval-axiom{index}-000-000", colony_id=f"eval-axiom{index}",
+                    level=0, claim_text=claim, is_atomic=expansion.is_atomic,
+                    bedrock_reason=expansion.bedrock_reason)
+        cells = [root]
+        edges = []
+        for sequence, premise in enumerate(expansion.sub_premises, 1):
+            if not isinstance(premise, PremiseCandidate):
+                raise ValueError("The supplied-axiom probe has no existing cells to reference")
+            child = Cell(id=f"eval-axiom{index}-001-{sequence:03d}", colony_id=root.colony_id,
+                         level=1, claim_text=premise.claim_text, relation=premise.relation)
+            cells.append(child)
+            edges.append(Edge(from_cell=root.id, to_cell=child.id))
+        results.append(DecompositionResult(cells=cells, edges=edges, center_claim=claim,
+                                           colony_name=f"axiom{index}"))
+    return EvalBatch(results=results, trivial_cell_ids={result.cells[0].id for result in results})
+
+
+def live_task(inputs: EvalInput, *, model_name: str, max_tokens: int | None = None) -> EvalBatch:
     """Use an explicitly configured model; callers own cost consent and gating."""
     if inputs.kind == "negative":
         return negative_fixture(inputs)
+    settings = {"model_settings": {"max_tokens": max_tokens}} if max_tokens is not None else None
+    if inputs.kind == "axiom":
+        with HarnessInferenceProvider(model_name, config=settings) as runner:
+            return supplied_axiom_task(inputs, runner)
     results: list[DecompositionResult] = []
     expected = set()
     with TemporaryDirectory(prefix="petri-live-eval-") as directory:
@@ -140,7 +173,7 @@ def live_task(inputs: EvalInput, *, model_name: str) -> EvalBatch:
         for index, claim in enumerate(inputs.claims):
             if inputs.kind == "reference" and index == 1:
                 expected = {cell.id for cell in results[0].cells if cell.level > 0}
-            with HarnessInferenceProvider(model_name) as runner:
+            with HarnessInferenceProvider(model_name, config=settings) as runner:
                 result = decompose_claim(claim, [], "eval", f"case{index}", None, agent_runner=runner,
                                          db_path=path, settings=DecompositionSettings(
                                              depth=3, per_layer=inputs.layer_ceiling, model=model_name))
