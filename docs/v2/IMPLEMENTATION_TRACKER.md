@@ -234,3 +234,44 @@ Continuous Gemma grow acceptance remains open. Live runs exposed shared context
 exhaustion with concurrent model requests, so acceptance inference now runs
 serially. Failed and stalled runs remain diagnostic evidence and do not satisfy
 the seed-to-grow or live-feed gates.
+
+## Integration checks through PR #241 — 2026-11-01
+
+Merged into the integration branch:
+
+- [PR #236](https://github.com/onthemarkdata/petri/pull/236) requires attempts at public retrieval,
+  separates backend overrides, and retains inference failure diagnostics.
+- [PR #237](https://github.com/onthemarkdata/petri/pull/237) refreshes delayed usage
+  totals and separates required investigator tool calls from final output.
+- [PR #238](https://github.com/onthemarkdata/petri/pull/238) restores Python 3.11
+  dashboard schema compatibility.
+- [PR #239](https://github.com/onthemarkdata/petri/pull/239) reports feed impact
+  across dependent colonies without enqueueing them.
+- [PR #240](https://github.com/onthemarkdata/petri/pull/240) approves completed
+  dashboard drafts and records seed completion once per attempt.
+- [PR #241](https://github.com/onthemarkdata/petri/pull/241) supplies ancestor scope
+  as explicitly unverified input to claim assessment.
+
+The recorded full offline run passed 1,360 tests, with one skip, 30 deselections,
+and 88.61% coverage. Process integration checks passed 22 tests, with six skips.
+[CI #184](https://github.com/onthemarkdata/petri/actions/runs/41358353776) passed
+all Python 3.11–3.14 test jobs, lint, type checking, and package build checks.
+
+Chromium checks covered Computer controls, Lab and cell navigation, usage, trace
+waterfalls, and SSE without console errors. During CLI-owned research, the
+dashboard remained read-only and showed committed events, growing usage totals,
+and workflow-to-step-to-agent-to-model trace ancestry. Tool ancestry was not
+observed in that capture. These UI checks included stalled research and do not
+establish a successful grow.
+
+A real Gemma dashboard seed survived server termination after its model output
+and first child were committed. Restart restored the saved browser run and
+completed the three-cell graph without repeating the model call. A generated
+premise omitted scope from the parent, so decomposition quality remains unresolved.
+
+The [Jaeger UI check](../observability.md#optional-external-backend-jaeger)
+verified an actual `petri grow --dry-run` command export. The dry run contained no model
+or workflow child spans.
+
+Repeatable full seed→grow→feed acceptance, known-outcome quality with real
+retrieval, and final approval of the integration PR into `dev` remain pending.
