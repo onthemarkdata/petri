@@ -20,6 +20,19 @@ if TYPE_CHECKING:
     from petri.models import AssessmentResult
 
 from petri.config import AGENT_TOOLS, LLM_INFERENCE_MODEL
+from petri.reasoning.prompts import (
+    build_assess_claim_substance_prompt,
+    assess_claim_substance_output_suffix,
+    build_generate_clarifying_questions_prompt,
+    generate_clarifying_questions_output_suffix,
+    build_decompose_claim_prompt,
+    decompose_claim_output_suffix,
+    build_decompose_why_prompt,
+    decompose_why_output_suffix,
+    build_assess_cell_prompt,
+    assess_cell_output_suffix,
+    build_summarize_evidence_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -524,18 +537,7 @@ class ClaudeCodeProvider:
             reason (str)               -- one-sentence explanation
             suggested_rewrite (str)    -- optional; "" if none
         """
-        prompt = (
-            "Assess whether the following text is a SUBSTANTIVE research claim "
-            "that warrants decomposition, or whether it is placeholder/test "
-            "input (e.g. 'this is a test claim', 'asdf', 'hello world', empty).\n\n"
-            f"Text: \"{claim}\"\n\n"
-            "Return ONLY a JSON object:\n"
-            "{\n"
-            '  "is_substantive": true|false,\n'
-            '  "reason": "one-sentence explanation",\n'
-            '  "suggested_rewrite": "tighter rephrasing, or empty string"\n'
-            "}\n"
-        )
+        prompt = build_assess_claim_substance_prompt(claim) + assess_claim_substance_output_suffix()
         try:
             raw = self._ask(prompt, on_progress=on_progress)
         except ClaudeCLIError:
@@ -560,17 +562,7 @@ class ClaudeCodeProvider:
         max_questions: int = 5,
         on_progress: Optional[Callable[[str], None]] = None,
     ) -> list[dict]:
-        prompt = (
-            f"Generate {max_questions} CLAIM-SPECIFIC clarifying questions for this research claim. "
-            "The questions must be tailored to the actual content of the claim — do not use generic "
-            "questions like 'what is the domain?' or 'what is the time horizon?'. Each question should "
-            "surface a specific assumption, scope boundary, or definitional ambiguity in THIS claim.\n\n"
-            f"Claim: \"{claim}\"\n\n"
-            "For each question, optionally provide 2-5 multiple-choice options when the answer space is "
-            "naturally bounded; otherwise leave options empty for free-text input.\n\n"
-            "Return ONLY a JSON array: "
-            '[{"question": "...", "options": ["...", "..."]}, ...]'
-        )
+        prompt = build_generate_clarifying_questions_prompt(claim, max_questions) + generate_clarifying_questions_output_suffix()
         try:
             raw = self._ask(prompt, on_progress=on_progress)
         except ClaudeCLIError:
@@ -597,45 +589,7 @@ class ClaudeCodeProvider:
         max_premises: int = 5,
         on_progress: Optional[Callable[[str], None]] = None,
     ) -> dict:
-        clarification_text = ""
-        if clarifications:
-            lines = [f"Q: {c['question']} A: {c.get('answer', 'N/A')}" for c in clarifications]
-            clarification_text = "\nClarifications:\n" + "\n".join(lines)
-
-        guidance_text = ""
-        if guidance.strip():
-            guidance_text = (
-                "\nRefinement guidance from user (must shape this re-roll):\n"
-                f"{guidance.strip()}\n"
-            )
-
-        prompt = (
-            "Decompose this claim into first-principles premises.\n\n"
-            f"Claim: \"{claim}\"{clarification_text}{guidance_text}\n\n"
-            "Work through this in four explicit steps. Show your reasoning as "
-            "you go — the user is watching this stream live.\n\n"
-            "STEP 1 — BRAINSTORM (overgenerate).\n"
-            "List 10-15 candidate premises that, if false, would invalidate "
-            "the claim. Cast a wide net. Cover different angles: definitions, "
-            "mechanisms, scope boundaries, counterfactuals, hidden assumptions. "
-            "Number them 1..N. Do NOT filter at this stage.\n\n"
-            "STEP 2 — PRIORITIZE.\n"
-            "For each candidate, score on three dimensions:\n"
-            "  - LOAD-BEARING: would the claim collapse if this were false? (HIGH/MED/LOW)\n"
-            "  - CONTESTABLE: is this actually in question, not trivially true? (HIGH/MED/LOW)\n"
-            "  - DISTINCT: does it cover ground the other top candidates don't?\n"
-            "Briefly justify each score.\n\n"
-            "STEP 3 — SELECT.\n"
-            f"Pick the TOP {max_premises} premises after ranking. Order them by "
-            "importance (most important first). Drop duplicates and trivial restatements. "
-            "Do not pick the first ones you wrote down — pick the ones that scored highest.\n\n"
-            "STEP 4 — EMIT JSON.\n"
-            "Return a JSON object on the final lines:\n"
-            '{"nodes": [{"level": 1, "seq": 1, "claim_text": "..."}, ...], "edges": []}\n\n'
-            f"The JSON must contain AT MOST {max_premises} nodes (fewer is fine if "
-            "fewer genuine first-principles premises exist). Return no commentary "
-            "after the JSON."
-        )
+        prompt = build_decompose_claim_prompt(claim, clarifications, guidance, max_premises) + decompose_claim_output_suffix(max_premises)
         raw = self._ask(prompt, on_progress=on_progress)
         parsed = _extract_json(raw)
         if parsed and "nodes" in parsed:
@@ -656,32 +610,7 @@ class ClaudeCodeProvider:
         If the premise is already atomic (directly verifiable), returns
         an empty list.
         """
-        prompt = (
-            "FIVE WHYS — drill one level deeper into a parent premise.\n\n"
-            f"Premise: \"{premise}\"\n\n"
-            "Work through this in four explicit steps. Show your reasoning "
-            "as you go — the user is watching this stream live.\n\n"
-            "STEP 1 — BRAINSTORM (overgenerate).\n"
-            "List 6-10 candidate sub-premises that must hold for the parent "
-            "premise to be true. Number them 1..N. Don't filter yet.\n\n"
-            "STEP 2 — PRIORITIZE.\n"
-            "For each candidate, score on:\n"
-            "  - FOUNDATIONALITY: closer to bedrock = higher (HIGH/MED/LOW)\n"
-            "  - INDEPENDENCE: separately verifiable from the others (HIGH/MED/LOW)\n"
-            "  - LOAD-BEARING: would the parent collapse if this sub-premise were false?\n"
-            "Briefly justify each score.\n\n"
-            "STEP 3 — SELECT.\n"
-            f"Pick the TOP {max_premises} sub-premises. Drop redundant or "
-            "surface-level ones. Do not pick the first ones you wrote down — "
-            "pick the ones that scored highest.\n\n"
-            "If the parent is already ATOMIC (a directly verifiable fact, "
-            "definition, or measurement), skip steps 1-3 and return:\n"
-            '{"sub_premises": [], "is_atomic": true, "reason": "why it is atomic"}\n\n'
-            "STEP 4 — EMIT JSON.\n"
-            'Return: {"sub_premises": [{"claim_text": "...", "is_atomic": false}, ...], "is_atomic": false}\n\n'
-            f"The sub_premises list must contain AT MOST {max_premises} items. "
-            "Return no commentary after the JSON."
-        )
+        prompt = build_decompose_why_prompt(premise, parent_level, parent_seq, max_premises) + decompose_why_output_suffix(max_premises)
         raw = self._ask(prompt, on_progress=on_progress)
         parsed = _extract_json(raw)
         if parsed and parsed.get("is_atomic", False):
@@ -709,67 +638,12 @@ class ClaudeCodeProvider:
                 "Add it to .petri/defaults/petri.yaml under 'agents:' with explicit "
                 "verdicts_pass and verdicts_block lists."
             )
-        verdict_list = ", ".join(valid_verdicts)
-        role_instruction = get_agent_instruction(agent_role) or "Assess this claim thoroughly."
-
-        context_parts = []
-        if context.get("iteration"):
-            context_parts.append(f"Iteration: {context['iteration']}")
-        if context.get("weakest_link"):
-            context_parts.append(f"Focus area: {context['weakest_link']}")
-        if context.get("focused_directive"):
-            context_parts.append(f"Directive: {context['focused_directive']}")
-        if context.get("phase"):
-            context_parts.append(f"Phase: {context['phase']}")
-        if context.get("source_validation"):
-            context_parts.append(f"Source validation: {json.dumps(context['source_validation'])}")
-        context_str = "\n".join(context_parts) if context_parts else "Initial assessment"
-
-        prior_evidence = context.get("prior_evidence", "")
-        evidence_section = ""
-        if prior_evidence:
-            evidence_section = (
-                f"\n--- Prior Evidence ---\n{prior_evidence}\n--- End Prior Evidence ---\n\n"
-                f"Build on the evidence above. Focus on new insights and gaps.\n"
-            )
-
-        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        freshness_directive = (
-            f"IMPORTANT — Today's date is {today_iso}. Your training data is "
-            f"stale relative to this date. You MUST use the WebSearch tool to "
-            f"find current sources and WebFetch to verify that each URL you "
-            f"cite actually exists before including it. Do NOT cite URLs from "
-            f"memory — they will be treated as fabricated. Prefer sources "
-            f"published within the last 12 months unless the claim is "
-            f"explicitly about historical events.\n\n"
-        )
-
-        prompt = (
-            f"{freshness_directive}"
-            f"You are the {agent_role} agent in a research validation pipeline.\n\n"
-            f"{role_instruction}\n\n"
-            f"Cell: {cell_id}\n"
-            f"Claim: \"{claim_text}\"\n"
-            f"Context: {context_str}\n"
-            f"{evidence_section}\n"
-            f"Valid verdicts: {verdict_list}\n\n"
-            f"Return ONLY a JSON object with:\n"
-            f'- "verdict": one of [{verdict_list}]\n'
-            f'- "sources_cited": REQUIRED array. Each source must have:\n'
-            f'  - "url": full URL (https://...) to the source\n'
-            f'  - "title": "Publication, Article Title (Year)"\n'
-            f'  - "hierarchy_level": 1-6 (1=direct measurement, 2=authoritative docs, '
-            f'3=derived calculation, 4=expert consensus, 5=single expert, 6=community report)\n'
-            f'  - "finding": 1-2 sentence finding from this source\n'
-            f'  - "supports_or_contradicts": "supports" or "contradicts"\n'
-            f'- "summary": 1-3 concise sentences. Enumerate dimensions, cite specific numbers.\n'
-            f'- "confidence": "HIGH", "MEDIUM", or "LOW"\n\n'
-            f"RULES:\n"
-            f"- Every claim MUST be backed by at least one source with a valid URL.\n"
-            f"- Keep summary TERSE — citations are the evidence.\n"
-            f"- Do NOT include \"arguments\" or \"evidence\" fields.\n\n"
-            f"Return ONLY the JSON."
-        )
+        prompt = build_assess_cell_prompt(
+            cell_id, claim_text, context, agent_role,
+            valid_verdicts=valid_verdicts,
+            role_instruction=get_agent_instruction(agent_role),
+            today_iso=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        ) + assess_cell_output_suffix(valid_verdicts)
 
         try:
             raw = self._ask(prompt, on_progress=on_progress)
@@ -865,7 +739,7 @@ class ClaudeCodeProvider:
         identity in event logs is still ``cell_lead`` so the audit trail is
         consistent with the lifecycle events cell_lead already owns.
 
-        The prompt is intentionally hand-built inline (rather than going
+        The prompt uses a dedicated builder (rather than going
         through the agent-role + verdict-set machinery) because:
         - There's no verdict to return — the output is free-form markdown.
         - We want deterministic section headings in the result, not
@@ -874,27 +748,5 @@ class ClaudeCodeProvider:
           parser also avoids parse-error retry loops on what is purely
           presentational output.
         """
-        prompt = (
-            "You are cell_lead, the orchestrator for this research cell. "
-            "Your job right now is to read the accumulated evidence below "
-            "and produce a concise markdown summary (no more than ~400 "
-            "words) that a human can scan in 30 seconds.\n\n"
-            f"## Cell claim\n{claim_text}\n\n"
-            f"## Iteration\n{iteration}\n\n"
-            "## Accumulated evidence\n"
-            f"{evidence_md}\n\n"
-            "## Output format\n"
-            "Return ONLY markdown with these sections, in this order:\n"
-            "1. **Current state** — one sentence describing where the "
-            "cell stands right now.\n"
-            "2. **Key findings** — 3-6 bullet points, each anchored to a "
-            "specific source or agent verdict. Be concrete, not generic.\n"
-            "3. **Open questions** — 1-3 bullets of what is still "
-            "unresolved, or 'None' if the cell has converged.\n"
-            "4. **Confidence** — a short phrase (e.g. 'high, primary "
-            "sources agree', 'low, contradicting sources', "
-            "'medium, pending red team').\n\n"
-            "Do not repeat the phase-by-phase breakdown from evidence.md "
-            "— that's the raw log. Synthesize across phases."
-        )
+        prompt = build_summarize_evidence_prompt(cell_id, claim_text, evidence_md, iteration)
         return self._ask(prompt)
