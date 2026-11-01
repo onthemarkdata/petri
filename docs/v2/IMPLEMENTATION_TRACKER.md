@@ -79,7 +79,7 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#63](https://github.com/onthemarkdata/petri/issues/63) | Retire the v1 engine and fcntl queue | Integrated in [PR #218](https://github.com/onthemarkdata/petri/pull/218); final v2 acceptance pending |
 | [#64](https://github.com/onthemarkdata/petri/issues/64) | Add OTel bootstrap and petri.yaml telemetry section | Integrated in [PR #162](https://github.com/onthemarkdata/petri/pull/162); final v2 acceptance pending |
 | [#65](https://github.com/onthemarkdata/petri/issues/65) | Spike: choose the pydantic-ai OTel instrumentation path | Integrated in [PR #163](https://github.com/onthemarkdata/petri/pull/163); final v2 acceptance pending |
-| [#66](https://github.com/onthemarkdata/petri/issues/66) | Enable DBOS OTel spans behind the durability seam | Pending |
+| [#66](https://github.com/onthemarkdata/petri/issues/66) | Enable DBOS OTel spans behind the durability seam | Integrated in [PR #219](https://github.com/onthemarkdata/petri/pull/219); final v2 acceptance pending |
 | [#67](https://github.com/onthemarkdata/petri/issues/67) | Instrument pydantic-ai agent runs with OTel | Integrated in [PR #164](https://github.com/onthemarkdata/petri/pull/164); final v2 acceptance pending |
 | [#68](https://github.com/onthemarkdata/petri/issues/68) | Attach petri.* domain attributes to spans | Integrated in [PR #165](https://github.com/onthemarkdata/petri/pull/165); final v2 acceptance pending |
 | [#69](https://github.com/onthemarkdata/petri/issues/69) | Persist spans and usage rows to petri.sqlite | Integrated in [PR #167](https://github.com/onthemarkdata/petri/pull/167); final v2 acceptance pending |
@@ -94,7 +94,7 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#78](https://github.com/onthemarkdata/petri/issues/78) | Add petri backup with --list and a snapshot hook | Integrated in [PR #177](https://github.com/onthemarkdata/petri/pull/177); final v2 acceptance pending |
 | [#79](https://github.com/onthemarkdata/petri/issues/79) | Add petri backup --restore with an overwrite guard | Integrated in [PR #181](https://github.com/onthemarkdata/petri/pull/181); final v2 acceptance pending |
 | [#80](https://github.com/onthemarkdata/petri/issues/80) | Add petri export for git-reviewable derived text | Integrated in [PR #182](https://github.com/onthemarkdata/petri/pull/182); final v2 acceptance pending |
-| [#81](https://github.com/onthemarkdata/petri/issues/81) | Replace /api/proc and sync seed with durable runs | Pending |
+| [#81](https://github.com/onthemarkdata/petri/issues/81) | Replace /api/proc and sync seed with durable runs | Integrated in [PR #225](https://github.com/onthemarkdata/petri/pull/225) and [PR #227](https://github.com/onthemarkdata/petri/pull/227); final v2 acceptance pending |
 | [#82](https://github.com/onthemarkdata/petri/issues/82) | Harden colony graph integrity and persistence | Integrated in [PR #192](https://github.com/onthemarkdata/petri/pull/192); final v2 acceptance pending |
 | [#83](https://github.com/onthemarkdata/petri/issues/83) | Ship starter analytics views in petri.sqlite | Integrated in [PR #188](https://github.com/onthemarkdata/petri/pull/188); final v2 acceptance pending |
 | [#84](https://github.com/onthemarkdata/petri/issues/84) | Write the verdict-driven re-decomposition RFC | Integrated in [PR #185](https://github.com/onthemarkdata/petri/pull/185); final v2 acceptance pending |
@@ -109,7 +109,7 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#93](https://github.com/onthemarkdata/petri/issues/93) | Add opt-in convergence-point priority to grow scheduling | Integrated in [PR #205](https://github.com/onthemarkdata/petri/pull/205); final v2 acceptance pending |
 | [#94](https://github.com/onthemarkdata/petri/issues/94) | Add a read-only Analyst for research-health flags | Integrated in [PR #204](https://github.com/onthemarkdata/petri/pull/204); final v2 acceptance pending |
 | [#95](https://github.com/onthemarkdata/petri/issues/95) | Write the GitHub feedback re-entry RFC | Integrated in [PR #209](https://github.com/onthemarkdata/petri/pull/209); final v2 acceptance pending |
-| [#96](https://github.com/onthemarkdata/petri/issues/96) | Archive merged worktrees and record corpus provenance | Pending |
+| [#96](https://github.com/onthemarkdata/petri/issues/96) | Archive merged worktrees and record corpus provenance | Local preservation and cleanup verified; provenance remains private by maintainer decision |
 | [#100](https://github.com/onthemarkdata/petri/issues/100) | Petri v2 migration — master tracker | In progress; see child PRs and validation notes |
 | [#117](https://github.com/onthemarkdata/petri/issues/117) | Wire `petri --version` into the CLI | Already shipped in PR #118; version CLI regression tests pass |
 | [#120](https://github.com/onthemarkdata/petri/issues/120) | Wire up the pi harness end-to-end | In progress; see child PRs and validation notes |
@@ -182,5 +182,27 @@ cell. Full quality acceptance remains open: broader decomposition cases and
 continuous seed-to-grow runs still produce validation failures. These failures
 are retained for diagnosis; no fallback verdict counts as a pass.
 
-Private archive tests remain opt-in, and worktree housekeeping remains pending.
-No private audit or source manifest is included in this public tracker.
+Private archive tests remain opt-in. Local preservation and worktree cleanup are
+verified; private audit records and source manifests stay outside this tracker.
+
+## Integration checks through PR #228
+
+PR #219 adds native DBOS spans to the dish telemetry provider. PRs #220–224 add
+typed output guidance, v2 agent instructions, persisted evidence handoffs,
+cross-colony scheduling passes, and strict decoding of known result envelopes.
+PRs #225–228 replace dashboard subprocess controls with durable runs, preserve
+dashboard reads during CLI ownership, decode declared tool-name envelopes, and
+match research prompts to available web tools.
+
+The combined dashboard, seed, prompt, and process-contention checks passed 55
+tests. Full-source mypy checked 145 files; Ruff and whitespace checks passed.
+The CLI adapter checks passed 41 tests, including argument validation and retries.
+The final combined offline suite and live application acceptance remain pending.
+
+PR #125 targets `dev` and already triggers CI under the existing workflow filters.
+The earlier rejected optional filter change is not needed for integration CI;
+the latest complete matrix must still pass before final approval.
+
+Live Gemma grow runs exposed malformed tool-call envelopes and an unbounded
+response. The decoder fix is integrated; response limits and repeated live runs
+remain under validation. No failed or stalled run counts as a successful grow.
