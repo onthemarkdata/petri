@@ -40,6 +40,8 @@ def main() -> int:
     parser.add_argument("directory", type=Path)
     parser.add_argument("--harness", required=True, choices=["provider", "pi"])
     parser.add_argument("--case", required=True, choices=CASES)
+    parser.add_argument("--output-mode", choices=["tool", "prompted"],
+                        help="Choose final-result delivery without changing host retrieval tools.")
     parser.add_argument("--expanded-budget", action="store_true",
                         help="Use a bounded acceptance budget for the full roster and source retrieval.")
     parser.add_argument("--max-tokens", type=int, default=4096,
@@ -117,6 +119,8 @@ def main() -> int:
             if args.harness == "provider"
             else {"backend": "pi", "model": GEMMA, "provider": "petri-local", "tools": []}
         )
+        if args.output_mode is not None:
+            config["harness"]["output_mode"] = args.output_mode
         (dish / "defaults/petri.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
     claim, expected = CASES[args.case]
     path = dish_db_path(dish, "grow-live")

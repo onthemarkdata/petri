@@ -101,6 +101,7 @@ class HarnessContent(StrictContent):
     model: Nonempty | None = None
     provider: Nonempty | None = None
     tools: list[Nonempty] = Field(default_factory=list)
+    output_mode: Literal["tool", "prompted"] | None = None
 
 
 class DebateContent(StrictContent):
@@ -184,6 +185,8 @@ class AgentConfig(StrictContent):
     def validate_response_settings(self):
         if self.model_settings.max_tokens is not None and self.harness.backend != "provider":
             raise ValueError("model_settings.max_tokens requires the provider backend; configure CLI response limits in its provider.")
+        if self.harness.output_mode == "tool" and self.harness.backend != "provider":
+            raise ValueError("CLI backends require prompted final output.")
         return self
 
     @field_validator("agents", mode="before")
