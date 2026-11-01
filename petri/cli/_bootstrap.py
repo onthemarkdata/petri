@@ -62,21 +62,11 @@ def find_petri_dir(start: Path | None = None) -> Path:
 
 
 def load_colonies(petri_dir: Path, dish_id: str) -> list[tuple]:
-    """Load all colonies from the petri-dishes directory."""
-    from petri.graph.colony import deserialize_colony
+    """Load v2 colonies from the configured dish database."""
+    from petri.storage.colonies import list_colonies
+    from petri.storage.paths import dish_db_path
 
-    colonies: list[tuple] = []
-    dishes_dir = petri_dir / "petri-dishes"
-    if not dishes_dir.exists():
-        return colonies
-    for colony_dir in sorted(dishes_dir.iterdir()):
-        if colony_dir.is_dir():
-            try:
-                graph, colony = deserialize_colony(colony_dir, dish_id)
-                colonies.append((graph, colony))
-            except Exception:
-                continue
-    return colonies
+    return list_colonies(dish_db_path(petri_dir, dish_id))
 
 
 def detect_interactive_mode() -> tuple[bool, object]:

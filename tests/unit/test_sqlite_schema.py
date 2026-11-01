@@ -67,7 +67,7 @@ def test_future_version_fails_loudly(tmp_path):
     path = tmp_path / "petri.sqlite"
     with sqlite3.connect(path) as conn:
         conn.execute("PRAGMA user_version = 999")
-    with pytest.raises(database.SchemaVersionError, match="999.*supported version 1"):
+    with pytest.raises(database.SchemaVersionError, match=rf"999.*supported version {database.SCHEMA_VERSION}"):
         database.connect(path)
     with sqlite3.connect(path) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 999

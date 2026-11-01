@@ -133,14 +133,10 @@ class TestFullFlow:
         r = runner.invoke(app, ["graph"])
         assert r.exit_code == 0, r.output
 
-        # Cell count consistency: check should report the same number
-        # of cells as live in the colony directory.
-        dishes_dir = seeded_petri_dir["petri_dir"] / "petri-dishes"
-        colony_dirs = [d for d in dishes_dir.iterdir() if d.is_dir()]
-        assert len(colony_dirs) == 1
+        from petri.storage.database import list_cells
+        from petri.storage.paths import dish_db_path
 
-        metadata_files = list(colony_dirs[0].rglob("metadata.json"))
-        assert len(metadata_files) == check_count
+        assert len(list_cells(dish_db_path(seeded_petri_dir["petri_dir"]))) == check_count
 
 
 # ── on-disk integrity (SC-002) ──────────────────────────────────────────

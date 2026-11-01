@@ -167,6 +167,12 @@ def create_petri_dish(
         result.created_dishes_dir = True
     dishes_dir.mkdir(exist_ok=True)
 
+    from petri.storage.database import connect
+    from petri.storage.paths import dish_db_path, dish_dir
+
+    connect(dish_db_path(petri_dir)).close()
+    (dish_dir(petri_dir) / "exports").mkdir(exist_ok=True)
+
     queue_path = petri_dir / "queue.json"
     if not queue_path.exists():
         result.created_queue = True

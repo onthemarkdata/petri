@@ -32,8 +32,10 @@ def seed_and_dry_run(dish):
     seeded = runner.invoke(app, ["seed", "Water freezes at zero degrees Celsius at standard atmospheric pressure.",
                                  "--no-questions", "--colony", "water"])
     assert seeded.exit_code == 0, f"{seeded.output}\n{seeded.exception!r}"
-    metadata = list((dish / "petri-dishes" / "water").rglob("metadata.json"))
-    assert len(metadata) >= 2
+    from petri.storage.database import list_cells
+    from petri.storage.paths import dish_db_path
+
+    assert len(list_cells(dish_db_path(dish), colony="bridge-test-water")) >= 2
     grown = runner.invoke(app, ["grow", "--dry-run"])
     assert grown.exit_code == 0, f"{grown.output}\n{grown.exception!r}"
     assert "Would process" in grown.output

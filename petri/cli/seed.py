@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
 import typer
 
-from petri.models import parse_key
 
 from petri.cli._bootstrap import (
     find_petri_dir,
@@ -17,11 +15,12 @@ from petri.cli._bootstrap import (
     resolve_provider,
 )
 from petri.cli_ui import print_error_and_exit
-from petri.storage.seed_guard import ColonyExistsError, require_empty_colony
-from petri.storage.paths import (
-    cell_dir as cell_dir_for,
-    events_path as events_file_path,
+from petri.storage.colonies import (
+    clear_unapproved_colony, colony_exists, reserve_colony, save_colony,
 )
+from petri.storage.seed_guard import ColonyExistsError
+from petri.storage.database import SQLiteEventLog
+from petri.storage.paths import dish_db_path
 
 if TYPE_CHECKING:
     from petri.models import ClarifyingQuestion
@@ -112,43 +111,27 @@ def _run_substance_check(
         claim = new_claim.strip() or claim
 
 
-def _events_path_for(colony_path: Path, colony_model, cell_id: str) -> Path:
-    """Resolve a cell's events.jsonl path.
-
-    Prefers the colony model's ``cell_paths`` mapping when available,
-    falling back to parsing the cell ID via ``storage.paths``.
-    """
-    relative_path = colony_model.cell_paths.get(cell_id)
-    if relative_path:
-        return colony_path / relative_path / "events.jsonl"
-    parsed = parse_key(cell_id, strict=True)
-    level, seq = parsed["level"], parsed["seq"]
-    return events_file_path(cell_dir_for(colony_path, level, seq))
+def _events_path_for(colony_path: Path, colony_model, cell_id: str) -> SQLiteEventLog:
+    """Select one cell's event stream in the dish database."""
+    return SQLiteEventLog(colony_path, cell_id)
 
 
 def _log_cell_event(
-    events_path: Path,
+    events_path: SQLiteEventLog,
     cell_id: str,
     event_type: str,
     data: dict | None = None,
+    *,
+    sequence: int = 0,
 ) -> None:
-    """Append an event to a cell's events.jsonl with error handling."""
+    """Persist a seed event, failing if its history cannot be saved."""
     from petri.storage.event_log import append_event
 
-    try:
-        append_event(
-            events_path=events_path,
-            cell_id=cell_id,
-            event_type=event_type,
-            agent="decomposition_lead",
-            iteration=0,
-            data=data or {},
-        )
-    except Exception as exc:
-        typer.echo(
-            f"Warning: failed to log event {event_type} for {cell_id}: {exc}",
-            err=True,
-        )
+    append_event(
+        events_path=events_path, cell_id=cell_id, event_type=event_type,
+        agent="decomposition_lead", iteration=0, data=data or {},
+        node="seed", sequence=sequence,
+    )
 
 
 def _make_cell_created_callback(
@@ -159,38 +142,16 @@ def _make_cell_created_callback(
     spinner,
     log_event: Callable[[str, str, dict], None],
 ) -> Callable:
-    """Return a callback for ``decompose_claim`` that persists each new cell.
-
-    The callback adds the cell + edges to the graph, re-serializes the
-    colony, logs a ``cell_created`` event, and prints the new claim above
-    the live spinner so the user retains a permanent record.
-    """
-    from petri.graph.colony import serialize_colony
-
+    """Persist each created cell and its edges before reporting progress."""
     def _on_cell_created(cell, new_edges) -> None:
-        try:
-            graph.add_cell(cell)
-            for edge in new_edges:
-                graph.add_edge(edge)
-            # Re-serialize incrementally — serialize_colony preserves
-            # existing events.jsonl files (touch only on first create).
-            serialize_colony(graph, colony_model, colony_path)
-            log_event(
-                cell.id,
-                "cell_created",
-                {
-                    "level": cell.level,
-                    "parents": [edge.from_cell for edge in new_edges],
-                },
-            )
-            # Print the new claim as a permanent line above the live
-            # spinner so the user has a record of what was just created.
-            spinner.print_line(cell.claim_text)
-        except Exception as exc:
-            typer.echo(
-                f"Warning: failed to persist cell {cell.id}: {exc}",
-                err=True,
-            )
+        graph.add_cell(cell)
+        for edge in new_edges:
+            graph.add_edge(edge)
+        save_colony(colony_path, graph, colony_model)
+        log_event(cell.id, "cell_created", {
+            "level": cell.level, "parents": [edge.from_cell for edge in new_edges],
+        })
+        spinner.print_line(cell.claim_text)
 
     return _on_cell_created
 
@@ -219,7 +180,7 @@ def register(app: typer.Typer) -> None:
         settings = DecompositionSettings.from_dish(petri_dir)
 
         from petri.cli_ui import Spinner
-        from petri.graph.colony import ColonyGraph, serialize_colony
+        from petri.graph.colony import ColonyGraph
         from petri.models import Cell, Colony, build_cell_key
         from petri.reasoning.decomposer import (
             decompose_claim,
@@ -313,20 +274,16 @@ def register(app: typer.Typer) -> None:
         typer.echo(f"Claim: {claim}")
         typer.echo()
 
-        # ── Phase C: Pre-create colony directory + center cell ──
+        # ── Phase C: Reserve the colony and persist its center ──
         colony_name = colony or generate_colony_name(claim)
         colony_id = f"{dish_id}-{colony_name}"
         center_id = build_cell_key(dish_id, colony_name, 0, 0)
-        colony_path = petri_dir / "petri-dishes" / colony_name
-
-        try:
-            require_empty_colony(colony_path)
-        except ColonyExistsError as exc:
-            print_error_and_exit(str(exc), code=1)
-
-        # A cell-free directory may remain after an interrupted initialization.
-        if colony_path.exists():
-            shutil.rmtree(colony_path)
+        colony_path = dish_db_path(petri_dir, dish_id)
+        if colony_exists(colony_path, colony_id):
+            print_error_and_exit(
+                f"Colony '{colony_name}' already exists. Choose another name; "
+                "use --resume for an interrupted seed when resume support is enabled.", code=1,
+            )
 
         center_cell = Cell(
             id=center_id,
@@ -345,13 +302,22 @@ def register(app: typer.Typer) -> None:
             clarifications=[],
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        serialize_colony(graph, colony_model, colony_path)
+        try:
+            reserve_colony(colony_path, colony_model)
+        except ColonyExistsError as error:
+            print_error_and_exit(str(error), code=1)
+        save_colony(colony_path, graph, colony_model)
+
+        event_sequences: dict[tuple[str, str], int] = {}
 
         def log_for_this_run(
             cell_id: str, event_type: str, data: dict | None = None
         ) -> None:
             events_file = _events_path_for(colony_path, colony_model, cell_id)
-            _log_cell_event(events_file, cell_id, event_type, data)
+            key = (cell_id, event_type)
+            sequence = event_sequences.get(key, 0)
+            _log_cell_event(events_file, cell_id, event_type, data, sequence=sequence)
+            event_sequences[key] = sequence + 1
 
         log_for_this_run(
             center_id, "seed_started", {"claim": claim, "no_questions": no_questions}
@@ -422,18 +388,17 @@ def register(app: typer.Typer) -> None:
             # Persist user clarifications onto the colony so a kill mid-flow
             # doesn't lose them.
             colony_model.clarifications = clarifications
-            serialize_colony(graph, colony_model, colony_path)
+            save_colony(colony_path, graph, colony_model)
 
         # ── Phase E: Decompose / Accept / Regenerate / Abort loop ──
         guidance = ""
         result = None
         while True:
             # Only this run's cells are replaced during regeneration.
-            if colony_path.exists():
-                shutil.rmtree(colony_path)
+            clear_unapproved_colony(colony_path, colony_id)
             graph = ColonyGraph(colony_id=colony_id)
             graph.add_cell(center_cell)
-            serialize_colony(graph, colony_model, colony_path)
+            save_colony(colony_path, graph, colony_model)
 
             log_for_this_run(
                 center_id,
@@ -494,8 +459,7 @@ def register(app: typer.Typer) -> None:
 
             if action is None or action == "Abort":
                 # Only this run's cells are removed when this run is rejected.
-                if colony_path.exists():
-                    shutil.rmtree(colony_path)
+                clear_unapproved_colony(colony_path, colony_id)
                 typer.echo("Decomposition rejected.")
                 raise typer.Exit(code=1)
 
@@ -508,16 +472,14 @@ def register(app: typer.Typer) -> None:
             ).ask()
             if guidance is None:
                 # Only this run's cells are removed when this run is rejected.
-                if colony_path.exists():
-                    shutil.rmtree(colony_path)
+                clear_unapproved_colony(colony_path, colony_id)
                 typer.echo("Cancelled.")
                 raise typer.Exit(code=1)
-            # Loop iterates: top of the loop wipes the colony dir and rebuilds
+            # The next iteration replaces draft rows and retains their events.
 
-        # Final colony.json rewrite — ensures cell_paths is consistent and
-        # persists the user's clarifications alongside the approved decomposition.
+        # Persist clarifications alongside the approved cells.
         colony_model.clarifications = clarifications
-        serialize_colony(graph, colony_model, colony_path)
+        save_colony(colony_path, graph, colony_model)
         log_for_this_run(
             center_id,
             "colony_approved",

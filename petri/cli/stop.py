@@ -2,23 +2,13 @@
 
 from __future__ import annotations
 
-import json
-
 import typer
 
 from petri.cli._bootstrap import find_petri_dir
 from petri.cli_ui import print_error_and_exit
 from petri.execution import resolve_backend
-from petri.models import parse_key
-from petri.storage.paths import (
-    cell_dir as cell_dir_for,
-)
-from petri.storage.paths import (
-    events_path as events_file_path,
-)
-from petri.storage.paths import (
-    metadata_path as metadata_file_path,
-)
+from petri.storage.database import SQLiteEventLog, get_cell
+from petri.storage.paths import dish_db_path
 
 
 def register(app: typer.Typer) -> None:
@@ -62,45 +52,15 @@ def register(app: typer.Typer) -> None:
                         # Graceful: stall
                         backend.update_state(petri_dir, cell_id, "stalled")
 
-                    # Log stop event — walk each per-colony directory looking
-                    # for a matching cell dir (using the zero-padded fallback
-                    # layout, which is what the cell-ID alone can reconstruct).
-                    level_int: int | None
-                    seq_int: int | None
-                    try:
-                        parsed = parse_key(cell_id, strict=True)
-                        level_int, seq_int = parsed["level"], parsed["seq"]
-                    except ValueError:
-                        level_int = seq_int = None
-
-                    if level_int is not None and seq_int is not None:
-                        dishes_dir = petri_dir / "petri-dishes"
-                        if dishes_dir.is_dir():
-                            for colony_path in dishes_dir.iterdir():
-                                if not colony_path.is_dir():
-                                    continue
-                                candidate_cell_dir = cell_dir_for(colony_path, level_int, seq_int)
-                                candidate_metadata = metadata_file_path(candidate_cell_dir)
-                                if not candidate_metadata.exists():
-                                    continue
-                                try:
-                                    meta = json.loads(candidate_metadata.read_text())
-                                    if meta.get("id") == cell_id:
-                                        append_event(
-                                            events_path=events_file_path(candidate_cell_dir),
-                                            cell_id=cell_id,
-                                            event_type="verdict_issued",
-                                            agent="cell_lead",
-                                            iteration=entry.get("iteration", 0),
-                                            data={
-                                                "verdict": "PIPELINE_STALLED",
-                                                "summary": "Stop requested by user"
-                                                + (" (force)" if force else ""),
-                                            },
-                                        )
-                                        break
-                                except Exception:
-                                    pass
+                    db_path = dish_db_path(petri_dir)
+                    if get_cell(db_path, cell_id) is not None:
+                        append_event(
+                            events_path=SQLiteEventLog(db_path, cell_id), cell_id=cell_id,
+                            event_type="verdict_issued", agent="cell_lead",
+                            iteration=entry.get("iteration", 0), node="stop",
+                            data={"verdict": "PIPELINE_STALLED", "summary":
+                                  "Stop requested by user" + (" (force)" if force else "")},
+                        )
 
                     stopped_cells.append(cell_id)
                 except ValueError:
