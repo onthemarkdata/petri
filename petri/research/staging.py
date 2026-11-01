@@ -4,8 +4,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any
 
-from pydantic_ai import RunContext
-from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai import ModelRetry, RunContext
+from pydantic_ai.capabilities import AbstractCapability, OutputContext, RawOutput
 from pydantic_ai.messages import InstructionPart, ModelMessage, ToolReturnPart
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.settings import ModelSettings
@@ -26,8 +26,23 @@ def investigation_settings(base: ModelSettings) -> Callable[[RunContext[Any]], M
     return settings
 
 
+def require_retrieval_attempt(messages: Sequence[ModelMessage]) -> None:
+    if not has_retrieval_attempt(messages):
+        raise ModelRetry(
+            "Call web_search or web_fetch before completing the investigation. "
+            "A failed retrieval attempt may justify an inconclusive result; it is not evidence."
+        )
+
+
 class RequiredInvestigationOutput(AbstractCapability[Any]):
     """Request a host tool call before enabling final-result JSON mode."""
+
+    async def before_output_validate(
+        self, context: RunContext[Any], *, output_context: OutputContext, output: RawOutput,
+    ) -> RawOutput:
+        if not context.partial_output:
+            require_retrieval_attempt(context.messages)
+        return output
 
     async def prepare_model_request(
         self, context: RunContext[Any], request: ModelRequestContext,
