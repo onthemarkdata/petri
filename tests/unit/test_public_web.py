@@ -10,7 +10,7 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from petri.agents.config import AgentConfig, load_agent_config
-from petri.agents.contract import AGENT_SPECS, AgentName, Phase
+from petri.agents.contract import AgentName
 from petri.agents.factory import build_agents, run_agent
 from petri.research.tools import ResearchContext
 from petri.research.web import MAX_BYTES, MAX_TEXT, PublicWebClient, PublicWebError
@@ -123,7 +123,7 @@ async def test_total_retrieval_deadline_is_bounded(monkeypatch):
         await client(slow).fetch("https://example.org/slow")
 
 
-def test_opt_in_registration_is_limited_to_research_roles_and_makes_no_requests():
+def test_opt_in_registration_covers_evidence_roles_and_makes_no_requests():
     calls = []
     web = client(lambda request: calls.append(request))
     config = load_agent_config(DEFAULTS)
@@ -140,7 +140,7 @@ def test_opt_in_registration_is_limited_to_research_roles_and_makes_no_requests(
     )
     for name, agent in agents.items():
         assert set(agent._function_toolset.tools) == (
-            {"web_search", "web_fetch"} if AGENT_SPECS[name].phase == Phase.RESEARCH else set()
+            {"web_search", "web_fetch"} if name not in {AgentName.DECOMPOSITION_LEAD, AgentName.CELL_LEAD} else set()
         )
     assert calls == []
 

@@ -26,7 +26,7 @@ from petri.agents.config import AgentConfig
 from petri.agents.contract import AGENT_SPECS, AgentName, Phase
 from petri.agents.debates import DebateStatus, log_debate, run_debate
 from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment
-from petri.execution.evidence import RecordedAssessment, format_socratic, render_evidence
+from petri.execution.evidence import RecordedAssessment, format_socratic, render_agent_context
 from petri.execution.pipeline import (
     ConvergenceDecision,
     EvaluationVerdict,
@@ -322,14 +322,14 @@ def _finish(services: PhaseServices, value: PipelineInput, phase: str) -> PhaseR
 
 
 def _prior_evidence(services: PhaseServices, value: PipelineInput) -> str:
-    return render_evidence(database.read_events(services.db_path, cell_id=value.cell_id))
+    return render_agent_context(database.read_events(services.db_path, cell_id=value.cell_id))
 
 
 async def run_socratic(value: PipelineInput, services: PhaseServices) -> PhaseRunResult:
     """Clarify the claim, challenge assumptions, map evidence, then verify the analysis."""
     _emit(services, value, "socratic", "phase_start")
     claim = _claim(services, value)
-    assessments = []
+    assessments: list[RecordedAssessment] = []
     for step, directive in SOCRATIC_STEPS:
         assessments.append(
             await _assessment(
@@ -340,6 +340,7 @@ async def run_socratic(value: PipelineInput, services: PhaseServices) -> PhaseRu
                 agent_name=f"socratic_{step}",
                 agent=services.socratic_agent,
                 claim=claim,
+                prior_evidence=format_socratic(assessments) if assessments else "",
                 directive=directive,
             )
         )
@@ -360,7 +361,6 @@ async def run_socratic(value: PipelineInput, services: PhaseServices) -> PhaseRu
 async def run_research(value: PipelineInput, services: PhaseServices) -> PhaseRunResult:
     _emit(services, value, "research", "phase_start")
     claim = _claim(services, value)
-    prior = _prior_evidence(services, value)
     for name, spec in AGENT_SPECS.items():
         if spec.phase == Phase.RESEARCH and not spec.is_lead:
             await _assessment(
@@ -371,7 +371,7 @@ async def run_research(value: PipelineInput, services: PhaseServices) -> PhaseRu
                 agent_name=name.value,
                 agent=services.agents[name],
                 claim=claim,
-                prior_evidence=prior,
+                prior_evidence=_prior_evidence(services, value),
             )
     return _finish(services, value, "research")
 
@@ -379,7 +379,6 @@ async def run_research(value: PipelineInput, services: PhaseServices) -> PhaseRu
 async def run_critique(value: PipelineInput, services: PhaseServices) -> PhaseRunResult:
     _emit(services, value, "critique", "phase_start")
     claim = _claim(services, value)
-    prior = _prior_evidence(services, value)
     for name, spec in AGENT_SPECS.items():
         if spec.phase == Phase.CRITIQUE and not spec.is_lead:
             await _assessment(
@@ -390,7 +389,7 @@ async def run_critique(value: PipelineInput, services: PhaseServices) -> PhaseRu
                 agent_name=name.value,
                 agent=services.agents[name],
                 claim=claim,
-                prior_evidence=prior,
+                prior_evidence=_prior_evidence(services, value),
             )
     for debate in services.config.debates:
         node = "debate:" + ":".join(name.value for name in debate.pair)
@@ -401,7 +400,10 @@ async def run_critique(value: PipelineInput, services: PhaseServices) -> PhaseRu
             with phase_span("debate", span_context(services, value), iteration=value.iteration,
                             agent=AgentName.CELL_LEAD, weakest_link=value.weakest_link) as span:
                 result = await run_debate(
-                    debate.protocol, services.agents, claim, services.config.limits.debate
+                    debate.protocol, services.agents, claim, services.config.limits.debate,
+                    prior_evidence=_prior_evidence(services, value),
+                    deps_factory=lambda name: ResearchContext(services.db_path, value.cell_id,
+                        name.value, value.iteration, services.round_number, node),
                 )
                 set_verdict_attributes(span, result.status.value, usage=result.usage,
                     model=services.config.model, prices=services.config.prices, outcome=result.status.value)
