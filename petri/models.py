@@ -45,6 +45,7 @@ class EventType(str, Enum):
     freshness_checked = "freshness_checked"
     verdict_issued = "verdict_issued"
     evidence_appended = "evidence_appended"
+    evidence_fed = "evidence_fed"
     evidence_summarized = "evidence_summarized"
     debate_mediated = "debate_mediated"
     convergence_checked = "convergence_checked"
@@ -165,6 +166,21 @@ class ConvergenceCheckedData(BaseModel):
 class CellReopenedData(BaseModel):
     trigger: str
     prior_status: str
+    original_workflow_id: str | None = None
+    forked_workflow_id: str | None = None
+    generation: int | None = Field(default=None, ge=1)
+    today_iso: str | None = None
+    max_iterations: int | None = Field(default=None, ge=1)
+
+
+class EvidenceFedData(BaseModel):
+    content: str
+    evidence_path: str
+    content_sha256: str
+    source_kind: str
+    original_workflow_id: str | None = None
+    forked_workflow_id: str
+    generation: int = Field(ge=1)
 
 
 class PropagationTriggeredData(BaseModel):
@@ -261,6 +277,7 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "freshness_checked": FreshnessCheckedData,
     "verdict_issued": VerdictIssuedData,
     "evidence_appended": EvidenceAppendedData,
+    "evidence_fed": EvidenceFedData,
     "evidence_summarized": EvidenceSummarizedData,
     "debate_mediated": DebateMediatedData,
     "convergence_checked": ConvergenceCheckedData,

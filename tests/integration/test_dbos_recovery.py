@@ -48,12 +48,15 @@ def test_sigkill_resumes_checkpointed_cell_and_excludes_another_owner(tmp_path):
     with sqlite3.connect(tmp_path / "audit.sqlite") as conn:
         calls = dict(conn.execute("SELECT phase,COUNT(*) FROM calls GROUP BY phase"))
     assert calls == {"socratic": 1, "research": 2}
-    events = database.read_events(tmp_path / "petri.sqlite")
+    events = database.read_events(tmp_path / "petri.sqlite", event_type="verdict_issued")
     assert len(events) == 2
     assert {event["id"] for event in events} == {
         "dish-colony-002-001:socratic",
         "dish-colony-002-001:research",
     }
+    queued = database.read_events(tmp_path / "petri.sqlite", event_type="cell_queued")
+    assert len(queued) == 1
+    assert queued[0]["data"]["workflow_id"] == "dish-colony-002-001:r1"
 
 
 @pytest.mark.integration
@@ -102,4 +105,9 @@ def test_sigkill_resumes_colony_without_reexecuting_validated_leaves(tmp_path):
     assert all(
         row["status"] == "VALIDATED" for row in database.list_cells(tmp_path / "petri.sqlite")
     )
-    assert len(database.read_events(tmp_path / "petri.sqlite")) == 10
+    assert len(database.read_events(tmp_path / "petri.sqlite", event_type="verdict_issued")) == 10
+    queued = database.read_events(tmp_path / "petri.sqlite", event_type="cell_queued")
+    assert len(queued) == 5
+    assert {event["data"]["workflow_id"] for event in queued} == {
+        f"{row['id']}:r1" for row in database.list_cells(tmp_path / "petri.sqlite")
+    }

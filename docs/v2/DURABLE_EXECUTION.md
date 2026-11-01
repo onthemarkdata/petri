@@ -110,10 +110,12 @@ status or writes a stalled verdict. Stopping an idle dish is a no-op. Grow exits
 0 for all-terminal completion or a user stop, including Ctrl+C, and 1 for blocked,
 conflicted, or failed work. SIGKILL recovery uses the same grow command.
 
-`petri feed` reports transitive impact, submits a stable revalidation request,
+`petri feed` reports transitive impact, checkpoints ingestion, and forks a
+completed cell workflow from its first research step. It reuses Socratic output
 and appends idempotent propagation flags for dependents. Flags preserve those
-cells' statuses and do not enqueue them. Only the explicitly reopened cell gets
-the next round.
+cells' statuses and do not enqueue them. Equal evidence attaches to the same
+allocated round. See [Feed evidence](FEED.md) for the SQLite fork boundary,
+older-checkpoint fallback, typed errors, and SIGKILL validation.
 
 The DBOS adapter accepts an optional async `after_pass(petri_dir) -> bool` hook.
 It runs after the selected parents settle and before the runtime closes. A true

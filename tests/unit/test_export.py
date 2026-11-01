@@ -98,3 +98,43 @@ def test_grow_completion_honors_export_flag(tmp_path, monkeypatch):
     result = CliRunner().invoke(app, ["grow", "--export"])
     assert result.exit_code == 0, result.output
     assert (tmp_path / "petri-dishes/dish/exports/manifest.json").is_file()
+
+
+def test_restored_feed_evidence_appears_in_markdown_without_disk_files(tmp_path):
+    import hashlib
+    import shutil
+    from petri.models import Event
+    from petri.storage.backup import snapshot_before_destructive, restore_snapshot
+
+    path = seed(tmp_path)
+    content = "Public evidence: SQLite transactions are atomic.\nSource: https://www.sqlite.org/transactional.html"
+    payload = {
+        "content": content, "evidence_path": "evidence/public.json",
+        "content_sha256": hashlib.sha256(content.encode()).hexdigest(), "source_kind": "file",
+        "original_workflow_id": "dish-colony-001-000:r1",
+        "forked_workflow_id": "dish-colony-001-000:r2", "generation": 2,
+    }
+    database.append_event(path, Event(
+        id="fed", cell_id="dish-colony-001-000", timestamp="2026-11-01T00:00:00Z",
+        type="evidence_fed", agent="execution_backend", iteration=0, data=payload,
+    ))
+    with database._write(path) as connection:
+        connection.execute("UPDATE cells SET evidence_md=? WHERE id=?", (
+            "Existing canonical evidence.", "dish-colony-001-000",
+        ))
+    evidence_file = path.parent / payload["evidence_path"]
+    evidence_file.parent.mkdir()
+    evidence_file.write_text(json.dumps({"content": content}))
+    export_dish(tmp_path, "dish")
+    original_events = (path.parent / "exports/cells/dish-colony-001-000/events.jsonl").read_bytes()
+    snapshot = snapshot_before_destructive(tmp_path, "dish")
+    shutil.rmtree(path.parent)
+    restore_snapshot(tmp_path, snapshot.name)
+    assert not evidence_file.exists()
+    output = export_dish(tmp_path, "dish")
+    markdown = (output / "cells/dish-colony-001-000/cell.md").read_text()
+    assert "Existing canonical evidence." in markdown
+    assert "### Fed evidence (round 2)" in markdown
+    assert "> Public evidence: SQLite transactions are atomic." in markdown
+    assert (output / "cells/dish-colony-001-000/events.jsonl").read_bytes() == original_events
+    assert database.read_events(path, event_type="evidence_fed")[0]["data"] == payload

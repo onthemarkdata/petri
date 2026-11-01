@@ -78,6 +78,7 @@ class StepResult:
     retry_after_seconds: float | None = None
     failure: str | None = None
     domain_receipt: DomainReceipt | None = None
+    phase: str | None = None
 
 
 def _bounded(value):
@@ -102,6 +103,14 @@ async def cell_phase(spec: CellRunSpec, phase: str, value: PipelineInput) -> Ste
     app = active_app()
     deps = app.dependencies(spec)
     with app.step_activity():
+        # A fork copies the workflow's original admission checkpoint. Enforce the
+        # new identity's start budget inside its first uncheckpointed phase too.
+        while delay := app.admission_delay(spec.workflow_id):
+            if cancellation_mode(app.petri_dir / "dbos.sqlite", spec.workflow_id) == "force":
+                raise DBOSWorkflowCancelledError("Force stop requested before phase admission")
+            await asyncio.sleep(min(delay, 0.05))
+        if cancellation_mode(app.petri_dir / "dbos.sqlite", spec.workflow_id) == "force":
+            raise DBOSWorkflowCancelledError("Force stop requested before phase admission")
         task = asyncio.create_task(getattr(deps, phase)(value))
         try:
             while not task.done():
@@ -114,14 +123,14 @@ async def cell_phase(spec: CellRunSpec, phase: str, value: PipelineInput) -> Ste
                     raise DBOSWorkflowCancelledError("Force stop requested by user")
             output = task.result()
             return _bounded(
-                StepResult(value=output, domain_receipt=capture_receipt(app.db_path, spec.cell_id))
+                StepResult(value=output, domain_receipt=capture_receipt(app.db_path, spec.cell_id), phase=phase)
             )
         except RateLimitedError as error:
-            return StepResult(retry_after_seconds=(
+            return StepResult(phase=phase, retry_after_seconds=(
                 error.retry_after_seconds if error.retry_after_seconds is not None else 1.0
             ))
         except (PermanentHarnessError, UnexpectedModelBehavior, UsageLimitExceeded) as error:
-            return StepResult(failure=str(error)[-4096:] or type(error).__name__)
+            return StepResult(failure=str(error)[-4096:] or type(error).__name__, phase=phase)
         finally:
             if not task.done():
                 task.cancel()
@@ -163,6 +172,18 @@ async def _phase(spec: CellRunSpec, name: str, value: PipelineInput):
 async def validate_cell(spec: CellRunSpec) -> PipelineEnd:
     from petri.execution.otel import set_cell_workflow_attributes
 
+    # Forks retain original inputs; the immutable workflow ID names the new round.
+    workflow_id = DBOS.workflow_id or spec.workflow_id
+    prefix = f"{spec.cell_id}:r"
+    if workflow_id != spec.workflow_id and workflow_id.startswith(prefix) and workflow_id[len(prefix):].isdigit():
+        contexts = [event["data"] for event in database.read_events(
+            active_app().db_path, cell_id=spec.cell_id, event_type="cell_reopened",
+        ) if event["data"].get("forked_workflow_id") == workflow_id]
+        if not contexts:
+            return SyncConflict(reason="The fork's committed round context is missing")
+        context = contexts[-1]
+        spec = replace(spec, round_number=int(workflow_id[len(prefix):]),
+                       today_iso=context["today_iso"], max_iterations=context["max_iterations"])
     set_cell_workflow_attributes(spec, active_app(), DBOS.span)
     if spec.application_version != APPLICATION_VERSION:
         raise RuntimeError("The workflow shape changed; run recovery with its original version")
@@ -452,11 +473,11 @@ class DBOSExecutionBackend:
         _bounded(spec)
         if spec.cell_id in self.app.conflicts:
             return ParkedCellHandle(spec.workflow_id, self.app.conflicts[spec.cell_id]["reason"])
-        from petri.execution.priorities import enqueue_with_priority
-
         status = await DBOS.get_workflow_status_async(spec.workflow_id)
         if status is not None and status.status == "CANCELLED":
             return await DBOS.resume_workflow_async(spec.workflow_id, queue_name=QUEUE_NAME)
+        from petri.execution.priorities import enqueue_with_priority
+
         return await enqueue_with_priority(self.app, spec, level)
 
     def close(self):
@@ -698,6 +719,50 @@ class DBOSExecutionBackend:
         async def run():
             handle = await submit()
             return await handle.get_result()
+        try:
+            return asyncio.run(run())
+        finally:
+            self.close()
+
+    def feed_evidence(self, request, *, petri_dir=None):
+        from petri.lifecycle.revalidate import feed_workflow, write_once
+        from petri.reasoning.ingest import _is_url, is_file_source
+
+        if petri_dir is None and (self.app is None or not self.app.started):
+            raise RuntimeError("Start the dish runtime before feeding evidence")
+        source = request.source
+        if not _is_url(source) and not source.startswith(("http://", "https://")):
+            if is_file_source(source):
+                request = replace(request, source=str(Path(source).expanduser().resolve()))
+            else:
+                import hashlib
+                digest = hashlib.sha256(source.encode()).hexdigest()
+                root = self.app.db_path.parent if petri_dir is None and self.app else dish_db_path(petri_dir).parent
+                staged = root / "inputs" / f"{digest}.txt"
+                write_once(staged, source)
+                request = replace(request, source=str(staged.resolve()))
+
+        async def submit():
+            if self.app is None or not self.app.started:
+                raise RuntimeError("Start the dish runtime before feeding evidence")
+            _bounded(request)
+            with SetWorkflowID(request.workflow_id):
+                return await DBOS.start_workflow_async(feed_workflow, request)
+
+        if petri_dir is None:
+            return submit()
+        self.start(petri_dir, db_path=dish_db_path(petri_dir))
+        async def run():
+            handle = await submit()
+            result = await handle.get_result()
+            # Startup may also recover an earlier feed parent for this evidence.
+            pending = await DBOS.list_workflows_async(
+                name="petri.feed_evidence", status=["PENDING", "ENQUEUED", "DELAYED"],
+            )
+            for prior in pending:
+                recovered = await DBOS.retrieve_workflow_async(prior.workflow_id)
+                await recovered.get_result()
+            return result
         try:
             return asyncio.run(run())
         finally:

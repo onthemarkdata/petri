@@ -56,6 +56,8 @@ class ExecutionBackend(Protocol):
 
     def reopen_cell(self, request, *, petri_dir: Path): ...
 
+    def feed_evidence(self, request, *, petri_dir: Path): ...
+
     def process_queue(
         self,
         *,
