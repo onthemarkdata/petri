@@ -45,3 +45,26 @@ class RequiredInvestigationOutput(AbstractCapability[Any]):
                 instruction_parts=instructions,
             )
         return request
+
+
+class NativeFunctionPromptedOutput(AbstractCapability[Any]):
+    """Keep native function calls available while validating prompted final output."""
+
+    async def prepare_model_request(
+        self, context: RunContext[Any], request: ModelRequestContext,
+    ) -> ModelRequestContext:
+        parameters = request.model_request_parameters
+        if parameters.output_mode == "prompted" and parameters.declared_function_tools:
+            prepared = request.model.customize_request_parameters(parameters)
+            prepared = replace(prepared, prompted_output_template=(
+                parameters.prompted_output_template or request.model.profile.get("prompted_output_template")))
+            final_instructions = prepared.prompted_output_instructions
+            if not final_instructions:
+                return request
+            instructions = list(parameters.instruction_parts or [])
+            instructions.append(InstructionPart(final_instructions))
+            request.model_request_parameters = replace(
+                parameters, output_mode="text", output_object=None, prompted_output_template=None,
+                instruction_parts=instructions,
+            )
+        return request

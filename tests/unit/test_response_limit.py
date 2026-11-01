@@ -115,7 +115,7 @@ async def test_prompted_final_output_keeps_native_host_retrieval(socratic):
     else:
         assert requests[0].get("tool_choice") == "required"
         assert "response_format" not in requests[0]
-        assert requests[1].get("response_format") == {"type": "json_object"}
+        assert "response_format" not in requests[1]
         assert requests[1].get("tool_choice") != "required"
     if not socratic:
         assert fetched == ["https://example.org/source"]

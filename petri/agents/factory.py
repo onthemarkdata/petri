@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 from pydantic_ai import Agent, AgentRunResult, ModelRetry, PromptedOutput, RunContext, ToolOutput
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
@@ -13,7 +14,9 @@ from petri.agents.contract import AgentName
 from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment, output_model
 from petri.agents.source_policy import check_terminal_sources
 from petri.research.tools import ResearchClient, register_research_tools
-from petri.research.staging import RequiredInvestigationOutput, has_retrieval_attempt, investigation_settings
+from petri.research.staging import (
+    NativeFunctionPromptedOutput, RequiredInvestigationOutput, has_retrieval_attempt, investigation_settings,
+)
 from petri.research.web import PublicWebClient
 
 ModelResolver = Callable[[dict], Model | str]
@@ -83,6 +86,11 @@ def build_agents(
                 '\nNo source retrieval tools are available in this run. Assess supplied evidence '
                 'and identify missing research. Do not claim to have searched or fetched sources.'
             )
+        capabilities: list[AbstractCapability[Any]] = []
+        if web is not None and name == AgentName.INVESTIGATOR:
+            capabilities.append(RequiredInvestigationOutput())
+        if backend == "provider":
+            capabilities.append(NativeFunctionPromptedOutput())
         roster[name] = Agent(
             selected_model,
             name=name.value,
@@ -90,7 +98,7 @@ def build_agents(
             instructions=instructions,
             model_settings=investigation_settings(validated.model_settings.as_model_settings())
             if web is not None and name == AgentName.INVESTIGATOR else validated.model_settings.as_model_settings(),
-            capabilities=[RequiredInvestigationOutput()] if web is not None and name == AgentName.INVESTIGATOR else [],
+            capabilities=capabilities,
             retries={"output": retries},
             defer_model_check=True,
         )

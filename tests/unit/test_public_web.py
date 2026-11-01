@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from contextlib import AsyncExitStack
 from pathlib import Path
 
@@ -81,7 +82,10 @@ async def test_investigator_attempts_retrieval_before_honest_inconclusive_output
         assert all(request.get("tool_choice") == "required" and "response_format" not in request
                    for request in model_requests[:2])
         assert model_requests[2].get("tool_choice") != "required"
-        assert model_requests[2]["response_format"] == {"type": "json_object"}
+        assert "response_format" not in model_requests[2]
+        instructions = "\n".join(message["content"] for message in model_requests[2]["messages"]
+                                 if isinstance(message.get("content"), str))
+        assert re.search(r'"required"\s*:\s*\[\s*"verdict"\s*\]', instructions)
     elif enabled:
         for request in model_requests[:2]:
             prompt = request["message"]
