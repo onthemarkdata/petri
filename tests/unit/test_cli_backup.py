@@ -16,7 +16,7 @@ def seed(petri_dir, dish="dish"):
         database.put_cell(path, {"id": f"{dish}-colony-001-00{index}", "colony": f"{dish}-colony",
             "level": 1, "seq": index, "claim_text": "A test claim", "created_at": "2026-01-01"})
     database.add_edge(path, from_cell=f"{dish}-colony-001-000", to_cell=f"{dish}-colony-001-001",
-                      edge_type="dependency", created_at="2026-01-01")
+                      edge_type="intra_colony", created_at="2026-01-01")
     with closing(database.connect(path)) as connection:
         connection.execute("INSERT INTO events VALUES ('event','cell','search_executed','agent',1,'{}','2026-01-01')")
     defaults = petri_dir / "defaults"
@@ -67,3 +67,50 @@ def test_list_and_cli_order(tmp_path, monkeypatch):
     assert "2 cells" in result.output and "bytes" in result.output
     result = CliRunner().invoke(app, ["backup", "--dish", "dish"])
     assert result.exit_code == 0 and "Snapshot saved" in result.output
+
+
+def test_restore_round_trip_guard_siblings_and_sidecars(tmp_path):
+    import pytest
+    from petri.storage.backup import restore_snapshot
+
+    path = seed(tmp_path)
+    sibling = seed(tmp_path, "other")
+    sibling_before = sibling.read_bytes(), sibling.stat().st_mtime_ns
+    expected = rows(path)
+    snapshot = snapshot_before_destructive(tmp_path, "dish")
+    with closing(database.connect(path)) as connection:
+        connection.execute("INSERT INTO events VALUES ('later','cell','search_executed','agent',1,'{}','2026-01-02')")
+    with pytest.raises(ValueError, match="--force"):
+        restore_snapshot(tmp_path, snapshot.name)
+    for suffix in ("-wal", "-shm"):
+        from pathlib import Path
+        Path(str(path) + suffix).write_bytes(b"stale")
+    assert restore_snapshot(tmp_path, snapshot.name, force=True) == path
+    assert rows(path) == expected
+    assert (sibling.read_bytes(), sibling.stat().st_mtime_ns) == sibling_before
+
+
+def test_restore_cli_warns_about_dbos(tmp_path, monkeypatch):
+    from petri.cli import backup as module
+
+    seed(tmp_path)
+    snapshot = snapshot_before_destructive(tmp_path, "dish")
+    (tmp_path / "dbos.sqlite").touch()
+    monkeypatch.setattr(module, "find_petri_dir", lambda: tmp_path)
+    result = CliRunner().invoke(app, ["backup", "--restore", snapshot.name, "--force"])
+    assert result.exit_code == 0, result.output
+    assert "WARNING: DBOS" in result.output and "desynchronize" in result.output
+
+
+def test_restore_rejects_active_execution_and_path_escape(tmp_path):
+    import pytest
+    from filelock import FileLock
+    from petri.storage.backup import restore_snapshot
+
+    seed(tmp_path)
+    snapshot = snapshot_before_destructive(tmp_path, "dish")
+    with FileLock(tmp_path / ".execution-owner.lock"):
+        with pytest.raises(RuntimeError, match="Stop grow"):
+            restore_snapshot(tmp_path, snapshot.name, force=True)
+    with pytest.raises(ValueError, match="snapshot name"):
+        restore_snapshot(tmp_path, "../elsewhere", force=True)

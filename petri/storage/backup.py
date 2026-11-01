@@ -73,3 +73,44 @@ def list_snapshots(petri_dir: Path, dish_id: str | None = None) -> list[Snapshot
         result.append(Snapshot(directory.name, details["dish_id"], details["created_at"],
                                count, path.stat().st_size, directory))
     return sorted(result, key=lambda snapshot: (snapshot.created_at, snapshot.name), reverse=True)
+
+
+def restore_snapshot(petri_dir: Path, name: str, *, force: bool = False) -> Path:
+    """Restore one validated snapshot, refusing overwrites and active execution."""
+    from filelock import FileLock, Timeout
+
+    if not name or Path(name).name != name or name in {".", ".."}:
+        raise ValueError("Use a snapshot name from petri backup --list")
+    snapshot = Path(petri_dir) / "backups" / name
+    if snapshot.is_symlink():
+        raise ValueError("A snapshot must be a local directory, not a symlink")
+    metadata = json.loads((snapshot / "snapshot.json").read_text(encoding="utf-8"))
+    target = dish_db_path(petri_dir, metadata["dish_id"])
+    source = snapshot / "petri.sqlite"
+    if source.is_symlink():
+        raise ValueError("A snapshot database must not be a symlink")
+    with read_connection(source) as connection:
+        if connection is None or connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise ValueError("Snapshot database failed its integrity check")
+    if target.exists() and not force:
+        raise ValueError(f"Refusing to overwrite {target}; use --force to restore this snapshot")
+    owner = FileLock(Path(petri_dir) / ".execution-owner.lock")
+    try:
+        owner.acquire(timeout=0)
+    except Timeout as error:
+        raise RuntimeError("Execution is active. Stop grow before restoring this dish.") from error
+    staging = target.with_name(f".restore-{uuid4().hex}.sqlite")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, staging)
+        # The owner lock prevents DBOS from reopening the old generation here.
+        for suffix in ("-wal", "-shm"):
+            Path(str(target) + suffix).unlink(missing_ok=True)
+        staging.replace(target)
+        defaults = snapshot / "defaults"
+        if defaults.is_dir():
+            shutil.copytree(defaults, Path(petri_dir) / "defaults", dirs_exist_ok=True)
+    finally:
+        staging.unlink(missing_ok=True)
+        owner.release()
+    return target
