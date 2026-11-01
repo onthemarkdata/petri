@@ -1,32 +1,10 @@
-"""Centralized filesystem path helpers for petri's on-disk layout.
+"""Canonical v2 dish paths and temporary legacy path helpers.
 
-All of petri's persistent state lives under ``<petri_dir>/petri-dishes/``
-in a fixed tree::
-
-    <petri_dir>/petri-dishes/
-        <colony_slug>/
-            colony.json
-            <level:03d>-<seq:03d>/          # fallback cell directory name
-                events.jsonl
-                metadata.json
-                evidence.md
-
-In practice the cell directory on disk is whatever
-:func:`petri.graph.colony.serialize_colony` wrote into
-``colony.cell_paths`` (a slugified ``<level>-<level_slug>/<seq>-<cell_slug>``
-layout), but callers that have only a cell ID fall back to the
-``<level:03d>-<seq:03d>`` convention — which is what the helpers here
-build.
-
-Cell IDs follow the schema defined by
-:func:`petri.models.build_cell_key`::
-
-    {dish}-{colony}-{level:03d}-{seq:03d}
-
-Because both the dish ID and the colony slug may themselves contain
-hyphens, parsing is always performed right-to-left: the final two
-hyphen-separated segments are the level and seq, and everything before
-them is the ``{dish}-{colony}`` prefix.
+V2 stores cells, edges, and events in
+``<petri_dir>/petri-dishes/<dish_id>/petri.sqlite`` and derived files in
+that dish's ``exports/`` directory. Only ``dish_dir`` constructs the dish
+path. Legacy cell-directory helpers remain for the v1 engine until its
+retirement; v2 seed and read paths do not use them.
 """
 
 from __future__ import annotations
@@ -39,6 +17,8 @@ from petri.models import parse_key
 from typing import Iterator
 
 __all__ = [
+    "dish_dir",
+    "dish_db_path",
     "parse_cell_id",
     "colony_dir",
     "cell_dir",
@@ -46,6 +26,24 @@ __all__ = [
     "metadata_path",
     "iter_events_files",
 ]
+
+
+def dish_dir(petri_dir: Path, dish_id: str | None = None) -> Path:
+    """Return the v2 dish directory without creating it."""
+    from petri.storage.dish import resolve_dish_id
+
+    name = resolve_dish_id(petri_dir) if dish_id is None else dish_id
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise ValueError("Dish ID must be one nonempty path component")
+    path = petri_dir / "petri-dishes" / name
+    if path.is_symlink():
+        raise ValueError(f"Dish directory must not be a symbolic link: {path}")
+    return path
+
+
+def dish_db_path(petri_dir: Path, dish_id: str | None = None) -> Path:
+    """Return the domain database path for the configured dish."""
+    return dish_dir(petri_dir, dish_id) / "petri.sqlite"
 
 
 def parse_cell_id(cell_id: str, dish_id: str | None = None) -> tuple[str, str, int, int]:

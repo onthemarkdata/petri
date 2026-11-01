@@ -26,7 +26,8 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Create a cross-colony edge between two cells."""
-        from petri.graph.colony import serialize_colony
+        from petri.storage.colonies import save_colony
+        from petri.storage.paths import dish_db_path
         from petri.models import Edge
 
         petri_dir = find_petri_dir()
@@ -89,11 +90,8 @@ def register(app: typer.Typer) -> None:
         except ValueError as exc:
             print_error_and_exit(f"Cannot create edge: {exc}")
 
-        # Re-serialize the colony
-        assert source_colony is not None  # narrowed by the None checks above
-        colony_slug = source_colony.id.replace(f"{dish_id}-", "", 1)
-        colony_path = petri_dir / "petri-dishes" / colony_slug
-        serialize_colony(source_graph, source_colony, colony_path)
+        assert source_colony is not None
+        save_colony(dish_db_path(petri_dir, dish_id), source_graph, source_colony)
 
         typer.echo(
             f"Cross-colony edge created: {first_cell_id} -> {second_cell_id}"

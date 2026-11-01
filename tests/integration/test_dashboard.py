@@ -61,6 +61,15 @@ def dashboard_env(petri_env_with_colony):
         data={"parent_cell_id": env["center"].id, "child_cell_ids": [env["cell1"].id]},
     )
 
+    from petri.models import Event
+    from petri.storage import database
+    from petri.storage.event_log import load_events
+    from petri.storage.paths import dish_db_path
+
+    for path in (cell1_events_path, center_events_path):
+        for event in load_events(path):
+            database.append_event(dish_db_path(env["petri_dir"]), Event.model_validate(event))
+
     # Add a queue entry
     add_to_queue(env["petri_dir"] / "queue.json", env["cell1"].id)
 

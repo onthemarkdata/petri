@@ -30,8 +30,7 @@ def test_cli_preserves_existing_colony(seeded_petri_dir, monkeypatch):
     ])
     assert result.exit_code == 1, result.output
     assert env["colony_name"] in result.output
-    assert "5 cell(s)" in result.output
-    assert str(env["colony_path"].resolve()) in result.output
+    assert "already exists" in result.output
     assert snapshot(env["petri_dir"]) == before
     assert provider.decompose_calls == []
 
@@ -47,7 +46,7 @@ def test_dashboard_preserves_existing_colony(seeded_petri_dir, monkeypatch):
     client = TestClient(create_app(env["petri_dir"], env["tmp_path"] / "index.sqlite"))
     result = client.post("/api/seed", json={"claim": "New", "colony": env["colony_name"]})
     assert result.status_code == 409
-    assert str(env["colony_path"].resolve()) in result.json()["detail"]
+    assert "already exists" in result.json()["detail"]
     assert snapshot(env["petri_dir"]) == before
 
 
@@ -68,7 +67,11 @@ def test_cell_free_directory_can_be_reused(seeded_petri_dir, monkeypatch, surfac
         client = TestClient(create_app(env["petri_dir"], env["tmp_path"] / "index.sqlite"))
         result = client.post("/api/seed", json={"claim": "A new claim", "colony": "fresh"})
         assert result.status_code == 200, result.text
-    assert len(list(target.rglob("metadata.json"))) == 3
+    from petri.storage.database import list_cells
+    from petri.storage.paths import dish_db_path
+
+    assert len(list_cells(dish_db_path(env["petri_dir"]), colony=f"{env['dish_id']}-fresh")) == 3
+    assert not list(target.iterdir())
 
 
 def test_incomplete_colony_is_protected(tmp_path):

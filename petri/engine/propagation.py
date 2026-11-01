@@ -8,13 +8,14 @@ them -- the user decides which dependents to re-queue.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from petri.storage.dish import resolve_dish_id as _get_dish_id
 from petri.graph.colony import ColonyGraph
 from petri.storage.event_log import append_event
-from petri.models import CellStatus, parse_key
+from petri.models import CellStatus
+from petri.storage.database import SQLiteEventLog, get_cell, put_cell
+from petri.storage.paths import dish_db_path
 from petri.storage.queue import add_to_queue, load_queue
 
 
@@ -30,54 +31,6 @@ _REOPENABLE = frozenset({
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
-def _cell_dir_for(petri_dir: Path, cell_id: str, dish_id: str) -> Path:
-    """Derive the filesystem directory for a cell from its composite key.
-
-    Uses the ``cell_paths`` mapping stored in ``colony.json`` when available.
-    Falls back to scanning for the cell's ``metadata.json`` via rglob.
-    """
-    parsed = parse_key(cell_id, dish_id, strict=True)
-    colony_slug = parsed["colony"]
-    colony_dir = petri_dir / "petri-dishes" / colony_slug
-
-    # Try cell_paths from colony.json first
-    colony_json = colony_dir / "colony.json"
-    if colony_json.exists():
-        colony_data = json.loads(colony_json.read_text(encoding="utf-8"))
-        cell_paths = colony_data.get("cell_paths", {})
-        if cell_id in cell_paths:
-            return colony_dir / cell_paths[cell_id]
-
-    # Fallback: scan for the cell's metadata.json
-    for metadata_path in colony_dir.rglob("metadata.json"):
-        meta = json.loads(metadata_path.read_text(encoding="utf-8"))
-        if meta.get("id") == cell_id:
-            return metadata_path.parent
-
-    # Last resort: old flat layout
-    seq_str = f"{parsed['seq']:03d}"
-    level_str = f"{parsed['level']:03d}"
-    return colony_dir / f"{level_str}-{seq_str}"
-
-
-def _load_cell_metadata(cell_dir: Path) -> dict:
-    """Read and return the metadata.json for a cell directory."""
-    metadata_path = cell_dir / "metadata.json"
-    if not metadata_path.exists():
-        raise FileNotFoundError(f"No metadata.json at {metadata_path}")
-    return json.loads(metadata_path.read_text(encoding="utf-8"))
-
-
-def _save_cell_metadata(cell_dir: Path, metadata: dict) -> None:
-    """Write metadata.json for a cell directory."""
-    metadata_path = cell_dir / "metadata.json"
-    metadata_path.write_text(
-        json.dumps(metadata, indent=2, default=str) + "\n",
-        encoding="utf-8",
-    )
-
-
-
 # ── Core Functions ──────────────────────────────────────────────────────
 
 
@@ -89,9 +42,9 @@ def reopen_cell(
 ) -> dict:
     """Re-open a validated/disproven cell for re-evaluation.
 
-    1. Load cell metadata from filesystem.
+    1. Load the cell from the dish database.
     2. Verify cell is in a re-openable status (VALIDATED, DISPROVEN, DEFER_OPEN).
-    3. Update cell status to NEW in metadata.json (all prior evidence preserved).
+    3. Set the row status to NEW while preserving prior evidence.
     4. Log ``cell_reopened`` event with trigger description and prior status.
     5. Add cell back to queue.
     6. Return ``{"cell_id": ..., "prior_status": ..., "new_status": "NEW"}``.
@@ -99,8 +52,10 @@ def reopen_cell(
     Raises ``ValueError`` if cell is not in a re-openable status.
     """
     dish_id = _get_dish_id(petri_dir)
-    cell_dir = _cell_dir_for(petri_dir, cell_id, dish_id)
-    metadata = _load_cell_metadata(cell_dir)
+    db_path = dish_db_path(petri_dir, dish_id)
+    metadata = get_cell(db_path, cell_id)
+    if metadata is None:
+        raise FileNotFoundError(f"Cell not found: {cell_id}")
 
     prior_status_str = metadata.get("status", "")
     try:
@@ -119,10 +74,10 @@ def reopen_cell(
 
     # Update status to NEW (append-only: evidence stays, only status changes)
     metadata["status"] = CellStatus.NEW.value
-    _save_cell_metadata(cell_dir, metadata)
+    put_cell(db_path, metadata)
 
     # Log the cell_reopened event
-    events_path = cell_dir / "events.jsonl"
+    events_path = SQLiteEventLog(db_path, cell_id)
     append_event(
         events_path=events_path,
         cell_id=cell_id,
@@ -181,8 +136,7 @@ def propagate_upward(
             flagged.append(dep_id)
 
             # Log propagation_triggered event for this dependent
-            dep_dir = _cell_dir_for(petri_dir, dep_id, dish_id)
-            events_path = dep_dir / "events.jsonl"
+            events_path = SQLiteEventLog(dish_db_path(petri_dir, dish_id), dep_id)
             append_event(
                 events_path=events_path,
                 cell_id=dep_id,

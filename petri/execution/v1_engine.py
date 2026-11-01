@@ -31,6 +31,26 @@ class V1ExecutionBackend:
         )
 
     def process_queue(self, **kwargs: Any) -> QueueProcessingResult:
+        from petri.storage.paths import dish_db_path
+        from petri.storage.colonies import list_colonies
+
+        db_path = dish_db_path(kwargs["petri_dir"]) if kwargs.get("dry_run") else None
+        if db_path is not None and db_path.is_file():
+            selected = kwargs.get("cell_ids")
+            eligible = []
+            if selected:
+                eligible = list(selected)
+            else:
+                for graph, colony in list_colonies(db_path):
+                    name = colony.id.removeprefix(f"{colony.dish}-")
+                    if kwargs.get("colony_filter") and name != kwargs["colony_filter"]:
+                        continue
+                    statuses = {cell.id: cell.status for cell in graph.get_all_cells()}
+                    eligible.extend(cell.id for cell in graph.get_eligible_for_validation(statuses))
+                    if not kwargs.get("all_cells") and not kwargs.get("colony_filter"):
+                        break
+            return QueueProcessingResult(processed=0, succeeded=0, failed=0, stalled=0,
+                                         dry_run=True, would_process=eligible)
         try:
             return processor.process_queue(**kwargs)
         except processor.NoProviderError as error:

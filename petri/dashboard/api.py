@@ -372,14 +372,12 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     @app.get("/api/dishes")
     def get_dishes():
         """List available dishes (empty list triggers onboarding)."""
-        dishes_dir = petri_dir / "petri-dishes"
-        if not dishes_dir.is_dir():
+        from petri.storage.paths import dish_db_path, dish_dir
+
+        if not dish_db_path(petri_dir).is_file():
             return []
-        result = []
-        for entry in sorted(dishes_dir.iterdir()):
-            if entry.is_dir():
-                result.append({"id": entry.name, "path": str(entry)})
-        return result
+        path = dish_dir(petri_dir)
+        return [{"id": path.name, "path": str(path)}]
 
     # ── Init (web-based onboarding) ──────────────────────────────────
 
@@ -438,14 +436,16 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
             decompose_claim,
             generate_colony_name,
         )
-        from petri.storage.seed_guard import ColonyExistsError, require_empty_colony
+        from petri.storage.database import SQLiteEventLog
+        from petri.storage.paths import dish_db_path
+        from petri.storage.colonies import colony_exists, reserve_colony, save_colony
+        from petri.storage.seed_guard import ColonyExistsError
 
         colony_name = colony_name_input or generate_colony_name(claim)
-        colony_path = petri_dir / "petri-dishes" / colony_name
-        try:
-            require_empty_colony(colony_path)
-        except ColonyExistsError as exc:
-            raise HTTPException(409, str(exc)) from exc
+        colony_id = f"{dish_id}-{colony_name}"
+        colony_path = dish_db_path(petri_dir, dish_id)
+        if colony_exists(colony_path, colony_id):
+            raise HTTPException(409, f"Colony '{colony_name}' already exists")
 
         # decompose_claim requires an InferenceProvider. Reuse the same
         # factory the CLI commands use so model + allowed_tools come
@@ -466,9 +466,14 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 provider=provider,
             )
         except Exception as exc:
-            raise HTTPException(500, f"Decomposition failed: {exc}")
+            raise HTTPException(500, f"Decomposition failed: {exc}") from exc
+        finally:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                close()
 
-        from petri.graph.colony import ColonyGraph, serialize_colony
+
+        from petri.graph.colony import ColonyGraph
         from petri.models import Colony
         from petri.storage.event_log import append_event
 
@@ -494,19 +499,17 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
             created_at=now,
         )
 
-        # Another seed may have finished while this request was decomposing.
+        if colony_exists(colony_path, colony_id):
+            raise HTTPException(409, f"Colony '{colony_name}' already exists")
         try:
-            require_empty_colony(colony_path)
-        except ColonyExistsError as exc:
-            raise HTTPException(409, str(exc)) from exc
-        serialize_colony(graph, colony_model, colony_path)
+            reserve_colony(colony_path, colony_model)
+        except ColonyExistsError as error:
+            raise HTTPException(409, str(error)) from error
+        save_colony(colony_path, graph, colony_model)
 
         for cell in cells:
             child_ids = [e.from_cell for e in edges if e.to_cell == cell.id]
-            cell_rel_path = colony_model.cell_paths.get(
-                cell.id, f"{cell.id.split('-')[-2]}-{cell.id.split('-')[-1]}"
-            )
-            events_path = colony_path / cell_rel_path / "events.jsonl"
+            events_path = SQLiteEventLog(colony_path, cell.id)
             append_event(
                 events_path=events_path,
                 cell_id=cell.id,
@@ -592,24 +595,11 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     @app.get("/api/cells")
     def get_cells():
         """Return all cells with colony graph data."""
-        from petri.graph.colony import deserialize_colony
+        from petri.cli._bootstrap import load_colonies
 
-        dishes_dir = petri_dir / "petri-dishes"
-        if not dishes_dir.is_dir():
-            return []
-
-        # Derive dish_id from petri.yaml or parent directory name
         dish_id = _get_dish_id(petri_dir)
-
         all_cells: list[dict] = []
-        for colony_dir in sorted(dishes_dir.iterdir()):
-            if not colony_dir.is_dir():
-                continue
-            try:
-                graph, colony = deserialize_colony(colony_dir, dish_id)
-            except Exception:
-                continue
-
+        for graph, colony in load_colonies(petri_dir, dish_id):
             for cell in graph.get_all_cells():
                 all_cells.append(
                     {
@@ -630,88 +620,35 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     @app.get("/api/cell/{cell_id}")
     def get_cell_detail(cell_id: str):
         """Full detail for one cell: metadata + events + evidence markdown."""
-        from petri.graph.colony import deserialize_colony
+        from petri.cli._bootstrap import load_colonies
+        from petri.storage.database import read_events
+        from petri.storage.paths import dish_db_path
 
-        dishes_dir = petri_dir / "petri-dishes"
         dish_id = _get_dish_id(petri_dir)
-
-        # Find the cell across all colonies
-        if dishes_dir.is_dir():
-            for colony_dir in sorted(dishes_dir.iterdir()):
-                if not colony_dir.is_dir():
-                    continue
-                try:
-                    graph, colony = deserialize_colony(colony_dir, dish_id)
-                    cell = graph.get_cell(cell_id)
-                except (Exception, KeyError):
-                    continue
-
-                # Fetch events from SQLite
-                conn = get_db(db_path)
-                try:
-                    rows = conn.execute(
-                        "SELECT id, cell_id, timestamp, type, agent, iteration, data "
-                        "FROM events WHERE cell_id = ? ORDER BY timestamp ASC",
-                        [cell_id],
-                    ).fetchall()
-                except sqlite3.OperationalError:
-                    rows = []
-                conn.close()
-
-                events = [
-                    {
-                        "id": r["id"],
-                        "cell_id": r["cell_id"],
-                        "timestamp": r["timestamp"],
-                        "type": r["type"],
-                        "agent": r["agent"],
-                        "iteration": r["iteration"],
-                        "data": json.loads(r["data"]),
-                    }
-                    for r in rows
-                ]
-
-                # Read evidence.md and summary.md from the cell directory.
-                # The colony stores the per-cell relative path in cell_paths;
-                # fall back to the default {level}-{seq} slug used by
-                # serialize_colony. evidence.md is the verbose append-only
-                # log (authoritative record). summary.md is a concise
-                # cell_lead digest regenerated each iteration and is what
-                # the dashboard's Evidence Summary section renders.
-                cell_rel_path = colony.cell_paths.get(
-                    cell.id,
-                    f"{cell.id.split('-')[-2]}-{cell.id.split('-')[-1]}",
-                )
-                cell_dir = colony_dir / cell_rel_path
-
-                evidence_md = ""
-                evidence_file = cell_dir / "evidence.md"
-                if evidence_file.is_file():
-                    try:
-                        evidence_md = evidence_file.read_text()
-                    except OSError:
-                        evidence_md = ""
-
-                summary_md = ""
-                summary_file = cell_dir / "summary.md"
-                if summary_file.is_file():
-                    try:
-                        summary_md = summary_file.read_text()
-                    except OSError:
-                        summary_md = ""
-
-                return {
-                    "cell_id": cell.id,
-                    "colony_id": cell.colony_id,
-                    "claim_text": cell.claim_text,
-                    "level": cell.level,
-                    "status": cell.status.value,
-                    "dependencies": cell.dependencies,
-                    "dependents": cell.dependents,
-                    "evidence_md": evidence_md,
-                    "summary_md": summary_md,
-                    "events": events,
-                }
+        for graph, colony in load_colonies(petri_dir, dish_id):
+            try:
+                cell = graph.get_cell(cell_id)
+            except KeyError:
+                continue
+            events = read_events(dish_db_path(petri_dir, dish_id), cell_id=cell_id)
+            evidence_md = "\n\n".join(
+                event["data"].get("summary", "") for event in events
+                if event["type"] == "evidence_appended"
+            )
+            summary_md = next((event["data"].get("summary", "") for event in reversed(events)
+                               if event["type"] == "verdict_issued" and event["agent"] == "cell_lead"), "")
+            return {
+                "cell_id": cell.id,
+                "colony_id": cell.colony_id,
+                "claim_text": cell.claim_text,
+                "level": cell.level,
+                "status": cell.status.value,
+                "dependencies": cell.dependencies,
+                "dependents": cell.dependents,
+                "evidence_md": evidence_md,
+                "summary_md": summary_md,
+                "events": events,
+            }
 
         raise HTTPException(404, "Cell %s not found" % cell_id)
 

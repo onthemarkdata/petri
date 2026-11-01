@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from petri.graph.colony import ColonyGraph, serialize_colony
+from petri.graph.colony import ColonyGraph
 from petri.storage.event_log import append_event, load_events
+from petri.storage.database import SQLiteEventLog, get_cell, put_cell
+from petri.storage.paths import dish_db_path
+from petri.storage.colonies import save_colony
 from petri.models import CellStatus, Colony
 from petri.engine.propagation import get_impact_report, propagate_upward, reopen_cell
 from petri.storage.queue import add_to_queue, load_queue
@@ -16,12 +19,8 @@ from petri.storage.queue import add_to_queue, load_queue
 from tests.conftest import make_cell, make_edge
 
 
-def _resolve_cell_dir(petri_dir: Path, colony_name: str, cell_id: str) -> Path:
-    """Resolve a cell's directory using colony.json cell_paths."""
-    colony_root = petri_dir / "petri-dishes" / colony_name
-    colony_data = json.loads((colony_root / "colony.json").read_text())
-    rel = colony_data["cell_paths"][cell_id]
-    return colony_root / rel
+def _resolve_cell_dir(petri_dir: Path, colony_name: str, cell_id: str) -> SQLiteEventLog:
+    return SQLiteEventLog(dish_db_path(petri_dir), cell_id)
 
 
 # ── reopen_cell ─────────────────────────────────────────────────────────
@@ -45,7 +44,7 @@ class TestReopenCell:
         cell_path = _resolve_cell_dir(
             env["petri_dir"], env["colony_name"], env["cell2"].id
         )
-        metadata = json.loads((cell_path / "metadata.json").read_text())
+        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
         assert metadata["status"] == "NEW"
 
     def test_logs_cell_reopened_event(self, petri_env_with_colony):
@@ -57,7 +56,7 @@ class TestReopenCell:
         cell_path = _resolve_cell_dir(
             env["petri_dir"], env["colony_name"], env["cell2"].id
         )
-        events = load_events(cell_path / "events.jsonl")
+        events = load_events(cell_path)
         reopened_events = [event for event in events if event["type"] == "cell_reopened"]
         assert len(reopened_events) == 1
         assert reopened_events[0]["data"]["trigger"] == "Contradicting evidence"
@@ -77,7 +76,7 @@ class TestReopenCell:
         cell_path = _resolve_cell_dir(
             env["petri_dir"], env["colony_name"], env["cell2"].id
         )
-        events_path = cell_path / "events.jsonl"
+        events_path = cell_path
 
         # Add some prior evidence events
         append_event(
@@ -116,11 +115,9 @@ class TestReopenCell:
         cell_path = _resolve_cell_dir(
             env["petri_dir"], env["colony_name"], env["premise1"].id
         )
-        metadata = json.loads((cell_path / "metadata.json").read_text())
+        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
         metadata["status"] = "DISPROVEN"
-        (cell_path / "metadata.json").write_text(
-            json.dumps(metadata, indent=2) + "\n"
-        )
+        put_cell(cell_path.db_path, metadata)
 
         result = reopen_cell(env["petri_dir"], env["premise1"].id, trigger="test")
         assert result["prior_status"] == "DISPROVEN"
@@ -131,11 +128,9 @@ class TestReopenCell:
         cell_path = _resolve_cell_dir(
             env["petri_dir"], env["colony_name"], env["premise1"].id
         )
-        metadata = json.loads((cell_path / "metadata.json").read_text())
+        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
         metadata["status"] = "DEFER_OPEN"
-        (cell_path / "metadata.json").write_text(
-            json.dumps(metadata, indent=2) + "\n"
-        )
+        put_cell(cell_path.db_path, metadata)
 
         result = reopen_cell(env["petri_dir"], env["premise1"].id, trigger="test")
         assert result["prior_status"] == "DEFER_OPEN"
@@ -151,11 +146,9 @@ class TestReopenCell:
         cell_path = _resolve_cell_dir(
             env["petri_dir"], env["colony_name"], env["cell2"].id
         )
-        metadata = json.loads((cell_path / "metadata.json").read_text())
+        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
         metadata["status"] = "RESEARCH"
-        (cell_path / "metadata.json").write_text(
-            json.dumps(metadata, indent=2) + "\n"
-        )
+        put_cell(cell_path.db_path, metadata)
 
         with pytest.raises(ValueError, match="not re-openable"):
             reopen_cell(env["petri_dir"], env["cell2"].id, trigger="test")
@@ -165,11 +158,9 @@ class TestReopenCell:
         cell_path = _resolve_cell_dir(
             env["petri_dir"], env["colony_name"], env["cell2"].id
         )
-        metadata = json.loads((cell_path / "metadata.json").read_text())
+        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
         metadata["status"] = "STALLED"
-        (cell_path / "metadata.json").write_text(
-            json.dumps(metadata, indent=2) + "\n"
-        )
+        put_cell(cell_path.db_path, metadata)
 
         with pytest.raises(ValueError, match="not re-openable"):
             reopen_cell(env["petri_dir"], env["cell2"].id, trigger="test")
@@ -228,7 +219,7 @@ class TestPropagateUpward:
             cell_path = _resolve_cell_dir(
                 env["petri_dir"], env["colony_name"], cell_id
             )
-            events = load_events(cell_path / "events.jsonl")
+            events = load_events(cell_path)
             prop_events = [
                 event for event in events if event["type"] == "propagation_triggered"
             ]
@@ -283,7 +274,7 @@ class TestPropagateUpward:
             id="d-c", dish="d", center_claim="A",
             center_cell_id=cell_a.id, created_at="2026-01-01T00:00:00Z",
         )
-        serialize_colony(graph, colony_model, petri_dir / "petri-dishes" / "c")
+        save_colony(dish_db_path(petri_dir), graph, colony_model)
 
         flagged = propagate_upward(petri_dir, cell_c.id, graph, "d")
         assert cell_b.id in flagged
@@ -344,8 +335,8 @@ class TestGetImpactReport:
         cell_path = _resolve_cell_dir(
             env["petri_dir"], env["colony_name"], env["cell2"].id
         )
-        metadata_before = (cell_path / "metadata.json").read_text()
-        events_before = (cell_path / "events.jsonl").read_text()
+        metadata_before = get_cell(cell_path.db_path, cell_path.cell_id)
+        events_before = load_events(cell_path)
         queue_before = (env["petri_dir"] / "queue.json").read_text()
 
         get_impact_report(
@@ -353,6 +344,6 @@ class TestGetImpactReport:
         )
 
         # Nothing changed
-        assert (cell_path / "metadata.json").read_text() == metadata_before
-        assert (cell_path / "events.jsonl").read_text() == events_before
+        assert get_cell(cell_path.db_path, cell_path.cell_id) == metadata_before
+        assert load_events(cell_path) == events_before
         assert (env["petri_dir"] / "queue.json").read_text() == queue_before

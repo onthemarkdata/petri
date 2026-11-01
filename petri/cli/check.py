@@ -9,16 +9,8 @@ import typer
 from petri.cli._bootstrap import find_petri_dir, get_dish_id, load_colonies
 from petri.cli_ui import print_error_and_exit
 from petri.execution import resolve_backend
-from petri.models import parse_key
-from petri.storage.paths import (
-    cell_dir as cell_dir_for,
-)
-from petri.storage.paths import (
-    colony_dir as colony_dir_for,
-)
-from petri.storage.paths import (
-    events_path as events_file_path,
-)
+from petri.storage.database import SQLiteEventLog
+from petri.storage.paths import dish_db_path
 
 
 def register(app: typer.Typer) -> None:
@@ -89,18 +81,9 @@ def register(app: typer.Typer) -> None:
                     # Show events
                     from petri.storage.event_log import load_events
 
-                    colony_base = colony_dir_for(petri_dir, dish_id, cell_obj.colony_id)
-                    # Look up path from colony.json first, fall back to the
-                    # zero-padded convention based on the parsed cell ID.
-                    cell_rel = col.cell_paths.get(cell_obj.id)
-                    if cell_rel:
-                        cell_events_path = colony_base / cell_rel / "events.jsonl"
-                    else:
-                        parsed = parse_key(cell_obj.id, strict=True)
-                        level_int, seq_int = parsed["level"], parsed["seq"]
-                        cell_events_path = events_file_path(
-                            cell_dir_for(colony_base, level_int, seq_int)
-                        )
+                    cell_events_path = SQLiteEventLog(
+                        dish_db_path(petri_dir, dish_id), cell_obj.id
+                    )
                     events = load_events(cell_events_path)
                     if events:
                         typer.echo(f"  Events:       {len(events)}")

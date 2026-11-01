@@ -19,7 +19,7 @@ from typing import Any
 
 from petri.models import Event, validate_event_data
 
-MIGRATIONS = ("001_domain.sql",)
+MIGRATIONS = ("001_domain.sql", "002_colonies.sql")
 SCHEMA_VERSION = len(MIGRATIONS)
 BUSY_TIMEOUT_MS = 30_000
 

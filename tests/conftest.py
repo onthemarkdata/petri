@@ -12,6 +12,8 @@ import pytest
 
 from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
 from petri.graph.colony import ColonyGraph, serialize_colony
+from petri.storage.colonies import save_colony
+from petri.storage.paths import dish_db_path
 from petri.models import Cell, CellStatus, Colony, Edge, Verdict, build_cell_key
 
 # ── Fake InferenceProvider ───────────────────────────────────────────────
@@ -434,6 +436,8 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
         canonical_colony["graph"], canonical_colony["colony_model"], colony_path
     )
 
+    save_colony(dish_db_path(petri_dir), canonical_colony["graph"], canonical_colony["colony_model"])
+
     # Populate queue.json with entries for every cell — matches the state
     # the engine expects after seeding (all cells NEW / queued state empty).
     queue_entries: dict = {}
@@ -497,6 +501,7 @@ def petri_env_with_colony(tmp_path, canonical_colony_validated_cells):
 
     colony_path = petri_dir / "petri-dishes" / colony["colony_name"]
     serialize_colony(colony["graph"], colony["colony_model"], colony_path)
+    save_colony(dish_db_path(petri_dir), colony["graph"], colony["colony_model"])
 
     return {
         "tmp_path": tmp_path,
