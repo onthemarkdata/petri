@@ -8,9 +8,7 @@ Each cell stores its events in a dedicated ``events.jsonl`` file located at
 immutable -- they are only ever appended, never updated or deleted.  This
 module is the sole writer; all other code treats the JSONL files as read-only.
 
-A combined rollup concatenates per-cell files into a single
-``combined.jsonl`` that downstream consumers (e.g. the SQLite read index) can
-ingest in one pass.
+V2 read consumers use the read-only functions in ``petri.query``.
 """
 
 from __future__ import annotations
@@ -263,27 +261,3 @@ def get_sources(events_path: Path | SQLiteEventLog) -> list[dict]:
 def get_searches(events_path: Path | SQLiteEventLog) -> list[dict]:
     """Return search_executed events."""
     return query_events(events_path, event_type="search_executed")
-
-
-# ── Rollup Operations ────────────────────────────────────────────────────
-
-
-def rollup_to_combined(dish_path: Path) -> Path:
-    """Concatenate all per-cell ``events.jsonl`` files into ``combined.jsonl``.
-
-    Walks ``dish_path/petri-dishes/{colony}/{cell}/events.jsonl`` in sorted
-    order and writes every non-blank line to ``dish_path/combined.jsonl``.
-    The combined file is what the SQLite read index is built from.
-    """
-    combined_path = dish_path / "combined.jsonl"
-    petri_dishes = dish_path / "petri-dishes"
-
-    with open(combined_path, "w") as combined:
-        if petri_dishes.is_dir():
-            for events_file in sorted(petri_dishes.rglob("events.jsonl")):
-                for line in events_file.read_text().splitlines():
-                    line = line.strip()
-                    if line:
-                        combined.write(line + "\n")
-
-    return combined_path

@@ -18,7 +18,7 @@ from petri.dashboard.migrate import (
     init_db,
     rebuild_sqlite,
 )
-from petri.storage.event_log import append_event, rollup_to_combined
+from petri.storage.event_log import append_event
 from petri.storage.queue import add_to_queue
 
 
@@ -162,10 +162,10 @@ class TestIncrementalSync:
         # First, do a full rebuild
         rebuild_sqlite(env["petri_dir"], env["db_path"])
 
-        # Rollup to get combined.jsonl and record its size
-        combined = rollup_to_combined(env["petri_dir"])
-        initial_size = combined.stat().st_size
-        file_offsets = {str(combined): initial_size}
+        file_offsets = {
+            str(path): path.stat().st_size
+            for path in (env["petri_dir"] / "petri-dishes").rglob("events.jsonl")
+        }
 
         # Append a new event — resolve path from colony.json
         colony_data = json.loads((env["colony_path"] / "colony.json").read_text())
@@ -179,9 +179,6 @@ class TestIncrementalSync:
             iteration=2,
             data={"verdict": "ARGUMENT_WITHSTANDS_CRITIQUE", "summary": "Solid"},
         )
-
-        # Re-rollup so combined.jsonl picks up the new event
-        rollup_to_combined(env["petri_dir"])
 
         # Incremental sync should pick up only the new event
         inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
@@ -198,19 +195,22 @@ class TestIncrementalSync:
         env = dashboard_env
         rebuild_sqlite(env["petri_dir"], env["db_path"])
 
-        combined = rollup_to_combined(env["petri_dir"])
-        file_offsets = {str(combined): combined.stat().st_size}
+        file_offsets = {
+            str(path): path.stat().st_size
+            for path in (env["petri_dir"] / "petri-dishes").rglob("events.jsonl")
+        }
 
         inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
         assert inserted == 0
 
-    def test_missing_combined_returns_zero(self, dashboard_env):
+    def test_empty_index_syncs_existing_cell_files(self, dashboard_env):
         env = dashboard_env
         init_db(env["db_path"])
 
         file_offsets: dict[str, int] = {}
         inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
-        assert inserted == 0
+        assert inserted == 5
+        assert not (env["petri_dir"] / "combined.jsonl").exists()
 
 
 # ── FastAPI REST endpoints ──────────────────────────────────────────────
