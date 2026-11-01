@@ -137,6 +137,7 @@ def build_assess_cell_prompt(
     valid_verdicts: list[str],
     role_instruction: str,
     today_iso: str,
+    require_source_retrieval: bool = True,
 ) -> str:
     """Build the cell assessment prompt body."""
     role_instruction = role_instruction or "Assess this claim thoroughly."
@@ -171,6 +172,10 @@ def build_assess_cell_prompt(
         "— they will be treated as fabricated. Prefer sources published within the "
         "last 12 months unless the claim is explicitly about historical events.\n\n"
     )
+    if not require_source_retrieval:
+        freshness_directive = ("This exploratory phase plans research before source retrieval. "
+                               "Use supplied context; do not claim to have browsed. "
+                               "When no verified source is supplied, return sources_cited as an empty array.\n\n")
     return (
         f"{freshness_directive}"
         "You are the "
