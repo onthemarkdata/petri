@@ -325,6 +325,8 @@ with a retrieval timestamp and content hash was observed. One cell became
 `STALLED` after three
 4,096-token responses ended with `length`; its final summary remained empty.
 The observer stopped without changing the active research run.
+The run subsequently exited with failure: both child cells were stalled, the
+root remained `NEW`, and no cell was eligible for live feed validation.
 
 Successful full seed→grow→feed runs, known-outcome quality with real fetched
 sources, and final integration approval remain open. The observed search and
