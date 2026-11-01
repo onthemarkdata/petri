@@ -7,7 +7,7 @@ from typing import Any
 import logging
 import re
 
-from pydantic_ai import Agent, ModelRetry, PromptedOutput, RunContext
+from pydantic_ai import Agent, ModelRetry, PromptedOutput, RunContext, capture_run_messages
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.messages import InstructionPart, AgentStreamEvent, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta
@@ -15,6 +15,7 @@ from pydantic_ai.models import Model, ModelRequestContext
 from pydantic_ai.settings import ModelSettings
 
 from petri.harness.errors import FailureDetail, HarnessError
+from petri.harness.diagnostics import model_failure_detail
 from petri.reasoning.decomposition_schemas import InitialDecomposition, PremiseCandidate, WhyExpansion
 from petri.reasoning.cell_search import CellSearchCandidate, search
 from petri.storage import database
@@ -216,16 +217,20 @@ async def run_decomposition_agent(
 
     if on_progress:
         on_progress(f"{agent.name}: started\n")
-    try:
-        result = await agent.run(
-            "Apply the decomposition instructions to the supplied claim. Return only the selected result, without intermediate analysis.",
-            deps=request, model=model, event_stream_handler=events if stream else None,
-        )
-    except (AgentRunError, HarnessError) as error:
-        if on_progress:
-            on_progress(f"{agent.name}: failed\n")
-        detail = error.detail if isinstance(error, HarnessError) else FailureDetail(partial_output=str(error))
-        raise DecompositionError(f"{agent.name} failed: {error}", detail=detail) from error
+    with capture_run_messages() as messages:
+        try:
+            result = await agent.run(
+                "Apply the decomposition instructions to the supplied claim. Return only the selected result, without intermediate analysis.",
+                deps=request, model=model, event_stream_handler=events if stream else None,
+            )
+        except (AgentRunError, HarnessError, DecompositionError) as error:
+            if on_progress:
+                on_progress(f"{agent.name}: failed\n")
+            detail = model_failure_detail(error, messages)
+            if isinstance(error, DecompositionError):
+                error.detail = detail
+                raise
+            raise DecompositionError(f"{agent.name} failed: {error}", detail=detail) from error
     if on_progress:
         on_progress(f"{agent.name}: completed\n")
     return result.output
