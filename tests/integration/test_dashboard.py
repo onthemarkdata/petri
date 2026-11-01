@@ -86,7 +86,7 @@ def api_client(dashboard_env):
 class TestHealthEndpoint:
     def test_health_returns_ok(self, api_client):
         client, _ = api_client
-        resp = client.get("/api/health")
+        resp = client.get("/api/ping")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
