@@ -194,6 +194,10 @@ async def test_research_handoff_contains_current_investigator_findings(phase_ser
     def respond(messages, info):
         name = next(name for name in AgentName if f"Act as {name.value}." in info.instructions)
         prompts[name] = str(messages)
+        if public_web and name == AgentName.INVESTIGATOR and not any(
+            part.part_kind == "tool-return" for message in messages for part in message.parts
+        ):
+            return ModelResponse(parts=[ToolCallPart("web_search", {"query": "fixture evidence"})])
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
             "verdict": services.config.agents[name].verdicts_pass[0],
             "summary": "CURRENT_INVESTIGATOR_FINDING" if name == AgentName.INVESTIGATOR else name.value,
@@ -201,8 +205,15 @@ async def test_research_handoff_contains_current_investigator_findings(phase_ser
             "evidence": "FULL_EVIDENCE_HANDOFF",
         })])
 
+    class Sources:
+        async def search(self, query, *, limit=5):
+            return []
+
+        async def fetch(self, url):
+            raise AssertionError("This handoff fixture only searches.")
+
     services.agents = build_agents(services.config, constitution="Preserve source attribution.",
-                                  model=FunctionModel(respond), output_mode="tool")
+                                  model=FunctionModel(respond), output_mode="tool", research_client=Sources())
     cell_id = database.list_cells(services.db_path)[0]["id"]
     await run_research(inputs(cell_id), services)
     assert "CURRENT_INVESTIGATOR_FINDING" in prompts[AgentName.FRESHNESS_CHECKER]

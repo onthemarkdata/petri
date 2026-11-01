@@ -1,6 +1,8 @@
 """Public retrieval is explicit, bounded, and testable without a network."""
 
 import asyncio
+import json
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 import httpx
@@ -8,6 +10,8 @@ import pytest
 from pydantic_ai.messages import ModelResponse, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from petri.agents.config import AgentConfig, load_agent_config
 from petri.agents.contract import AgentName
@@ -15,8 +19,56 @@ from petri.agents.factory import build_agents, run_agent
 from petri.research.tools import ResearchContext
 from petri.research.web import MAX_BYTES, MAX_TEXT, PublicWebClient, PublicWebError
 from petri.storage import database
+from petri.harness.pi.model import PiModel
+from petri.harness.pi.transport import PiRpcTransport
 
 DEFAULTS = Path(__file__).parents[2] / "petri/defaults/petri.yaml"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["provider", "pi"])
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_investigator_attempts_retrieval_before_honest_inconclusive_output(fake_pi, backend, enabled):
+    raw = load_agent_config(DEFAULTS).model_dump(mode="json")
+    raw["research"] = {"public_web": enabled}
+    raw["harness"] = {"backend": backend, "model": "local-test", "output_mode": "prompted"}
+    config = AgentConfig.model_validate(raw)
+    final = {"verdict": "NEEDS_MORE_EVIDENCE", "sources_cited": []}
+    model_requests = []
+    attempts = []
+
+    def respond(request):
+        payload = json.loads(request.content)
+        model_requests.append(payload)
+        message = {"role": "assistant", "content": json.dumps(final)}
+        if len(model_requests) == 2:
+            message = {"role": "assistant", "tool_calls": [{"id": "search", "type": "function", "function": {
+                "name": "web_search", "arguments": json.dumps({"query": "fixture evidence"})}}]}
+        return httpx.Response(200, json={"id": "local-response", "object": "chat.completion", "created": 0,
+            "model": "local-test", "choices": [{"index": 0, "message": message,
+            "finish_reason": "tool_calls" if "tool_calls" in message else "stop"}]})
+
+    def unavailable(request):
+        attempts.append(request)
+        return httpx.Response(503)
+
+    async with AsyncExitStack() as stack:
+        if backend == "pi":
+            fake_pi.scenario({"text": json.dumps(final)},
+                             {"text": json.dumps({"web_search": [{"query": "fixture evidence"}]})},
+                             {"text": json.dumps(final)})
+            model = await stack.enter_async_context(PiModel("local-test",
+                transport=PiRpcTransport(binary=str(fake_pi.path))))
+        else:
+            http = await stack.enter_async_context(httpx.AsyncClient(transport=httpx.MockTransport(respond)))
+            model = OpenAIChatModel("local-test", provider=OpenAIProvider(
+                base_url="http://local.invalid/v1", api_key="local-test", http_client=http))
+        agent = build_agents(config, constitution="Preserve evidence.", model=model,
+                             research_client=client(unavailable))[AgentName.INVESTIGATOR]
+        result = await agent.run("Investigate the fixture claim.")
+        assert (model.round_trips if backend == "pi" else len(model_requests)) == (3 if enabled else 1)
+    assert len(attempts) == (1 if enabled else 0)
+    assert result.output.verdict == "NEEDS_MORE_EVIDENCE" and not result.output.sources_cited
 
 
 async def public(host):

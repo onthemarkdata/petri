@@ -23,6 +23,10 @@ The source may still contain misleading claims or instructions: tool results are
 marked as untrusted evidence, and agent instructions prohibit following source
 instructions or inventing results when retrieval fails. An output validator rejects
 citations whose final URLs were not returned by a successful fetch in that run.
+The investigator must attempt `web_search` or `web_fetch` before returning an
+assessment when public-web research is enabled. A failed retrieval counts as
+an attempt, but supplies no evidence and may justify an inconclusive result.
+Other roles may assess supplied evidence without a mandatory new search.
 
 During a cell phase, successful searches append `search_executed` events with the
 query, returned URLs, and count. Successful fetches append `source_reviewed`

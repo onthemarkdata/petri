@@ -3,7 +3,8 @@
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
-from pydantic_ai import Agent, AgentRunResult, ModelRetry, PromptedOutput, ToolOutput
+from pydantic_ai import Agent, AgentRunResult, ModelRetry, PromptedOutput, RunContext, ToolOutput
+from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
@@ -94,6 +95,17 @@ def build_agents(
         if web is not None and name not in {AgentName.DECOMPOSITION_LEAD, AgentName.CELL_LEAD}:
             register_research_tools(roster[name],web)
     evaluator = roster[AgentName.EVIDENCE_EVALUATOR]
+
+    if web is not None:
+        @roster[AgentName.INVESTIGATOR].output_validator
+        def require_investigation_attempt(ctx: RunContext[Any], output: AgentAssessment) -> AgentAssessment:
+            if not any(isinstance(part, ToolReturnPart) and part.tool_name in {"web_search", "web_fetch"}
+                       for message in ctx.messages for part in message.parts):
+                raise ModelRetry(
+                    "Call web_search or web_fetch before completing the investigation. "
+                    "A failed retrieval attempt may justify an inconclusive result; it is not evidence."
+                )
+            return output
 
     @evaluator.output_validator
     def enforce_terminal_sources(output: AgentAssessment) -> AgentAssessment:
