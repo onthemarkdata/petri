@@ -180,3 +180,31 @@ Duplicate YAML keys, duplicate verdicts, unknown roster names, missing agents,
 unknown content fields and invalid debate participants are errors. Importing agent modules
 loads no YAML configuration and creates no inference models. Decomposer-specific settings
 remain outside this schema until the decomposer milestone adds them explicitly.
+
+### Agent factory decisions
+
+`build_agents` takes validated content and explicit constitution text. It validates
+all content again before resolving any model, then builds uniquely named agents
+with constitution text in pydantic-ai `instructions`. Instructions are supplied on
+each run, including runs that reuse message history. `run_agent` supplies the
+configured cell-run `UsageLimits`; callers of raw `Agent.run` must supply limits
+explicitly. Configuration and inference models can be injected for offline tests.
+
+The simplifier's `OVERCOMPLICATED` verdict is legal advisory vocabulary. It never
+blocks convergence because the simplifier's code-defined mode is NON_BLOCKING.
+This preserves the existing behavior in both contract and factory validation.
+
+The installed API verified for this migration is pydantic-ai 2.64.0. The factory
+uses ToolOutput for direct provider models and PromptedOutput for pi and Claude
+Code transports. Both delivery modes pass FunctionModel tests; tool output also
+passed a separate real local Gemma readiness check. A real CLI-harness factory
+run remains an integration gate until the M1 transports are integrated. Callers
+can explicitly select either mode for a tested backend. Validation retries are
+bounded; invalid verdicts are reflected to the model and never coerced to a
+passing value. In 2.64.0, tool-output retries are represented by a ToolReturnPart
+with `outcome='retried'`, rather than always by RetryPromptPart.
+
+Fractional YAML rounds normalize through `DebateContent.protocol`: `1.5` becomes
+one whole exchange plus a final word from the first participant. Agent phases
+and blocking semantics come solely from `AgentSpec`; the v2 content loader
+rejects legacy numeric phase and structural fields instead of duplicating them.

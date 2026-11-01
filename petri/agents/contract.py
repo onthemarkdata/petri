@@ -301,3 +301,23 @@ AGENT_SPECS: dict[AgentName, AgentSpec] = {
         verdicts_block=(),
     ),
 }
+
+
+class DebateProtocol(BaseModel):
+    """Whole exchanges followed by an optional final word from one participant."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    pairing: tuple[AgentName, AgentName]
+    rounds: int
+    final_word: AgentName | None = None
+    purpose: str
+
+    @model_validator(mode="after")
+    def validate_protocol(self):
+        if self.rounds < 0 or (self.rounds == 0 and self.final_word is None):
+            raise ValueError("A debate must contain at least one turn.")
+        if self.pairing[0] == self.pairing[1]:
+            raise ValueError("Debate participants must be distinct.")
+        if self.final_word is not None and self.final_word not in self.pairing:
+            raise ValueError("The final speaker must belong to the pairing.")
+        return self
