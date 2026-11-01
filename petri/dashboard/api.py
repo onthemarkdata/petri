@@ -19,7 +19,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +31,7 @@ from petri.storage.dish import resolve_dish_id as _get_dish_id
 from petri.dashboard.frontend import build_frontend_html
 from petri.dashboard.migrate import incremental_sync
 from petri.storage.queue import list_queue, load_queue
+from petri import query
 
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
@@ -145,16 +146,15 @@ def get_db(db_path: Path) -> sqlite3.Connection:
 # ── Factory ───────────────────────────────────────────────────────────────
 
 
-def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
+def create_app(petri_dir: Path) -> FastAPI:
     """Build and return the FastAPI application.
 
     Parameters
     ----------
     petri_dir:
         Path to the ``.petri`` directory.
-    db_path:
-        Path to the SQLite read index file.
     """
+    db_path = petri_dir / "petri.sqlite"
     file_offsets: dict[str, int] = {}
 
     # Transitional index offsets; v2 query readers use per-dish databases directly.
@@ -369,12 +369,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     @app.get("/api/dishes")
     def get_dishes():
         """List available dishes (empty list triggers onboarding)."""
-        from petri.storage.paths import dish_db_path, dish_dir
-
-        if not dish_db_path(petri_dir).is_file():
-            return []
-        path = dish_dir(petri_dir)
-        return [{"id": path.name, "path": str(path)}]
+        return [{'id': dish.dish_id, 'path': str(dish.db_path.parent)} for dish in query.enumerate_dishes(petri_dir)]
 
     # ── Init (web-based onboarding) ──────────────────────────────────
 
@@ -541,50 +536,14 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         iteration: Optional[int] = None,
         event_type: Optional[str] = None,
         agent: Optional[str] = None,
-        limit: int = Query(default=500, le=5000),
+        limit: int = Query(default=500, ge=1, le=5000),
     ):
-        conditions: list[str] = []
-        params: list[object] = []
-
-        if cell_id:
-            conditions.append("cell_id = ?")
-            params.append(cell_id)
-        if iteration is not None:
-            conditions.append("iteration = ?")
-            params.append(iteration)
-        if event_type:
-            conditions.append("type = ?")
-            params.append(event_type)
-        if agent:
-            conditions.append("agent = ?")
-            params.append(agent)
-
-        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
-        sql = (
-            "SELECT id, cell_id, timestamp, type, agent, iteration, data "
-            "FROM events" + where + " ORDER BY timestamp ASC LIMIT ?"
-        )
-        params.append(limit)
-
-        conn = get_db(db_path)
-        try:
-            rows = conn.execute(sql, params).fetchall()
-        except sqlite3.OperationalError:
-            rows = []
-        conn.close()
-
-        return [
-            {
-                "id": r["id"],
-                "cell_id": r["cell_id"],
-                "timestamp": r["timestamp"],
-                "type": r["type"],
-                "agent": r["agent"],
-                "iteration": r["iteration"],
-                "data": json.loads(r["data"]),
-            }
-            for r in rows
+        events = [
+            event for dish in query.enumerate_dishes(petri_dir)
+            for event in query.query_events(dish.db_path, cell_id=cell_id or None,
+                iteration=iteration, event_type=event_type or None, agent=agent or None, limit=limit)
         ]
+        return sorted(events, key=lambda event: event['timestamp'])[:limit]
 
     # ── Queue ─────────────────────────────────────────────────────────
 
@@ -597,87 +556,40 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
 
     @app.get("/api/cells")
     def get_cells():
-        """Return all cells with colony graph data."""
-        from petri.cli._bootstrap import load_colonies
+        """Read cell metadata and relationships from each v2 dish database."""
+        return [
+            {key: cell[key] for key in ('cell_id', 'colony_id', 'claim_text', 'level', 'status', 'dependencies', 'dependents')}
+            for dish in query.enumerate_dishes(petri_dir) for cell in query.list_cells(dish.db_path)
+        ]
 
-        dish_id = _get_dish_id(petri_dir)
-        all_cells: list[dict] = []
-        for graph, colony in load_colonies(petri_dir, dish_id):
-            for cell in graph.get_all_cells():
-                all_cells.append(
-                    {
-                        "cell_id": cell.id,
-                        "colony_id": cell.colony_id,
-                        "claim_text": cell.claim_text,
-                        "level": cell.level,
-                        "status": cell.status.value,
-                        "dependencies": cell.dependencies,
-                        "dependents": cell.dependents,
-                    }
-                )
+    @app.get('/api/edges')
+    def get_edges(cell_id: str | None = None, colony: str | None = None):
+        return [edge for dish in query.enumerate_dishes(petri_dir)
+                for edge in query.get_edges(dish.db_path, cell_id=cell_id, colony=colony)]
 
-        return all_cells
-
-    # ── Single cell detail ────────────────────────────────────────────
-
-    @app.get("/api/cell/{cell_id}")
+    @app.get('/api/cell/{cell_id}')
     def get_cell_detail(cell_id: str):
-        """Full detail for one cell: metadata + events + evidence markdown."""
-        from petri.cli._bootstrap import load_colonies
-        from petri.storage.database import read_events
-        from petri.storage.paths import dish_db_path
-
-        dish_id = _get_dish_id(petri_dir)
-        for graph, colony in load_colonies(petri_dir, dish_id):
-            try:
-                cell = graph.get_cell(cell_id)
-            except KeyError:
-                continue
-            events = read_events(dish_db_path(petri_dir, dish_id), cell_id=cell_id)
-            evidence_md = "\n\n".join(
-                event["data"].get("summary", "") for event in events
-                if event["type"] == "evidence_appended"
-            )
-            summary_md = next((event["data"].get("summary", "") for event in reversed(events)
-                               if event["type"] == "verdict_issued" and event["agent"] == "cell_lead"), "")
-            return {
-                "cell_id": cell.id,
-                "colony_id": cell.colony_id,
-                "claim_text": cell.claim_text,
-                "level": cell.level,
-                "status": cell.status.value,
-                "dependencies": cell.dependencies,
-                "dependents": cell.dependents,
-                "evidence_md": evidence_md,
-                "summary_md": summary_md,
-                "events": events,
-            }
-
-        raise HTTPException(404, "Cell %s not found" % cell_id)
+        """Read one cell's content and events without assembling a colony."""
+        for dish in query.enumerate_dishes(petri_dir):
+            cell = query.get_cell(dish.db_path, cell_id)
+            if cell is not None:
+                result: dict[str, Any] = {key: cell[key] for key in ('cell_id', 'colony_id', 'claim_text', 'level', 'status', 'dependencies', 'dependents', 'evidence_md', 'summary_md')}
+                result['events'] = query.query_events(dish.db_path, cell_id=cell_id, limit=None)
+                return result
+        raise HTTPException(404, 'Cell %s not found' % cell_id)
 
     # ── Stats ─────────────────────────────────────────────────────────
 
     @app.get("/api/stats")
     def get_stats():
-        conn = get_db(db_path)
-        try:
-            total_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-            cells_with_events = conn.execute(
-                "SELECT COUNT(DISTINCT cell_id) FROM events"
-            ).fetchone()[0]
-            type_rows = conn.execute(
-                "SELECT type, COUNT(*) as cnt FROM events GROUP BY type ORDER BY cnt DESC"
-            ).fetchall()
-            top_cells = conn.execute(
-                "SELECT cell_id, COUNT(*) as cnt FROM events "
-                "GROUP BY cell_id ORDER BY cnt DESC LIMIT 10"
-            ).fetchall()
-        except sqlite3.OperationalError:
-            total_events = 0
-            cells_with_events = 0
-            type_rows = []
-            top_cells = []
-        conn.close()
+        summaries = [query.event_stats(dish.db_path) for dish in query.enumerate_dishes(petri_dir)]
+        types: dict[str, int] = {}
+        cells: dict[str, int] = {}
+        for summary in summaries:
+            for row in summary['events_by_type']:
+                types[row['type']] = types.get(row['type'], 0) + row['count']
+            for row in summary['top_cells']:
+                cells[row['cell_id']] = cells.get(row['cell_id'], 0) + row['event_count']
 
         # Queue stats
         queue_path = petri_dir / "queue.json"
@@ -693,17 +605,12 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
             cells_by_state[state] = cells_by_state.get(state, 0) + 1
 
         return {
-            "total_events": total_events,
-            "cells_with_events": cells_with_events,
+            "total_events": sum(summary["total_events"] for summary in summaries),
+            "cells_with_events": sum(summary["cells_with_events"] for summary in summaries),
             "queue_size": len(entries),
             "cells_by_state": cells_by_state,
-            "events_by_type": [
-                {"type": r["type"], "count": r["cnt"]} for r in type_rows
-            ],
-            "top_cells": [
-                {"cell_id": r["cell_id"], "event_count": r["cnt"]}
-                for r in top_cells
-            ],
+            'events_by_type': [{'type': key, 'count': value} for key, value in sorted(types.items(), key=lambda item: (-item[1], item[0]))],
+            'top_cells': [{'cell_id': key, 'event_count': value} for key, value in sorted(cells.items(), key=lambda item: (-item[1], item[0]))[:10]],
         }
 
     # ── SSE stream ────────────────────────────────────────────────────

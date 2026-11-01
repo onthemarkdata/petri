@@ -229,7 +229,7 @@ def api_client(dashboard_env):
 
     from petri.dashboard.api import create_app
 
-    app = create_app(env["petri_dir"], env["db_path"])
+    app = create_app(env["petri_dir"])
     client = TestClient(app, raise_server_exceptions=True)
     return client, env
 
@@ -426,7 +426,7 @@ class TestDishesEndpoint:
 
         from petri.dashboard.api import create_app
 
-        app = create_app(env["petri_dir"], env["db_path"])
+        app = create_app(env["petri_dir"])
         client = TestClient(app, raise_server_exceptions=True)
 
         resp = client.get("/api/dishes")

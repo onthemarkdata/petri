@@ -34,7 +34,7 @@ def seed_trace(path, *, cell_id='cell-a', start=100):
 @pytest.fixture
 def client_and_path(tmp_path):
     path = tmp_path / 'petri-dishes' / 'dish' / 'petri.sqlite'
-    return TestClient(create_app(tmp_path, tmp_path / 'unused.sqlite')), path
+    return TestClient(create_app(tmp_path)), path
 
 
 def test_trace_summary_and_parent_tree(client_and_path):

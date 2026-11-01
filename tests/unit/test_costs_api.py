@@ -22,7 +22,7 @@ def client(tmp_path):
             connection.execute("INSERT INTO spans VALUES (?,? ,NULL,'span','INTERNAL',1,2,'OK',NULL,'{}','{}')", (span,'trace'))
             connection.execute('INSERT INTO usage VALUES (?,?,?,?,?,?,?,?)', (span,'trace',cell,phase,'agent',tokens_in,tokens_out,cost))
         connection.execute("INSERT INTO spans VALUES ('no-usage','trace',NULL,'no usage','INTERNAL',1,2,'OK',NULL,'{}','{}')")
-    return TestClient(create_app(tmp_path, tmp_path / 'unused.sqlite'))
+    return TestClient(create_app(tmp_path))
 
 
 def test_totals_cells_phases_and_filters(client):
@@ -53,7 +53,7 @@ def test_totals_cells_phases_and_filters(client):
 
 
 def test_no_store_or_premigration_store_returns_empty(tmp_path):
-    client = TestClient(create_app(tmp_path, tmp_path / 'unused.sqlite'))
+    client = TestClient(create_app(tmp_path))
     expected = {'total':{'cell_id':None,'phase':None,'tokens_input':None,'tokens_output':None,'cost_usd':None}, 'cells':[], 'phases':[]}
     assert client.get('/api/costs').json() == expected
     path = tmp_path / 'petri-dishes' / 'old' / 'petri.sqlite'

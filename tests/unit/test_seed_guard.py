@@ -43,7 +43,7 @@ def test_dashboard_preserves_existing_colony(seeded_petri_dir, monkeypatch):
         pytest.fail("Existing colonies must be rejected before resolving inference.")
 
     monkeypatch.setattr("petri.cli._bootstrap.resolve_provider", unexpected_provider)
-    client = TestClient(create_app(env["petri_dir"], env["tmp_path"] / "index.sqlite"))
+    client = TestClient(create_app(env["petri_dir"]))
     result = client.post("/api/seed", json={"claim": "New", "colony": env["colony_name"]})
     assert result.status_code == 409
     assert "already exists" in result.json()["detail"]
@@ -64,7 +64,7 @@ def test_cell_free_directory_can_be_reused(seeded_petri_dir, monkeypatch, surfac
         ])
         assert result.exit_code == 0, result.output
     else:
-        client = TestClient(create_app(env["petri_dir"], env["tmp_path"] / "index.sqlite"))
+        client = TestClient(create_app(env["petri_dir"]))
         result = client.post("/api/seed", json={"claim": "A new claim", "colony": "fresh"})
         assert result.status_code == 200, result.text
     from petri.storage.database import list_cells

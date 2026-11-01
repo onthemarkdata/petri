@@ -2200,7 +2200,7 @@ function renderLab() {
 // ── Colony DAG View ─────────────────────────────────────────────────────
 
 function loadColonyDAG(colonyId) {
-  Promise.all([fetchJSON('/api/cells'), fetchJSON('/api/queue')]).then(function(results) {
+  Promise.all([fetchJSON('/api/cells'), fetchJSON('/api/queue'), fetchJSON('/api/edges')]).then(function(results) {
     var allCells = results[0];
     var queue = results[1];
     var colonyCells = allCells.filter(function(cell) { return cell.colony_id === colonyId; });
@@ -2233,12 +2233,12 @@ function loadColonyDAG(colonyId) {
     setText(document.getElementById('dag-stat-active'), padLeft(activeCount, 2));
     setText(document.getElementById('dag-stat-levels'), padLeft(maxLevel + 1, 2));
 
-    renderDAG(colonyCells, allCells, colonyId, activeSet);
+    renderDAG(colonyCells, allCells, colonyId, activeSet, results[2]);
     renderDAGLegend();
   });
 }
 
-function renderDAG(colonyCells, allCells, colonyId, activeSet) {
+function renderDAG(colonyCells, allCells, colonyId, activeSet, edges) {
   var svg = document.getElementById('dag-svg');
   var container = document.getElementById('dag-container');
   var width = container.clientWidth;
@@ -2307,11 +2307,12 @@ function renderDAG(colonyCells, allCells, colonyId, activeSet) {
   var simEdges = [];
   var crossStubs = {};
   colonyCells.forEach(function(cell) {
-    (cell.dependencies || []).forEach(function(depId) {
+    (edges || []).filter(function(edge) { return edge.from_cell === cell.cell_id; }).forEach(function(edge) {
+      var depId = edge.to_cell;
       var dep = allCellMap[depId];
       if (!dep) return;
       if (dep.colony_id === colonyId) {
-        simEdges.push({ source: cell.cell_id, target: depId, kind: 'intra' });
+        simEdges.push({ source: cell.cell_id, target: depId, kind: 'intra', edge_type: edge.edge_type });
         return;
       }
       if (!crossStubs[depId]) {
@@ -2337,7 +2338,7 @@ function renderDAG(colonyCells, allCells, colonyId, activeSet) {
         simCells.push(stub);
         simMap[depId] = stub;
       }
-      simEdges.push({ source: cell.cell_id, target: depId, kind: 'cross' });
+      simEdges.push({ source: cell.cell_id, target: depId, kind: 'cross', edge_type: edge.edge_type });
     });
   });
 
@@ -2464,12 +2465,14 @@ function renderDAG(colonyCells, allCells, colonyId, activeSet) {
   // the bottom layer. Replaces the previous two-segment elbow paths,
   // which looked noisy on dense colony graphs.
   simEdges.forEach(function(edge) {
+    var edgeType = edge.edge_type || 'intra_colony';
     var src = simMap[edge.source];
     var tgt = simMap[edge.target];
     if (!src || !tgt) return;
     edgeLayer.appendChild(buildSVGEl('path', {
       d: straightPath(src, tgt),
-      class: 'dag-edge ' + (edge.kind === 'cross' ? 'cross' : 'intra'),
+      class: 'dag-edge ' + (edgeType === 'cross_colony' ? 'cross' : 'intra'),
+      'data-edge-type': edgeType,
     }));
   });
 
