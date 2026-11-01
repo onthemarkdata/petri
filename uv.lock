@@ -1690,6 +1690,7 @@ dependencies = [
     { name = "questionary" },
     { name = "sse-starlette" },
     { name = "typer" },
+    { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
 
@@ -1740,6 +1741,7 @@ requires-dist = [
     { name = "questionary", specifier = ">=2.0" },
     { name = "sse-starlette", specifier = ">=1.6" },
     { name = "typer", specifier = ">=0.9" },
+    { name = "typing-extensions", specifier = ">=4.12.2" },
     { name = "uvicorn", specifier = ">=0.23" },
 ]
 provides-extras = ["pdf", "test", "dev", "all"]

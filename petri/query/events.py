@@ -3,7 +3,9 @@
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
+
+from typing_extensions import TypedDict
 
 from petri.query.connection import has_table, read_connection
 
