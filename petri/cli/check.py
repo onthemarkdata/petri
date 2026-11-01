@@ -184,3 +184,15 @@ def register(app: typer.Typer) -> None:
         for cell_id in ranked:
             metric = intelligence.cells[cell_id]
             typer.echo(f'  {cell_id}  importance={metric.importance}  fragility={metric.fragility}')
+
+        from petri.query.health import latest_health
+
+        health = latest_health(dish_db_path(petri_dir))
+        typer.echo('Active health flags:')
+        if health is None or not health.flags:
+            typer.echo('  No active flags in the latest report.')
+        else:
+            for flag in health.flags:
+                typer.echo(f'  [{flag.severity}] {flag.message}')
+                typer.echo(f"    Cells: {', '.join(flag.affected_cells) or '-'}")
+                typer.echo(f"    Agents: {', '.join(flag.affected_agents) or '-'}")

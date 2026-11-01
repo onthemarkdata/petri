@@ -23,13 +23,13 @@ def _port_is_listening(port: int) -> bool:
 
 
 def _is_petri_dashboard(port: int) -> bool:
-    """Return True iff ``GET /api/health`` on ``port`` returns the petri shape.
+    """Return True iff ``GET /api/ping`` on ``port`` returns the petri shape.
 
     This is the self-identification check that lets us safely kill a
     prior dashboard instance without risking an unrelated dev server
     that happens to be on the same port.
     """
-    url = f"http://127.0.0.1:{port}/api/health"
+    url = f"http://127.0.0.1:{port}/api/ping"
     try:
         with urllib.request.urlopen(url, timeout=1.0) as response:
             payload = json.loads(response.read())
@@ -71,7 +71,7 @@ def _free_port_or_exit(port: int) -> None:
     if not _is_petri_dashboard(port):
         typer.echo(
             f"ERROR: Port {port} is already in use, but the process on it "
-            f"is not a petri dashboard (no valid /api/health response). "
+            f"is not a petri dashboard (no valid /api/ping response). "
             f"Free it manually:  lsof -iTCP:{port} -sTCP:LISTEN",
             err=True,
         )

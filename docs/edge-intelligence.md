@@ -54,3 +54,37 @@ Run these checks against a dish with two colonies whose cells share a dependency
 
 The CLI and TestClient steps were executed on the local fixture. No inference or
 live grow was needed. Browser appearance still requires the final visual check.
+
+## Research health Analyst
+
+The Analyst runs pure diagnostic rules over one committed database snapshot. It
+uses no inference and makes no changes to cells, edges, or events. Reports append
+to `analyst_reports`; update and delete triggers protect their history.
+
+Add an `analyst` section to `petri.yaml` to change these defaults:
+
+```yaml
+analyst:
+  # Omit schedule to disable periodic reports. DBOS accepts six-field cron too.
+  schedule: "0 * * * *"
+  systemic_block_cells: 5
+  verdict_window_hours: 24
+  stale_after_hours: 168
+  stale_min_dependents: 3
+```
+
+A systemic-agent flag names an agent whose historical blocking verdicts affect at
+least five active cells. Duplicate verdicts and shared paths count each cell once.
+A stalled-velocity flag names eligible NEW cells with no verdict in the previous
+24 hours. Eligibility requires every dependency to be VALIDATED. A staleness flag
+names a cell with at least three transitive dependents whose last domain event is
+at least seven days old. Cells without event timestamps do not receive a staleness
+flag; `Cell.created_at` never supplies an evidence age.
+
+Periodic reports register when the v2 DBOS app starts. An absent schedule key
+registers nothing and pauses any previous Analyst schedule. Each firing uses a
+stable report identity, so replay cannot append a second report for that firing.
+`/api/health` returns the latest typed report, or `null` before the first report.
+`petri check` and the dashboard show its active flags, severities, affected cells,
+and agents. `/api/ping` is the dashboard liveness endpoint used by `petri launch`.
+The flags describe recorded research activity and do not perform remediation.

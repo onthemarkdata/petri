@@ -2037,12 +2037,13 @@ function loadLabData() {
     fetchJSON('/api/cells'),
     fetchJSON('/api/queue'),
     fetchJSON('/api/stats'),
-    fetchJSON('/api/intelligence'),
+    fetchJSON('/api/intelligence'), fetchJSON('/api/health'),
   ]).then(function(results) {
     State.cells = results[0];
     State.queue = results[1];
     State.stats = results[2];
     State.intelligence = results[3];
+    State.health = results[4];
     renderLab();
   }).catch(function(err) {
     var container = document.getElementById('lab-content');
@@ -2097,6 +2098,17 @@ function renderLab() {
       cellId + ' · importance=' + metric.importance + ' · fragility=' + metric.fragility));
   });
   container.appendChild(targets);
+  var healthPanel = buildEl('div', {id:'research-health-panel',className:'hud-panel compact'});
+  healthPanel.appendChild(buildEl('div', {className:'lab-section-label'}, 'Research health'));
+  var flags = State.health ? State.health.flags : [];
+  if (!flags.length) healthPanel.appendChild(buildEl('div', {}, 'No active flags in the latest report.'));
+  flags.forEach(function(flag) {
+    healthPanel.appendChild(buildEl('div', {className:'health-flag', 'data-severity':flag.severity},
+      '[' + flag.severity + '] ' + flag.message));
+    healthPanel.appendChild(buildEl('div', {}, 'Cells: ' + (flag.affected_cells.join(', ') || '-')));
+    healthPanel.appendChild(buildEl('div', {}, 'Agents: ' + (flag.affected_agents.join(', ') || '-')));
+  });
+  container.appendChild(healthPanel);
 
   // Colony cards — each colony is a clickable HUD panel.
   var colonyKeys = Object.keys(colonies);

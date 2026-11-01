@@ -160,8 +160,8 @@ def create_app(
 
     # ── Health ────────────────────────────────────────────────────────
 
-    @app.get("/api/health")
-    def health():
+    @app.get("/api/ping")
+    def ping():
         return {"status": "ok"}
 
     # ── Petri subprocess spawning (Computer tab) ─────────────────────
@@ -543,6 +543,16 @@ def create_app(
                       for edge in query.get_edges(dish.db_path,cell_id=cell_id,colony=colony)]
             span.set_attribute('petri.outcome','ok')
             return result
+
+    from petri.analysis.analyst import ResearchHealthReport
+
+    @app.get('/api/health', response_model=ResearchHealthReport | None)
+    def get_health():
+        from petri.query.health import latest_health
+        reports = [report for dish in query.enumerate_dishes(petri_dir)
+                   if (report := latest_health(dish.db_path)) is not None]
+        latest = max(reports,key=lambda report:report.created_at,default=None)
+        return latest.model_dump(mode='json') if latest is not None else None
 
     @app.get('/api/intelligence')
     def get_intelligence():

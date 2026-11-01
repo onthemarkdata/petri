@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from petri.analysis.analyst import AnalystConfig
 from petri.execution.config import ExecutionConfig
 from petri.lifecycle.config import LifecycleConfig
 
@@ -142,6 +143,7 @@ class PrePipelineContent(StrictContent):
 
 
 class AgentConfig(StrictContent):
+    analyst: AnalystConfig = Field(default_factory=AnalystConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     auto_export: bool = False
     schema_version: Literal[2]
