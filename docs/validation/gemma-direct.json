@@ -1,0 +1,123 @@
+{
+  "scope": "model readiness, not Petri end-to-end validation",
+  "timestamp_utc": "2026-11-01T20:36:47.104807+00:00",
+  "model": "huggingface.co/google/gemma-4-e2b-it-qat-q4_0-gguf:Q4_0",
+  "dmr_id": "sha256:520cda67ab7bf1f3d92b179382f86a3df5036e6f9b1024d96583fce53cbdaf8d",
+  "result": [
+    {
+      "check": "completion",
+      "run": 1,
+      "elapsed_seconds": 2.677,
+      "message": {
+        "role": "assistant",
+        "content": "READY"
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 14,
+        "total_tokens": 16,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "check": "completion",
+      "run": 2,
+      "elapsed_seconds": 0.068,
+      "message": {
+        "role": "assistant",
+        "content": "READY"
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 14,
+        "total_tokens": 16,
+        "prompt_tokens_details": {
+          "cached_tokens": 1
+        }
+      }
+    },
+    {
+      "check": "completion",
+      "run": 3,
+      "elapsed_seconds": 0.068,
+      "message": {
+        "role": "assistant",
+        "content": "READY"
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 14,
+        "total_tokens": 16,
+        "prompt_tokens_details": {
+          "cached_tokens": 1
+        }
+      }
+    },
+    {
+      "check": "json_schema",
+      "elapsed_seconds": 0.273,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"status\": \"ready\",\n  \"count\": 3\n}\n"
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 24,
+        "prompt_tokens": 23,
+        "total_tokens": 47,
+        "prompt_tokens_details": {
+          "cached_tokens": 1
+        }
+      }
+    },
+    {
+      "check": "tool_call",
+      "elapsed_seconds": 0.656,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "lookup_source",
+              "arguments": "{\"source_id\":\"alpha\"}"
+            },
+            "id": "aZpZ10qp50JQvxtZpjACrgXA02dXI6xA"
+          }
+        ]
+      },
+      "finish_reason": "tool_calls",
+      "usage": {
+        "completion_tokens": 17,
+        "prompt_tokens": 73,
+        "total_tokens": 90,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "check": "tool_result",
+      "elapsed_seconds": 0.155,
+      "message": {
+        "role": "assistant",
+        "content": "PETRI42"
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 5,
+        "prompt_tokens": 128,
+        "total_tokens": 133,
+        "prompt_tokens_details": {
+          "cached_tokens": 54
+        }
+      }
+    }
+  ]
+}

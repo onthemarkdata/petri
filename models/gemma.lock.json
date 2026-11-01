@@ -1,0 +1,24 @@
+{
+  "source": "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf",
+  "revision": "675cff42a74c774d6cb76f76d8eacb49b48c9b93",
+  "model": "huggingface.co/google/gemma-4-e2b-it-qat-q4_0-gguf:Q4_0",
+  "pull_reference": "hf.co/google/gemma-4-E2B-it-qat-q4_0-gguf:Q4_0",
+  "dmr_id": "sha256:520cda67ab7bf1f3d92b179382f86a3df5036e6f9b1024d96583fce53cbdaf8d",
+  "context_size": 32768,
+  "files": [
+    {
+      "filename": "gemma-4-E2B-it-mmproj.gguf",
+      "sha256": "021059cce659fe7f9170d5599761d7bbaf644b798dab9503aca30dc43e6beb14",
+      "size": 986833664,
+      "pointerSize": 134
+    },
+    {
+      "filename": "gemma-4-E2B_q4_0-it.gguf",
+      "sha256": "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634",
+      "size": 3349516256,
+      "pointerSize": 135
+    }
+  ],
+  "pi_package": "@mariozechner/pi-coding-agent",
+  "pi_version": "0.73.1"
+}
