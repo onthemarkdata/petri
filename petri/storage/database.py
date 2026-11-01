@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
@@ -84,6 +85,35 @@ def migrate(conn: sqlite3.Connection, scripts: Sequence[str] | None = None) -> N
             raise
 
 
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Retry startup lock upgrades within one busy-timeout budget.
+
+    SQLite can return BUSY immediately when journal-mode setup races another
+    opener; that lock upgrade does not always invoke its busy handler. Bound
+    both SQLite's wait and our retry delay by the same monotonic deadline.
+    """
+    deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+    delay = 0.005
+    try:
+        while True:
+            remaining = max(0.0, deadline - time.monotonic())
+            conn.execute(f"PRAGMA busy_timeout = {int(remaining * 1000)}")
+            try:
+                mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+                if mode.lower() != "wal":
+                    raise sqlite3.OperationalError(f"SQLite did not enable WAL mode: {mode}")
+                return
+            except sqlite3.OperationalError as error:
+                code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+                remaining = deadline - time.monotonic()
+                if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or remaining <= 0:
+                    raise
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 2, 0.05)
+    finally:
+        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     """Open and migrate a domain database; the caller must close the connection.
 
@@ -95,8 +125,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
     conn.row_factory = sqlite3.Row
     try:
-        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
-        conn.execute("PRAGMA journal_mode = WAL")
+        _enable_wal(conn)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA recursive_triggers = ON")
         migrate(conn)
