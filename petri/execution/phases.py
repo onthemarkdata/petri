@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
-from pydantic_ai import Agent, PromptedOutput, ToolOutput, capture_run_messages
+from pydantic_ai import Agent, ModelRetry, PromptedOutput, RunContext, ToolOutput, capture_run_messages
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
@@ -119,7 +119,7 @@ def build_socratic_agent(
     mode = config.harness.output_mode or (
         "tool" if model is not None or config.harness.backend == "provider" else "prompted")
     output = ToolOutput(SocraticAssessment) if mode == "tool" else PromptedOutput(SocraticAssessment)
-    return Agent(
+    agent = Agent(
         selected,
         name="socratic_questioner",
         output_type=output,
@@ -129,6 +129,19 @@ def build_socratic_agent(
         "do not claim to have browsed or fabricate citations.\n\n" + ASSESSMENT_FORMAT,
         retries=2,
     )
+    @agent.output_validator
+    def enforce_step_verdict(ctx: RunContext[Any], output: SocraticAssessment) -> SocraticAssessment:
+        role = getattr(ctx.deps, "agent", None)
+        allowed = {
+            "socratic_clarify": {"CLARIFIED"},
+            "socratic_challenge_assumptions": {"ASSUMPTIONS_CHALLENGED"},
+            "socratic_identify_evidence_needed": {"EVIDENCE_MAPPED"},
+            "socratic_verifier": {"VERIFIED", "SOCRATIC_INCOMPLETE"},
+        }.get(role if isinstance(role, str) else "")
+        if allowed and output.verdict not in allowed:
+            raise ModelRetry(f"For {role}, return one of these exact verdicts: {', '.join(sorted(allowed))}.")
+        return output
+    return agent
 
 
 def _emit(

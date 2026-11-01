@@ -49,6 +49,35 @@ SOURCE = {
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("role, expected", [
+    ("socratic_clarify", "CLARIFIED"),
+    ("socratic_challenge_assumptions", "ASSUMPTIONS_CHALLENGED"),
+    ("socratic_identify_evidence_needed", "EVIDENCE_MAPPED"),
+    ("socratic_verifier", "VERIFIED"),
+    ("socratic_verifier", "SOCRATIC_INCOMPLETE"),
+])
+async def test_socratic_step_retries_wrong_verdict_without_translating_it(phase_services, role, expected):
+    from petri.research.tools import ResearchContext
+
+    services, signals = phase_services
+    calls = []
+
+    def respond(messages, info):
+        calls.append(str(messages))
+        wrong = "CLARIFIED" if expected != "CLARIFIED" else "EVIDENCE_MAPPED"
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+            {"verdict": wrong if len(calls) == 1 else expected})])
+
+    agent = build_socratic_agent(services.config, constitution="Preserve verdict meaning.",
+                                model=FunctionModel(respond))
+    result = await agent.run("Perform the assigned Socratic step.", deps=ResearchContext(
+        services.db_path, database.list_cells(services.db_path)[0]["id"], role, 0, 1, role))
+    assert len(calls) == 2 and f"For {role}, return one of these exact verdicts" in calls[1]
+    assert result.output.verdict == expected
+    assert not database.read_events(services.db_path, event_type="verdict_issued")
+
+
+@pytest.mark.asyncio
 async def test_citation_confidence_is_retried_before_persistence(phase_services):
     services, signals = phase_services
     calls = []
@@ -517,9 +546,12 @@ async def test_actual_phase_spans_attribute_usage_once_per_call(phase_services):
     provider.add_span_processor(SimpleSpanProcessor(SQLiteSpanExporter(services.db_path)))
     services.config = services.config.model_copy(update={"prices": {
         services.config.model: ModelPrice(input_per_million=2, output_per_million=5)}})
+    verdicts = {"socratic_clarify": "CLARIFIED", "socratic_challenge_assumptions": "ASSUMPTIONS_CHALLENGED",
+                "socratic_identify_evidence_needed": "EVIDENCE_MAPPED", "socratic_verifier": "VERIFIED"}
+    responses = iter(verdicts.values())
     def measured(messages, info):
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
-            {"verdict": "VERIFIED", "summary": "A precise claim", "sources_cited": [SOURCE]})],
+            {"verdict": next(responses), "summary": "A precise claim", "sources_cited": [SOURCE]})],
             usage=RequestUsage(input_tokens=10, output_tokens=4))
     value = inputs(cell_id)
     try:
@@ -533,7 +565,7 @@ async def test_actual_phase_spans_attribute_usage_once_per_call(phase_services):
         assert len(phases) == 8 and len(measured_spans) == 4
         assert all(s.attributes["petri.cell_id"] == cell_id for s in phases)
         assert all(s.attributes["petri.agent_role"].startswith("socratic_") for s in phases)
-        assert all(s.attributes["petri.verdict"] == "VERIFIED" for s in phases)
+        assert all(s.attributes["petri.verdict"] == verdicts[s.attributes["petri.agent_role"]] for s in phases)
         assert all(s.attributes["petri.tokens_input"] == 10 for s in measured_spans)
         assert sum(s.attributes["petri.tokens_output"] for s in measured_spans) == 16
         assert sum(s.attributes["petri.cost_usd"] for s in measured_spans) == pytest.approx(0.00016)
