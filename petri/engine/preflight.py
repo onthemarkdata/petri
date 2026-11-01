@@ -84,9 +84,9 @@ def check_pi(minimum_node: tuple[int, int, int] = (22, 19, 0)) -> CheckResult:
             result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10)
         except (subprocess.TimeoutExpired, OSError):
             return CheckResult("pi CLI", False, f"{name} did not respond. {install}")
-        output = result.stdout.strip()
+        output = result.stdout.strip() or result.stderr.strip()
         if result.returncode != 0 or not output:
-            return CheckResult("pi CLI", False, f"{name} --version failed. {install}")
+            return CheckResult("pi CLI", False, f"{name} --version failed (exit {result.returncode}): {result.stderr.strip()[:300]}. {install}")
         versions.append(output.split("\n", 1)[0])
     summary = f"pi {versions[0]}; Node.js {versions[1]}"
     match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", versions[1])

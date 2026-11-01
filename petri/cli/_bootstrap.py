@@ -20,12 +20,21 @@ get_dish_id = resolve_dish_id
 def resolve_provider(petri_dir: Path):
     """Resolve an InferenceProvider from petri.yaml config.
 
-    All inference routes through Claude Code CLI, which handles auth
-    and model routing via the Anthropic API. Tool grants come from
-    ``agent_tools`` in the dish config (defaults to a research-focused
-    set including WebSearch and WebFetch).
+    Explicit harness mappings use the typed bridge. Dishes without that
+    mapping retain the legacy Claude Code path and agent_tools grants.
     """
     config = load_dish_config(petri_dir)
+    if isinstance(config.get("harness"), dict):
+        from click import get_current_context
+        from petri.harness.legacy_bridge import HarnessInferenceProvider
+        from petri.harness.resolve import resolve_model
+
+        provider = HarnessInferenceProvider(resolve_model(config), config=config)
+        context = get_current_context(silent=True)
+        if context is not None:
+            context.call_on_close(provider.close)
+        return provider
+
     model_cfg = config.get("model", {})
     if isinstance(model_cfg, dict):
         model_name = model_cfg.get("name")

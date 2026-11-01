@@ -10,7 +10,7 @@ template-stamped tree.
 from __future__ import annotations
 
 import re
-from typing import Callable, Optional, cast
+from typing import Callable, Optional
 
 from petri.reasoning.decomposition_settings import DecompositionSettings
 
@@ -53,25 +53,9 @@ def generate_clarifying_questions(
             "the wizard is fully agentic and has no hardcoded fallback."
         )
 
-    # The InferenceProvider protocol annotates this as returning
-    # list[ClarifyingQuestion], but every concrete provider returns raw JSON
-    # dicts here — this wrapper is the dict -> ClarifyingQuestion conversion
-    # step. Cast to the true runtime type so the dict access below
-    # type-checks; cast() is a no-op at runtime and preserves behavior.
-    raw = cast(
-        "list[dict]",
-        provider.generate_clarifying_questions(
-            claim, max_questions, on_progress=on_progress
-        ),
-    )
-    return [
-        ClarifyingQuestion(
-            question=question["question"],
-            options=question.get("options", []),
-            answer=question.get("answer"),
-        )
-        for question in raw[:max_questions]
-    ]
+    raw = provider.generate_clarifying_questions(claim, max_questions, on_progress=on_progress)
+    return [question if isinstance(question, ClarifyingQuestion)
+            else ClarifyingQuestion.model_validate(question) for question in raw[:max_questions]]
 
 
 def decompose_claim(
@@ -276,21 +260,14 @@ def _provider_decompose(
         }
         for clarification in clarifications
     ]
-    # The InferenceProvider protocol annotates decompose_claim as returning
-    # DecompositionResult, but concrete providers return the raw JSON dict
-    # ({"nodes": [...], "edges": [...]}) that this function parses below via
-    # raw.get(...). Cast to the true runtime type so the dict access
-    # type-checks; cast() is a no-op at runtime and preserves behavior.
-    raw = cast(
-        "dict",
-        provider.decompose_claim(
-            claim,
-            clarification_dicts,
-            guidance=guidance,
-            max_premises=max_per_layer,
-            on_progress=on_progress,
-        ),
+    raw = provider.decompose_claim(
+        claim, clarification_dicts, guidance=guidance,
+        max_premises=max_per_layer, on_progress=on_progress,
     )
+    # Typed bridge cells contain temporary IDs. Only claim/level data enters
+    # this reader; the dish assigns every persisted ID below.
+    raw_cells = ([cell.model_dump() for cell in raw.cells]
+                 if isinstance(raw, DecompositionResult) else raw.get("nodes", []))
 
     # Build Level 0 center cell — the CLI is responsible for serializing
     # this one (it's created and persisted before _provider_decompose runs)
@@ -318,7 +295,6 @@ def _provider_decompose(
     # Parse Level 1 cells from initial decomposition. Hard-truncate to
     # the per-layer cap as a safety net (the prompt asks for at most N,
     # but we don't trust the model to obey).
-    raw_cells = raw.get("nodes", [])
     level_one_cells: list[Cell] = []
     seq_counter = 1
     for raw_cell in raw_cells:

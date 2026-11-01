@@ -124,6 +124,7 @@ class FreshnessCheckedData(BaseModel):
 
 
 class VerdictIssuedData(BaseModel):
+    failure_detail: dict | None = None
     verdict: str
     summary: str = ""
     arguments: str = ""

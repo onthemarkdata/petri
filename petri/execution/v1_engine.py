@@ -14,12 +14,21 @@ from petri.models import QueueProcessingResult
 
 
 class V1ExecutionBackend:
+    def __init__(self, config: dict | None = None):
+        self.config = config
+
     @property
     def status_interval(self) -> float:
         return loop.GROW_STATUS_INTERVAL_SECONDS
 
     def preflight(self) -> PreflightCheck:
-        return PreflightCheck(**asdict(preflight.check_claude_cli()))
+        if self.config is None or not isinstance(self.config.get("harness"), dict):
+            return PreflightCheck(**asdict(preflight.check_claude_cli()))
+        checks = preflight.run_preflight(self.config)
+        return PreflightCheck(
+            name="Inference backend", passed=all(check.passed for check in checks),
+            message="; ".join(f"{check.name}: {check.message}" for check in checks),
+        )
 
     def process_queue(self, **kwargs: Any) -> QueueProcessingResult:
         try:

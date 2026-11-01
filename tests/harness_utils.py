@@ -24,11 +24,12 @@ wrapping itself, so pass the bare list; ``FunctionModel`` tool-call args must
 match the tool schema exactly, so pass ``{"response": [...]}``.
 """
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
 import pytest
-from pydantic_ai import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai import ModelMessage, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
@@ -178,8 +179,10 @@ def make_scripted_output_model(
         # Count replies, since the initial request can span several messages.
         replies = sum(isinstance(message, ModelResponse) for message in messages)
         index = min(replies, len(script) - 1)
-        tool_name = info.output_tools[0].name
-        return ModelResponse(parts=[ToolCallPart(tool_name, script[index])])
+        if info.output_tools:
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, script[index])])
+        payload = script[index]
+        return ModelResponse(parts=[TextPart(json.dumps(payload))])
 
     return FunctionModel(scripted, model_name=model_name)
 

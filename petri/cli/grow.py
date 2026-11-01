@@ -65,11 +65,10 @@ def register(app: typer.Typer) -> None:
         selected_cells: list[str] | None = cell or None
         all_cells: bool = not selected_cells and not colony_name
 
-        # Preflight: check claude CLI before attempting processing
-        claude_check = backend.preflight()
-        if not claude_check.passed:
+        check = backend.preflight()
+        if not check.passed:
             print_error_and_exit(
-                f"Error: {claude_check.message}\nRun 'petri inspect' to check all prerequisites.",
+                f"Error: {check.message}\nRun 'petri inspect' to check all prerequisites.",
             )
 
         # Resolve the inference provider from petri.yaml config

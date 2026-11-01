@@ -243,7 +243,7 @@ def _verdict_data(result: object) -> dict:
             serialized_sources.append(source_entry.model_dump(exclude_none=True))
         elif isinstance(source_entry, dict):
             serialized_sources.append(source_entry)
-    return {
+    data = {
         "verdict": _get(result, "verdict", "PASS"),
         "summary": _to_str(_get(result, "summary", "")),
         "arguments": "",
@@ -251,6 +251,10 @@ def _verdict_data(result: object) -> dict:
         "confidence": _to_str(_get(result, "confidence", "")),
         "sources_cited": serialized_sources,
     }
+    detail = _get(result, "failure_detail", None)
+    if detail is not None:
+        data["failure_detail"] = detail.model_dump(mode="json") if hasattr(detail, "model_dump") else detail
+    return data
 
 
 def _source_to_dict(source_entry: object) -> dict | None:

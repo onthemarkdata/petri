@@ -240,3 +240,14 @@ def build_summarize_evidence_prompt(
         "repeat the phase-by-phase breakdown from evidence.md — that's the raw log. "
         "Synthesize across phases."
     )
+
+
+
+def build_match_evidence_prompt(content: str, candidates: list[dict]) -> str:
+    """Compare evidence with explicitly supplied cell claims."""
+    return (
+        "Match this evidence to the candidate cells. Return only relevant candidates, "
+        "using their exact cell IDs. Score relevance from 0 (unrelated) to 1 (directly relevant) "
+        "and explain each match. An empty list means no candidate is relevant.\n\n"
+        f"Evidence:\n{content}\n\nCandidates:\n{json.dumps(candidates)}"
+    )
