@@ -79,5 +79,6 @@ warn_unused_ignores = false
 testpaths = ["tests"]
 addopts = "-m 'not integration'"
 markers = [
+    "live: opt-in local model inference; disabled unless explicitly enabled",
     "integration: may reach the real network or a real CLI; bypasses the offline guard (run explicitly with `pytest -m integration`)",
 ]

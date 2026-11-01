@@ -264,3 +264,33 @@ LLM calls. `check` exits 0 for valid content, 1 for configuration violations, an
 3 when no `.petri/` dish exists. Errors name the offending YAML fields. The v2
 loader requires `schema_version: 2`; it does not silently convert v0.3.x content.
 See [the schema contract](docs/ARCHITECTURE-V2.md#v2-agent-content-schema).
+
+Run one specialist with the typed output schema and configured usage limits:
+
+```bash
+petri agents run skeptic --claim "A falsifiable claim" --yes
+petri agents run evidence_evaluator --cell CELL_ID --verbose
+petri agents run skeptic --claim "A claim" --model openai:MODEL_ID --max-requests 3 --max-tokens 12000
+```
+
+`--claim` and `--cell` are alternatives. `--model` overrides the selected agent's
+provider model. `--max-requests` includes output retries; `--max-tokens` caps total
+input and output tokens. Token limits are checked after a response, so a response
+can cross the cap. A breached limit exits nonzero and prints the last unvalidated
+model output with measured usage. Terminal evidence verdicts still require a
+citation within the configured source hierarchy threshold.
+
+An interactive terminal asks before inference because model use may incur costs.
+`--yes` skips the warning; noninteractive runs skip it automatically. The usage
+report prints provider-reported requests and input, output, and cache tokens. No
+dollar estimate is shown for an unpriced model. `--verbose` includes output retries.
+
+For a local model that follows JSON instructions more reliably than forced tool
+calls, use `--output-mode prompted`; `tool` explicitly selects tool output. Both
+modes enforce the same typed output and source validators. The live CLI test uses
+[the pinned Docker Model Runner setup](docs/local-model-validation.md) and makes
+real local requests only when enabled:
+
+```bash
+PETRI_LIVE_GEMMA=1 pytest -q tests/unit/test_cli_agents_run.py -m live
+```

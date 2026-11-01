@@ -1,4 +1,4 @@
-"""Inspect and validate v2 agent content without constructing inference models."""
+"""Inspect and validate agent content, or explicitly run one specialist."""
 
 import json
 from pathlib import Path
@@ -26,6 +26,9 @@ def register(app: typer.Typer) -> None:
         help="Inspect, validate, and run typed research agents.", no_args_is_help=True
     )
     app.add_typer(agents, name="agents")
+    from petri.cli.agent_run import register as register_run
+
+    register_run(agents)
 
     @agents.command("list")
     def list_agents(
