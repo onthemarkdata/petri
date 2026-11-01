@@ -379,3 +379,96 @@ lifecycle operations; the existing seed/grow/scan/feed commands use the
 `traced_command` wrapper. Re-decomposition (#84–#88) must use
 `root_command_span("re-decompose", dish_id)` when its command is added. These hooks
 preserve the distinction between execution spans and domain events.
+
+## Iterative lifecycle (D10, #84)
+
+Status: **informed by seeding**. Re-validate the proposal framing and guard defaults
+after the first full v2 grow. This section specifies the lifecycle; individual
+implementation issues record which parts have shipped. Mechanical convergence
+and the agent verdict vocabularies remain unchanged.
+
+### Trigger contract
+
+Detection runs over the latest verdict per agent after a cell round settles.
+A trigger describes a proposal; it does not reopen the parent or its dependents.
+
+| Verdict | Fire point | Captured context | Proposed behavior |
+|---|---|---|---|
+| `EVIDENCE_INCONCLUSIVE` | Evidence evaluation settles without adequate support | Evaluator summary, weakest link, focused directive | Propose narrower, testable claims for the missing evidence |
+| `CRITICAL_FLAW_FOUND` | A completed round retains the skeptic's flaw verdict | Flaw text, weakest link, focused directive | Propose at least one counterargument addressing the flaw |
+| `DEFENSIBLE_WITH_CAVEATS` | A completed round retains the champion's caveat verdict | Champion caveat text and round context | Turn material caveats into explicit limiting sub-claims |
+| `PIPELINE_STALLED` | The iteration circuit breaker settles a round | Recorded stall reason, weakest link, focused directive | Propose a narrower decomposition of the unresolved dependency |
+
+A `PIPELINE_STALLED` event from `petri stop` is a user decision, not a circuit
+breaker. Only an explicit `circuit_breaker` stall reason is eligible; a missing
+or unknown reason does not authorize a proposal.
+
+The boundary model is:
+
+```python
+class RedecompositionTrigger(BaseModel):
+    cell_id: str
+    trigger_verdict: Literal[
+        "EVIDENCE_INCONCLUSIVE", "CRITICAL_FLAW_FOUND",
+        "DEFENSIBLE_WITH_CAVEATS", "PIPELINE_STALLED",
+    ]
+    agent: str
+    fire_point: Literal["settled_round", "circuit_breaker"]
+    weakest_link: str | None = None
+    focused_directive: str = ""
+    caveat_text: str = ""
+    flaw_text: str = ""
+    generation: int = Field(ge=0)
+```
+
+Generation is a lifecycle counter scoped to the cell, separate from the research
+iteration inside one validation round. The recorded source event and generation
+identify a trigger deterministically; replay must not create another proposal.
+
+### Guards and approval
+
+These defaults belong under the `lifecycle` key in `petri.yaml`:
+
+```yaml
+lifecycle:
+  max_rounds_per_cell: 2
+  per_parent_cap: 4
+  stop_at_bedrock: true
+  dish_proposal_budget: 100
+  auto_approve: false
+```
+
+The round limit counts accepted proposal generations. The per-parent cap bounds
+proposed children and must also respect the decomposition settings' layer limit.
+An atomic parent stops proposal generation when `stop_at_bedrock` is true. The
+dish budget counts all persisted proposed children, including rejected proposals,
+so repeated rejection cannot evade the budget. Reserve capacity before model
+execution and record the reason when a guard prevents a proposal.
+
+`petri grow --redecompose-on=inconclusive,flaw,caveats,stalled` opts into the named
+signals. Without the flag, detection and proposal generation stay off, including
+when `auto_approve` is configured. The default approval gate shows each proposed
+sub-claim, trigger, generation, and guard result. Approve enqueues the proposed
+cells with deterministic cell-and-generation workflow IDs. Reject records the
+decision and enqueues nothing. `--approve-all` and `--reject-all` provide explicit
+batch decisions; `auto_approve: true` opts into approval without a prompt.
+
+A noninteractive run with pending proposals and no explicit decision reports
+that approval is pending and exits without waiting for input. Approval never
+substitutes for validation. Existing dependents are flagged for human review;
+they are not automatically reopened or enqueued. The first interface is CLI-only.
+
+### Durable execution questions
+
+- **Generation identity:** a workflow ID must include dish, cell, source event,
+  and generation. Confirm that an approval replay and a restored domain snapshot
+  cannot advance the generation twice; reconciliation must park mismatches.
+- **Checkpoint size:** use IDs and evidence paths in workflow inputs. Keep each
+  serialized step payload below 2 MiB, enforced before persistence. Confirm the
+  installed DBOS serializer and whether metadata overhead changes this bound.
+- **Crash window:** a recorded step result can be reused. A process killed after
+  a model returns but before any durable result commits can repeat that call;
+  the design must not promise exactly-once provider billing.
+- **First-grow review:** inspect whether flaw proposals remain counterarguments,
+  caveat proposals remain conditional, and the budget stops repeated expansion
+  without changing the mechanical verdict of the original cell.
