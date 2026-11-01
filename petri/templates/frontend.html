@@ -1810,6 +1810,7 @@ function renderTraceWaterfall(spans) {
   </div>
   <div class="lab-content" id="traces-panel">
     <button class="hud-btn" id="traces-refresh">Refresh traces</button>
+    <div id="costs-panel" class="hud-panel compact" aria-live="polite"></div>
     <div id="trace-list"></div>
     <div class="lab-section-label">Waterfall · workflow / step / agent / model / tool</div>
     <div id="trace-waterfall"></div>
@@ -2671,8 +2672,28 @@ function appendLogRow(evt, skipScroll) {
 });
 
 
+
+function usageLabel(row) {
+  function count(value) { return value == null ? 'n/a' : String(value); }
+  return 'Input tokens: ' + count(row.tokens_input) + ' · Output tokens: ' + count(row.tokens_output) + ' · Cost: ' + (row.cost_usd == null ? 'n/a' : '$' + row.cost_usd.toFixed(6));
+}
+function loadCosts(container, cellId) {
+  fetchJSON('/api/costs' + (cellId ? '?cell_id=' + encodeURIComponent(cellId) : '')).then(function(usage) {
+    container.textContent = '';
+    container.appendChild(buildEl('div', {className:'lab-section-label'}, cellId ? 'Cell usage' : 'Dish usage'));
+    container.appendChild(buildEl('div', {}, usageLabel(usage.total)));
+    usage.cells.forEach(function(row) {
+      if (!cellId) container.appendChild(buildEl('div', {}, row.cell_id + ' · ' + usageLabel(row)));
+    });
+    usage.phases.forEach(function(row) {
+      container.appendChild(buildEl('div', {}, (row.phase || 'Unspecified phase') + ' · ' + (cellId ? '' : (row.cell_id || 'Dish') + ' · ') + usageLabel(row)));
+    });
+  }).catch(function(error) { container.textContent = 'Could not load usage: ' + error.message; });
+}
+
 // Local traces share the dashboard's API and SSE connection.
 function loadTraces() {
+  loadCosts(document.getElementById('costs-panel'), State.traceCell);
   var list = document.getElementById('trace-list');
   var query = State.traceCell ? '?cell_id=' + encodeURIComponent(State.traceCell) : '';
   fetchJSON('/api/traces' + query).then(function(traces) {
@@ -2746,6 +2767,9 @@ function renderCellDetail(cell) {
     style: { background: statusColor + '22', color: statusColor },
   }, cell.status));
   container.appendChild(header);
+  var costs = buildEl('div', {className:'hud-panel compact', id:'cell-costs-panel'});
+  container.appendChild(costs);
+  loadCosts(costs, cell.cell_id);
 
   // ── 3. Info Cards (meta grid) ──
   container.appendChild(buildEl('div', { className: 'lab-section-label' }, 'Info'));

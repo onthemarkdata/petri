@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from petri.telemetry.span_store import SpanRow, query_spans
+from petri.telemetry.span_store import SpanRow, aggregate_usage, query_spans
 
 
 def create_traces_router(petri_dir: Path) -> APIRouter:
@@ -20,7 +20,7 @@ def create_traces_router(petri_dir: Path) -> APIRouter:
         grouped: dict[str, list[SpanRow]] = {}
         for span in query_spans(petri_dir, limit=None):
             grouped.setdefault(span['trace_id'], []).append(span)
-        result = []
+        result: list[dict[str, Any]] = []
         for trace_id, spans in grouped.items():
             if cell_id is not None and not any(span['attributes'].get('petri.cell_id') == cell_id for span in spans):
                 continue
@@ -47,5 +47,15 @@ def create_traces_router(petri_dir: Path) -> APIRouter:
         if not spans:
             raise HTTPException(status_code=404, detail='Trace not found.')
         return sorted(spans, key=lambda span: (span['start_time_ns'], span['span_id']))
+
+    @router.get('/api/costs')
+    def costs(cell_id: str | None = None, colony: str | None = None) -> dict[str, Any]:
+        options = {'cell_id': cell_id, 'colony': colony}
+        totals = aggregate_usage(petri_dir, group_by='total', **options)
+        return {
+            'total': totals[0] if totals else {'cell_id': None, 'phase': None, 'tokens_input': None, 'tokens_output': None, 'cost_usd': None},
+            'cells': aggregate_usage(petri_dir, group_by='cell', **options),
+            'phases': aggregate_usage(petri_dir, group_by='cell_phase', **options),
+        }
 
     return router

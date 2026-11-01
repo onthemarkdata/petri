@@ -185,3 +185,67 @@ def prune(petri_dir: Path, retention_days: int = 30, *, now_ns: int | None = Non
         except sqlite3.Error as error:
             logger.warning('Local telemetry retention skipped (%s).', type(error).__name__)
     return removed
+
+
+class UsageRow(TypedDict):
+    cell_id: str | None
+    phase: str | None
+    tokens_input: int | None
+    tokens_output: int | None
+    cost_usd: float | None
+
+
+def aggregate_usage(
+    petri_dir: Path,
+    *,
+    group_by: str = 'cell',
+    cell_id: str | None = None,
+    colony: str | None = None,
+) -> list[UsageRow]:
+    """Aggregate reported usage in SQL; missing measurements remain null.
+
+    A total with an unpriced usage row has an unknown cost. Cell groups include
+    existing cells without usage, while phase groups contain reported usage only.
+    """
+    groups = {'cell': 'c.cell_id', 'phase': 'u.phase', 'cell_phase': 'c.cell_id,u.phase', 'total': ''}
+    if group_by not in groups:
+        raise ValueError('group_by must be cell, phase, cell_phase, or total.')
+    result: dict[tuple[str | None, str | None], UsageRow] = {}
+    for path in _paths(petri_dir):
+        with read_connection(path) as connection:
+            if connection is None or not has_table(connection, 'usage'):
+                continue
+            select_cell = 'c.cell_id' if group_by in ('cell', 'cell_phase') else 'NULL'
+            select_phase = 'u.phase' if group_by in ('phase', 'cell_phase') else 'NULL'
+            sql = (
+                'WITH candidates AS (SELECT id AS cell_id,colony FROM cells UNION ALL '
+                'SELECT DISTINCT cell_id,NULL FROM usage WHERE cell_id IS NOT NULL '
+                'AND cell_id NOT IN (SELECT id FROM cells)) '
+                f'SELECT {select_cell} AS cell_id,{select_phase} AS phase,COUNT(u.span_id) AS usage_rows,'
+            )
+            sql += ','.join(
+                f'CASE WHEN COUNT(u.{column})=COUNT(u.span_id) THEN SUM(u.{column}) ELSE NULL END AS {column}'
+                for column in ('tokens_input', 'tokens_output', 'cost_usd')
+            )
+            if group_by == 'cell':
+                sql += ' FROM candidates c LEFT JOIN usage u ON u.cell_id=c.cell_id '
+            else:
+                sql += ' FROM usage u LEFT JOIN candidates c ON u.cell_id=c.cell_id '
+            sql += 'WHERE (? IS NULL OR c.cell_id=?) AND (? IS NULL OR c.colony=?)'
+            if groups[group_by]:
+                sql += ' GROUP BY ' + groups[group_by]
+            for row in connection.execute(sql, (cell_id, cell_id, colony, colony)):
+                if group_by != 'cell' and not row['usage_rows']:
+                    continue
+                key = (row['cell_id'], row['phase'])
+                item = UsageRow(
+                    cell_id=row['cell_id'], phase=row['phase'], tokens_input=row['tokens_input'],
+                    tokens_output=row['tokens_output'], cost_usd=row['cost_usd'],
+                )
+                if key in result:
+                    for column in ('tokens_input', 'tokens_output', 'cost_usd'):
+                        previous, value = result[key][column], item[column]
+                        result[key][column] = previous + value if previous is not None and value is not None else None
+                else:
+                    result[key] = item
+    return sorted(result.values(), key=lambda row: (row['cell_id'] or '', row['phase'] or ''))
