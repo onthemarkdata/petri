@@ -473,3 +473,25 @@ they are not automatically reopened or enqueued. The first interface is CLI-only
 - **First-grow review:** inspect whether flaw proposals remain counterarguments,
   caveat proposals remain conditional, and the budget stops repeated expansion
   without changing the mechanical verdict of the original cell.
+
+### D10 verification: native DBOS spans on SQLite
+
+The #66 integration test runs DBOS 3.4.0 against its SQLite system database.
+One workflow calling two steps emits one workflow span and two child step spans;
+the test checks their parent span IDs. A second dish in the same process sends
+its spans to its own provider. Disabling telemetry emits no DBOS spans. These
+checks do not establish PostgreSQL parity; PostgreSQL was not exercised.
+
+DBOS 3.4.0 obtains its tracer from OpenTelemetry's process-global provider and
+has no provider injection API. Petri owns a provider per dish without replacing
+an embedding application's global provider. The version-pinned adapter in
+`petri.execution.otel` therefore routes the SDK's native `start_span` call to the
+current dish's provider and restores the SDK method when the owner closes. An
+SDK upgrade requires reviewing this isolated use of a private API.
+
+Petri initializes that provider before `DBOS.launch()`. Its existing exporters
+own endpoint configuration, headers, sampling, and the local SQLite sink. The
+SDK receives `enable_otlp`, semantic attribute names, and empty exporter endpoint
+lists to avoid duplicate export. This replaces the issue's proposed direct SDK
+endpoint forwarding: the test asserts the configured endpoint at Petri's owned
+exporter boundary instead. No pipeline module imports DBOS for tracing.

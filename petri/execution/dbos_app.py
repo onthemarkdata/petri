@@ -18,6 +18,7 @@ from petri.storage import database
 if TYPE_CHECKING:
     from petri.execution.dbos_backend import CellRunSpec
     from petri.execution.pipeline import PipelineDeps
+    from petri.execution.otel import DBOSTelemetry
 
 QUEUE_NAME = "petri-cells"
 APPLICATION_VERSION = "petri-cell-pipeline-1"
@@ -65,6 +66,7 @@ class DBOSApp:
         self._owner = FileLock(self.petri_dir / ".execution-owner.lock", thread_local=False)
         self._slots = threading.BoundedSemaphore(settings.worker_concurrency)
         self.started = False
+        self.telemetry: DBOSTelemetry | None = None
         self.conflicts: dict[str, dict] = {}
         self.target_priority_plans: dict[str, dict[str, int]] = {}
 
@@ -99,6 +101,8 @@ class DBOSApp:
                     "An inference call is still running; execution ownership is retained"
                 )
         DBOS.destroy(workflow_completion_timeout_sec=0)
+        if self.telemetry:
+            self.telemetry.close()
         self.started = False
         _ACTIVE = None
         self._owner.release()
@@ -135,6 +139,10 @@ class DBOSApp:
             from petri.execution.reconciliation import reconcile
 
             self.conflicts = reconcile(self.db_path, self.petri_dir / "dbos.sqlite")
+            from petri.execution.otel import DBOSTelemetry
+
+            self.telemetry = DBOSTelemetry(self.petri_dir)
+            self.telemetry.bind()
             DBOS(
                 config={
                     "name": "petri",
@@ -142,7 +150,7 @@ class DBOSApp:
                     "system_database_url": f"sqlite:///{self.petri_dir / 'dbos.sqlite'}",
                     "executor_id": "petri-dish-owner",
                     "use_listen_notify": False,
-                    "enable_otlp": False,
+                    **self.telemetry.dbos_config(),
                     "log_level": "WARNING",
                 }
             )
@@ -164,6 +172,8 @@ class DBOSApp:
             return self
         except BaseException:
             DBOS.destroy()
+            if self.telemetry:
+                self.telemetry.close()
             _ACTIVE = None
             self._owner.release()
             raise
@@ -178,6 +188,8 @@ class DBOSApp:
             if pending:
                 raise RuntimeError("Wait for or cancel active workflows before closing execution")
             DBOS.destroy(workflow_completion_timeout_sec=10)
+            if self.telemetry:
+                self.telemetry.close()
             for runner in self._seed_runners.values() if self.owns_seed_runners else ():
                 if hasattr(runner, "close"):
                     runner.close()
