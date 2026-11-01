@@ -11,7 +11,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from petri.storage.database import connect
+from petri.storage.database import SCHEMA_VERSION, connect
 from petri.telemetry import init_telemetry, shutdown_telemetry
 from petri.telemetry.span_store import SQLiteSpanExporter, prune, query_spans
 
@@ -61,7 +61,7 @@ def test_roundtrip_usage_filters_and_domain_preservation(tmp_path):
         usage = connection.execute('SELECT * FROM usage').fetchone()
         assert (usage['tokens_input'], usage['tokens_output'], usage['cost_usd']) == (10, 5, None)
         assert connection.execute('SELECT cell_id,phase,SUM(tokens_input) FROM usage GROUP BY cell_id,phase').fetchone()[:] == ('cell-a', 'research', 10)
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION
         assert connection.execute('PRAGMA index_list(usage)').fetchall()
         for table in before:
             assert connection.execute('SELECT * FROM ' + table).fetchall() == before[table]
@@ -109,9 +109,9 @@ def test_migration_upgrades_prior_schema_and_reopens(tmp_path):
         migrate(connection, [source.joinpath(name).read_text() for name in ['001_domain.sql', '002_colonies.sql']])
         assert connection.execute('PRAGMA user_version').fetchone()[0] == 2
     with closing(connect(path)) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION
     with closing(connect(path)) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION
 
 
 def test_prune_keeps_recent_rows_and_domain_history(tmp_path):
