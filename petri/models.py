@@ -72,6 +72,7 @@ class EventType(str, Enum):
     decomposition_audit = "decomposition_audit"
     decomposition_warning = "decomposition_warning"
     decomposition_edited = "decomposition_edited"
+    agent_execution_failed = "agent_execution_failed"
     cell_expansion_completed = "cell_expansion_completed"
     cell_marked_atomic = "cell_marked_atomic"
     # Agent lifecycle events fired incrementally during `petri seed`
@@ -202,6 +203,13 @@ class DecompositionAuditData(BaseModel):
     should_restructure: bool = False
 
 
+class AgentExecutionFailedData(BaseModel):
+    phase: str
+    error_type: str
+    message: str
+    failure_detail: dict
+
+
 class DecompositionEditedData(BaseModel):
     attempt: int = Field(ge=0)
     original_text: str
@@ -280,6 +288,7 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "decomposition_audit": DecompositionAuditData,
     "decomposition_warning": DecompositionWarningData,
     "decomposition_edited": DecompositionEditedData,
+    "agent_execution_failed": AgentExecutionFailedData,
     "cell_expansion_completed": AgentStepData,
     "cell_marked_atomic": AgentStepData,
     # Agent lifecycle events fired incrementally by `petri seed` so the

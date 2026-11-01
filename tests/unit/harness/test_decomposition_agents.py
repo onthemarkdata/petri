@@ -50,9 +50,11 @@ async def test_invalid_then_valid_retries():
 @pytest.mark.asyncio
 async def test_exhaustion_raises_without_an_atomic_result():
     model, calls = script([{}])
-    with pytest.raises(DecompositionError, match="five_whys failed"):
+    with pytest.raises(DecompositionError, match="five_whys failed") as failure:
         await run_decomposition_agent(five_whys, DecompositionInput("claim"), model=model)
     assert len(calls) == 2
+    assert failure.value.detail.partial_output == "{}"
+    assert failure.value.detail.last_stream_event["validation_feedback"]
 
 
 def test_named_agents_preserve_the_initial_step_wording():

@@ -12,6 +12,7 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from petri.agents.config import load_agent_config
 from petri.agents.contract import AgentName
@@ -45,6 +46,51 @@ SOURCE = {
     "supports_or_contradicts": "supports",
     "confidence": "HIGH",
 }
+
+
+@pytest.mark.asyncio
+async def test_failed_model_output_is_durable_without_a_verdict(phase_services):
+    services, signals = phase_services
+    cell_id = database.list_cells(services.db_path)[0]["id"]
+
+    def invalid(messages, info):
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                             {"verdict": "NOT_A_VALID_VERDICT", "summary": "Invalid model output"})])
+
+    services.socratic_agent = build_socratic_agent(
+        services.config, constitution="Preserve source attribution.", model=FunctionModel(invalid))
+    value = PipelineInput.model_validate(CellPipelineState(cell_id=cell_id).model_dump())
+    with pytest.raises(UnexpectedModelBehavior):
+        await run_socratic(value, services)
+    failures = database.read_events(services.db_path, cell_id=cell_id, event_type="agent_execution_failed")
+    assert len(failures) == 1
+    detail = failures[0]["data"]["failure_detail"]
+    assert "NOT_A_VALID_VERDICT" in detail["partial_output"]
+    assert detail["last_stream_event"]["validation_feedback"]
+    assert not database.read_events(services.db_path, cell_id=cell_id, event_type="verdict_issued")
+    assert database.get_cell(services.db_path, cell_id)["status"] == "NEW"
+
+
+@pytest.mark.asyncio
+async def test_permanent_harness_failure_keeps_backend_diagnostics(phase_services):
+    from petri.harness.errors import FailureDetail, PermanentHarnessError
+
+    services, signals = phase_services
+    cell_id = database.list_cells(services.db_path)[0]["id"]
+
+    def failed(messages, info):
+        raise PermanentHarnessError("Local transport failed", detail=FailureDetail(
+            stderr_tail="backend diagnostic", partial_output="unfinished model output",
+            last_stream_event={"kind": "incomplete"}))
+
+    services.socratic_agent = build_socratic_agent(services.config,
+        constitution="Preserve source attribution.", model=FunctionModel(failed))
+    with pytest.raises(PermanentHarnessError):
+        await run_socratic(inputs(cell_id), services)
+    detail = database.read_events(services.db_path, event_type="agent_execution_failed")[0]["data"]["failure_detail"]
+    assert detail["stderr_tail"] == "backend diagnostic"
+    assert detail["partial_output"] == "unfinished model output"
+    assert detail["last_stream_event"]["backend_event"] == {"kind": "incomplete"}
 
 
 @pytest.fixture
