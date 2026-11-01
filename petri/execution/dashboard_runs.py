@@ -76,7 +76,9 @@ def _prepare_dashboard_seed(app, spec: DashboardSeedSpec) -> SeedRunSpec:
         if connection.execute("SELECT 1 FROM events WHERE id=?", (identity,)).fetchone():
             return seed
         if existing and spec.request.regenerate:
-            clear_unapproved_colony(path, seed.colony_id, connection=connection)
+            clear_unapproved_colony(
+                path, seed.colony_id, connection=connection, release_reservation=False
+            )
         else:
             reserve_colony(path, colony, connection=connection)
         save_colony(path, graph, colony, connection=connection)

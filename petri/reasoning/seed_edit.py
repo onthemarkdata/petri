@@ -149,7 +149,9 @@ def validate_draft(
 def materialize_edited_state(path: Path, state: SeedState) -> None:
     """Replay a journaled edit without consulting older model responses."""
     with database._write(path) as connection:
-        clear_unapproved_colony(path, state.colony_id, connection=connection)
+        clear_unapproved_colony(
+            path, state.colony_id, connection=connection, release_reservation=False
+        )
         for cell in state.cells:
             database.put_cell(path, {
                 **cell.model_dump(mode="json"), "colony": cell.colony_id,

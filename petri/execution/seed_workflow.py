@@ -99,6 +99,7 @@ def _decompose_seed_step(spec, app):
             0,
             {"level": cell.level, "parents": [edge.from_cell for edge in edges]},
             node="seed",
+            round_number=spec.attempt,
         )
         if app.seed_on_cell_created:
             app.seed_on_cell_created(cell, edges)

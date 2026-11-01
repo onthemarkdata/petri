@@ -112,8 +112,17 @@ def list_colonies(db_path: Path) -> list[tuple[ColonyGraph, Colony]]:
     return result
 
 
-def clear_unapproved_colony(db_path: Path, colony_id: str, *, connection: sqlite3.Connection | None = None) -> None:
-    """Discard this seed's draft rows while retaining its event history."""
+def clear_unapproved_colony(
+    db_path: Path,
+    colony_id: str,
+    *,
+    connection: sqlite3.Connection | None = None,
+    release_reservation: bool = True,
+) -> None:
+    """Discard draft rows and release the name, retaining immutable event history.
+
+    Editors and regeneration retain the reservation while replacing its rows.
+    """
     with database.write_connection(db_path, connection) as conn:
         approved = conn.execute(
             "SELECT 1 FROM events WHERE event_type='colony_approved' AND cell_id IN "
@@ -130,3 +139,5 @@ def clear_unapproved_colony(db_path: Path, colony_id: str, *, connection: sqlite
             raise ValueError("Another colony references this draft")
         conn.execute("DELETE FROM edges WHERE from_cell IN (SELECT id FROM cells WHERE colony=?)", (colony_id,))
         conn.execute("DELETE FROM cells WHERE colony=?", (colony_id,))
+        if release_reservation:
+            conn.execute("DELETE FROM colonies WHERE id=?", (colony_id,))

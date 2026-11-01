@@ -120,3 +120,73 @@ def test_regeneration_replaces_only_current_run(seeded_petri_dir, monkeypatch):
     assert len(provider.decompose_calls) == 2
     assert provider.decompose_calls[-1]["guidance"] == "Focus on evidence"
     assert snapshot(env["colony_path"]) == before
+    from petri.storage import database
+    from petri.storage.paths import dish_db_path
+
+    path = dish_db_path(env["petri_dir"])
+    assert len(database.read_events(path, event_type="cell_created")) == 4
+
+
+@pytest.mark.parametrize("interrupt_replacement", [False, True])
+def test_abort_then_fresh_seed_reuses_name_without_replaying_old_output(
+    seeded_petri_dir, monkeypatch, interrupt_replacement
+):
+    from click.testing import _NamedTextIOWrapper
+    from petri.storage import database
+    from petri.storage.colonies import colony_exists, load_colony
+    from petri.storage.paths import dish_db_path
+
+    env = seeded_petri_dir
+    path = dish_db_path(env["petri_dir"])
+    colony_id = f"{env['dish_id']}-fresh"
+    unrelated = database.list_cells(path, colony=env["colony_id"])
+    first = FakeProvider()
+    second = FakeProvider()
+    first.questions_response = second.questions_response = []
+    second.decompose_response = {
+        "nodes": [
+            {"claim_text": "A replacement meter premise"},
+            {"claim_text": "A replacement second premise", "relation": "limits"},
+        ]
+    }
+    selected = [first]
+    actions = iter(["Abort", "Accept"])
+    monkeypatch.setattr("petri.cli.seed.resolve_provider", lambda _: selected[0])
+    monkeypatch.setattr(_NamedTextIOWrapper, "isatty", lambda _: True)
+    monkeypatch.setattr(
+        "questionary.select", lambda *a, **kw: SimpleNamespace(ask=lambda: next(actions))
+    )
+    runner = CliRunner()
+    aborted = runner.invoke(app, ["seed", "Original units claim", "--colony", "fresh"])
+    assert aborted.exit_code == 1 and "Decomposition rejected" in aborted.output, aborted.output
+    assert not database.list_cells(path, colony=colony_id)
+    assert not colony_exists(path, colony_id)
+    history = {event["id"]: event for event in database.read_events(path)}
+    assert history
+
+    selected[0] = second
+    expand = second.expand_why
+    if interrupt_replacement:
+        def fail_expansion(*args, **kwargs):
+            raise RuntimeError("Interrupted replacement draft")
+        monkeypatch.setattr(second, "expand_why", fail_expansion)
+    accepted = runner.invoke(app, ["seed", "Replacement units claim", "--colony", "fresh"])
+    if interrupt_replacement:
+        assert accepted.exit_code == 2 and "Interrupted replacement" in accepted.output
+        monkeypatch.setattr(second, "expand_why", expand)
+        accepted = runner.invoke(app, ["seed", "--resume", "--colony", "fresh", "--no-questions"])
+    assert accepted.exit_code == 0, (accepted.output, accepted.exception)
+    graph, colony = load_colony(path, colony_id)
+    assert colony.center_claim == "Replacement units claim"
+    assert {cell.claim_text for cell in graph.get_all_cells() if cell.level} == {
+        "A replacement meter premise", "A replacement second premise"
+    }
+    assert len(first.decompose_calls) == len(second.decompose_calls) == 1
+    events = database.read_events(path)
+    by_id = {event["id"]: event for event in events}
+    assert all(by_id[key] == event for key, event in history.items())
+    assert len([event for event in events if event["type"] == "decomposition_started"]) == 2
+    assert len([event for event in events if event["type"] == "decomposition_completed"]) == 2
+    assert len([event for event in events if event["type"] == "cell_created"]) == 4
+    assert len([event for event in events if event["type"] == "colony_approved"]) == 1
+    assert database.list_cells(path, colony=env["colony_id"]) == unrelated

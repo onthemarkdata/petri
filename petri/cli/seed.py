@@ -126,6 +126,7 @@ def _log_cell_event(
     data: dict | None = None,
     *,
     sequence: int = 0,
+    attempt: int = 0,
 ) -> None:
     """Persist a seed event, failing if its history cannot be saved."""
     from petri.storage.event_log import append_event
@@ -139,6 +140,7 @@ def _log_cell_event(
         data=data or {},
         node="seed",
         sequence=sequence,
+        round_number=attempt,
     )
 
 
@@ -441,13 +443,20 @@ def register(app: typer.Typer) -> None:
             print_error_and_exit(str(error), code=1)
         save_colony(colony_path, graph, colony_model)
 
-        event_sequences: dict[tuple[str, str], int] = {}
+        event_sequences: dict[tuple[int, str, str], int] = {}
+        attempt = current_attempt(colony_path, center_id) + 1
 
         def log_for_this_run(cell_id: str, event_type: str, data: dict | None = None) -> None:
+            nonlocal attempt
+            if event_type == "decomposition_started":
+                attempt = current_attempt(colony_path, center_id) + 1
+                data = {**(data or {}), "attempt": attempt}
             events_file = _events_path_for(colony_path, colony_model, cell_id)
-            key = (cell_id, event_type)
+            key = (attempt, cell_id, event_type)
             sequence = event_sequences.get(key, 0)
-            _log_cell_event(events_file, cell_id, event_type, data, sequence=sequence)
+            _log_cell_event(
+                events_file, cell_id, event_type, data, sequence=sequence, attempt=attempt
+            )
             event_sequences[key] = sequence + 1
 
         log_for_this_run(center_id, "seed_started", {"claim": claim, "no_questions": no_questions})
@@ -513,7 +522,7 @@ def register(app: typer.Typer) -> None:
         while True:
             # Only this run's cells are replaced during regeneration.
             snapshot_before_destructive(petri_dir, dish_id)
-            clear_unapproved_colony(colony_path, colony_id)
+            clear_unapproved_colony(colony_path, colony_id, release_reservation=False)
             graph = ColonyGraph(colony_id=colony_id)
             graph.add_cell(center_cell)
             save_colony(colony_path, graph, colony_model)

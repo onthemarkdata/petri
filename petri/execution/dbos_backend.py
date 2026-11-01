@@ -42,7 +42,7 @@ from petri.execution.pipeline import (
 )
 from petri.harness.errors import PermanentHarnessError, RateLimitedError
 from petri.execution.reconciliation import DomainReceipt, capture_receipt, read_conflicts
-from petri.models import CellStatus, ProcessCellResult, QueueProcessingResult, parse_key
+from petri.models import CellStatus, ProcessCellResult, QueueProcessingResult, build_cell_key, parse_key
 from petri.storage import database
 from petri.storage.paths import dish_db_path
 
@@ -306,6 +306,7 @@ class DBOSExecutionBackend:
         from petri.execution.seed_workflow import SeedRunSpec
         from petri.query.cells import list_colonies
         from petri.reasoning.decomposition_settings import DecompositionSettings
+        from petri.reasoning.seed_events import current_attempt
 
         if self.app is None or not self.app.started:
             raise RuntimeError("Start the dashboard execution owner before submitting a run.")
@@ -314,22 +315,27 @@ class DBOSExecutionBackend:
         existing = next(
             (row for row in list_colonies(self.app.db_path) if row["id"] == colony_id), None
         )
-        initial = await DBOS.get_workflow_status_async(colony_id)
+        settings = DecompositionSettings.from_dish(self.app.petri_dir)
+        center_id = build_cell_key(dish_id, str(request.colony), 0, 0)
+        last_attempt = current_attempt(self.app.db_path, center_id)
+        current = SeedRunSpec(
+            colony_id, dish_id, str(request.colony), settings, max(last_attempt, 1)
+        )
+        initial = await DBOS.get_workflow_status_async(current.workflow_id)
         if not request.regenerate:
-            if initial is not None:
-                if existing is not None and existing["center_claim"] != request.claim:
-                    raise ValueError(
-                        "This colony contains a different claim; request regeneration explicitly."
-                    )
-                return self._run_status(initial)
             if existing is not None:
+                if existing["center_claim"] != request.claim:
+                    raise ValueError(
+                        "This colony already exists with a different claim; request regeneration explicitly."
+                    )
+                if initial is not None:
+                    return self._run_status(initial)
                 raise ValueError(
                     "This colony already exists; request regeneration to replace its draft."
                 )
-        elif initial is not None and initial.status in {"PENDING", "ENQUEUED"}:
+        if initial is not None and initial.status in {"PENDING", "ENQUEUED"}:
             raise ValueError("Wait for or cancel the existing seed run before regenerating it.")
-        attempt = 1
-        settings = DecompositionSettings.from_dish(self.app.petri_dir)
+        attempt = last_attempt + 1
         while True:
             seed = SeedRunSpec(
                 colony_id, dish_id, str(request.colony), settings, attempt, request.guidance
