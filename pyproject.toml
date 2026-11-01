@@ -23,7 +23,7 @@ dependencies = [
     "pydantic>=2.0",
     "httpx>=0.27",
     "croniter>=6.0,<7",
-    "dbos==3.4.0",
+    "dbos[otel]==3.4.0",
     "filelock>=3.16",
     "pydantic-ai>=2.64,<3",
 

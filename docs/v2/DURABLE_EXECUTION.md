@@ -126,3 +126,16 @@ phases:
 ```sh
 pytest tests/integration/test_grow_resume.py -m integration -q
 ```
+
+## Workflow traces
+
+With telemetry enabled, native DBOS workflow and step spans use the current
+dish's provider, exporters, and local SQLite sink. Cell workflow spans carry the
+cell ID and round. `telemetry.enabled: false` disables DBOS spans as well as
+Petri's other spans. Provider initialization precedes runtime launch.
+
+The DBOS 3.4.0 adapter is confined to the execution backend and restores its SDK
+hook when the owner closes. The SQLite test verifies workflow/step parenting,
+sequential dish isolation, and disabled telemetry. See the
+[D10 verification](../ARCHITECTURE-V2.md#d10-verification-native-dbos-spans-on-sqlite)
+for the private SDK boundary and endpoint configuration decision.

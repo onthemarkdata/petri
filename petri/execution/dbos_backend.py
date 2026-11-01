@@ -159,6 +159,9 @@ async def _phase(spec: CellRunSpec, name: str, value: PipelineInput):
 
 @DBOS.workflow(name="petri.validate_cell")
 async def validate_cell(spec: CellRunSpec) -> PipelineEnd:
+    from petri.execution.otel import set_cell_workflow_attributes
+
+    set_cell_workflow_attributes(spec, active_app(), DBOS.span)
     if spec.application_version != APPLICATION_VERSION:
         raise RuntimeError("The workflow shape changed; run recovery with its original version")
     app = active_app()
