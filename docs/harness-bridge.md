@@ -90,3 +90,16 @@ For a manually authorized hosted-provider check, use an isolated dish with
 `harness: {backend: provider, model: anthropic:claude-sonnet-4-6}` and your own
 provider credentials, then run the same seed and dry-run commands. That check
 incurs provider charges and is not part of the automated local validation.
+
+The typed decomposition runner accepts `agent_runner` and `db_path` explicitly.
+Its named agents return `InitialDecomposition` and `WhyExpansion`; malformed
+results exhaust validation retries with `DecompositionError`. An atomic stop
+requires both `is_atomic: true` and a nonempty `bedrock_reason`. Cells receive
+UTC creation timestamps and persist through the database seam. Existing
+provider injection remains available for legacy callers and offline fixtures.
+The typed path does not parse free text or infer atomicity from an empty result.
+
+Streaming is explicit in `run_decomposition_agent(stream=True)`: capable models
+deliver text chunks through the progress callback. Pi currently returns a
+completed response, so its bridge uses start/completion progress instead.
+Callbacks on the bridge's typed methods run on its owned worker thread.
