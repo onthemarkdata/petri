@@ -99,9 +99,9 @@ class DishGraph:
             return cls.from_connection(connection)
 
 
-def append(db_path: Path, edge: EdgeRecord) -> bool:
+def append(db_path: Path, edge: EdgeRecord, *, connection: sqlite3.Connection | None = None) -> bool:
     """Append an active version once; reject cycles under the same writer lock."""
-    with database._write(db_path) as conn:
+    with database.write_connection(db_path,connection) as conn:
         graph = DishGraph.from_connection(conn)
         if edge.from_cell not in graph.cells or edge.to_cell not in graph.cells:
             raise sqlite3.IntegrityError('FOREIGN KEY constraint failed: edge endpoints must exist in the dish')
@@ -151,14 +151,15 @@ def read_tombstones(db_path: Path) -> list[EdgeTombstone]:
         return [EdgeTombstone.model_validate(dict(row)) for row in connection.execute('SELECT * FROM edge_tombstones ORDER BY created_at,from_cell,to_cell,edge_type,edge_created_at')]
 
 
-def retire_cell(db_path: Path, cell_id: str, *, reason: str = 'Removed from colony topology') -> bool:
+def retire_cell(db_path: Path, cell_id: str, *, reason: str = 'Removed from colony topology',
+                connection: sqlite3.Connection | None = None) -> bool:
     """Retire a cell and incident edges atomically, preserving historical references."""
     now = datetime.now(timezone.utc).isoformat()
-    with database._write(db_path) as connection:
-        if connection.execute('SELECT 1 FROM active_cells WHERE id=?',(cell_id,)).fetchone() is None:
+    with database.write_connection(db_path,connection) as writer:
+        if writer.execute('SELECT 1 FROM active_cells WHERE id=?',(cell_id,)).fetchone() is None:
             return False
-        for row in connection.execute('SELECT * FROM active_edges WHERE from_cell=? OR to_cell=?',(cell_id,cell_id)).fetchall():
-            connection.execute('INSERT OR IGNORE INTO edge_tombstones VALUES (?,?,?,?,?,?)',
+        for row in writer.execute('SELECT * FROM active_edges WHERE from_cell=? OR to_cell=?',(cell_id,cell_id)).fetchall():
+            writer.execute('INSERT OR IGNORE INTO edge_tombstones VALUES (?,?,?,?,?,?)',
                 (row['from_cell'],row['to_cell'],row['edge_type'],row['created_at'],reason,now))
-        connection.execute('INSERT INTO cell_tombstones VALUES (?,?,?)',(cell_id,reason,now))
+        writer.execute('INSERT INTO cell_tombstones VALUES (?,?,?)',(cell_id,reason,now))
     return True
