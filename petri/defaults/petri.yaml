@@ -216,3 +216,17 @@ limits:
   debate:
     request_limit: 6
     total_tokens_limit: 50000
+
+# Local tracing is enabled by default. External export requires an endpoint.
+# telemetry:
+#   enabled: true
+#   service_name: petri
+#   sample_ratio: 1.0
+#   local:
+#     enabled: true
+#     retention_days: 30
+#   otlp:
+#     traces_endpoint: null
+#     logs_endpoint: null
+#     headers: {}
+#     protocol: http/protobuf
