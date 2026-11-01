@@ -88,4 +88,6 @@ addopts = "-m 'not integration'"
 markers = [
     "live: opt-in local model inference; disabled unless explicitly enabled",
     "integration: may reach the real network or a real CLI; bypasses the offline guard (run explicitly with `pytest -m integration`)",
+    "live: explicitly enabled configured-model evaluation; never runs in CI",
+    "private_archive: opt-in local checks of a separately supplied private archive",
 ]

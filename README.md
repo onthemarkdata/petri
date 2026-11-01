@@ -245,6 +245,48 @@ uv pip install -e ".[all]"
 uv run pytest tests/
 ```
 
+## Decomposition evaluations
+
+The default test suite includes deterministic decomposition evaluations with
+FunctionModel and public synthetic fixtures. They run without network or
+subprocess calls. Run the report directly with:
+
+```sh
+uv run python -m evals.decomposer
+```
+
+The seven evaluators check quota filling, count variation, counterarguments,
+bedrock stops, specific cross-colony references, depth variation, and parent
+restatements. Two historical failure shapes intentionally score poorly.
+Reintroducing quota wording also fails an instruction regression check.
+
+Private research stays outside this repository. To validate a local archive
+bundle, set `PETRI_PRIVATE_ARCHIVE` and run the opt-in check:
+
+```sh
+PETRI_PRIVATE_ARCHIVE=/path/to/private-bundle uv run pytest tests/evals -m private_archive -q -s
+```
+
+The bundle contains `claims-graph.json`, `layer-distribution.json`,
+`paired-waves.json`, and six documents under `principle-measurement/`. The
+check prints aggregate counts and retrieval metrics. See the
+[fixture provenance policy](evals/decomposer/fixtures/README.md).
+
+Live evaluation calls the configured model and may incur provider charges. It
+can run several dozen calls per case, with retries and tool calls adding more;
+provider prices and actual token use determine cost. It never runs in CI or
+falls back to another model. After choosing a model and accepting its cost, run:
+
+```sh
+PETRI_LIVE_EVALS=1 PETRI_EVAL_MODEL=provider:model uv run pytest tests/evals -m live -q -s
+```
+
+For a local endpoint, configure its provider environment explicitly and use its
+exact model name. The live test prints a per-case report and fails if the
+reference case does not reuse a specific non-root cell. Passing synthetic
+fixtures does not establish that a live model makes reliable decomposition
+judgments.
+
 ## Contributing
 
 Petri is mid-flight on its **v2 migration** — re-platforming onto Pydantic AI, pydantic-graph,
