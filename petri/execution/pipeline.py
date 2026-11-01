@@ -68,6 +68,7 @@ class DeferClosed(_FrozenModel):
 
 class NeedsHuman(_FrozenModel):
     status: Literal["needs_human"] = "needs_human"
+    cell_status: Literal["STALLED", "NEEDS_EXPERIMENT"] = "STALLED"
     reason: str = Field(min_length=1)
 
 
@@ -132,6 +133,7 @@ class PipelineDeps:
     red_team: Callable[[PipelineInput], Awaitable[RedTeamResult]]
     evaluate: Callable[[PipelineInput], Awaitable[EvaluationVerdict]]
     sync_check: Callable[[PipelineInput], Awaitable[SyncConflict | None]]
+    finish: Callable[[PipelineInput, PipelineEnd], Awaitable[None]] | None = None
 
 
 def _input(state: CellPipelineState) -> PipelineInput:
@@ -199,7 +201,12 @@ class ConvergenceCheckNode(BaseNode[CellPipelineState, PipelineDeps, PipelineEnd
                 return End(DeferOpen(reason=decision.reason))
             if decision.short_circuit == "defer_closed":
                 return End(DeferClosed(reason=decision.reason))
-            return End(NeedsHuman(reason=decision.reason or "An experiment requires human input"))
+            return End(
+                NeedsHuman(
+                    cell_status="NEEDS_EXPERIMENT",
+                    reason=decision.reason or "An experiment requires human input",
+                )
+            )
         ctx.state.weakest_link = decision.weakest_link
         ctx.state.focused_directive = decision.focused_directive or (
             f"Focus on addressing {decision.weakest_link} concerns"
@@ -303,6 +310,8 @@ async def run_pipeline(state: CellPipelineState, deps: PipelineDeps) -> Pipeline
             if isinstance(tasks, EndMarker):
                 if previous_node is None or type(tasks.value) not in _DECLARED[previous_node][1]:
                     raise GraphRuntimeError(f"Undeclared terminal result from {previous_node}")
+                if deps.finish is not None:
+                    await deps.finish(_input(state), tasks.value)
                 return tasks.value
             for task in tasks:
                 if task.node_id not in node_names:

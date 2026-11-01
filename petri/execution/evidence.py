@@ -118,6 +118,51 @@ def format_socratic(assessments: Sequence[Assessment]) -> str:
     return "\n".join(lines)
 
 
+def format_red_team(assessment: Assessment, iteration: int) -> str:
+    lines = [f"### Red Team Review (Iteration {iteration})\n"]
+    lines.extend(_sources([assessment]) or ["_No sources cited by red team._", ""])
+    lines.extend([f"**Red Team Verdict:** {assessment.verdict} — {assessment.summary}", ""])
+    return "\n".join(lines)
+
+
+def format_evaluation(assessment: RecordedAssessment, iteration: int) -> str:
+    lines = [f"### Evidence Evaluation (Iteration {iteration})\n"]
+    sources = list({source.url: source for source in assessment.sources_cited}.values())
+    lines.extend(_sources([assessment]) or ["_No sources cited by evidence evaluator._", ""])
+    if sources:
+        lines.extend(
+            [
+                "| # | Source | URL | Level | Direction | Finding |",
+                "|---|--------|-----|-------|-----------|---------|",
+            ]
+        )
+        for index, source in enumerate(sources, 1):
+            lines.append(
+                f"| {index} | {source.title or 'Unknown'} | {source.url} | {source.hierarchy_level} | {source.supports_or_contradicts} | {source.finding or '—'} |"
+            )
+        lines.append("")
+    lines.extend(
+        [f"**Verdict:** {assessment.verdict} | **Confidence:** {assessment.confidence}", ""]
+    )
+    if assessment.summary:
+        lines.extend([f"**Assessment:** {assessment.summary}", ""])
+    return "\n".join(lines)
+
+
+def format_audit(assessment: Assessment, audit: dict, iteration: int) -> str:
+    lines = [
+        f"### Decomposition Audit (Iteration {iteration})\n",
+        f"**Convergence failed after {iteration + 1} iterations.**\n",
+        f"**Re-examination:** {assessment.summary}",
+        "",
+    ]
+    if audit["suggestion"]:
+        lines.append(f"**Structural Suggestions:** {audit['suggestion']}\n")
+    if audit["should_restructure"]:
+        lines.append("**Recommendation:** This cell may need to be restructured.\n")
+    return "\n".join(lines)
+
+
 def debate_summary(data: dict) -> dict:
     """Render actual debate turns through the legacy critique-summary layout."""
     detail = json.loads(data["exchange_summary"])
@@ -131,12 +176,19 @@ def render_evidence(events: Iterable[dict]) -> str:
     """Rebuild the appended evidence body using events alone, in append order."""
     assessments: dict[tuple[int, str], list[RecordedAssessment]] = {}
     debates: dict[int, list[dict]] = {}
+    audits: dict[int, dict] = {}
     sections = []
     for event in events:
         iteration = event["iteration"]
         if event["type"] == "verdict_issued":
             agent = event["agent"]
-            if agent.startswith("socratic_"):
+            if agent == "socratic_decomposition_auditor":
+                phase = "decomposition_audit"
+            elif agent == "red_team_lead":
+                phase = "red_team"
+            elif agent == "evidence_evaluator":
+                phase = "evaluation"
+            elif agent.startswith("socratic_"):
                 phase = "socratic"
             elif agent in AgentName._value2member_map_:
                 phase = AGENT_SPECS[AgentName(agent)].phase.value
@@ -148,12 +200,21 @@ def render_evidence(events: Iterable[dict]) -> str:
             assessments.setdefault((iteration, phase), []).append(assessment)
         elif event["type"] == "debate_mediated":
             debates.setdefault(iteration, []).append(debate_summary(event["data"]))
+        elif event["type"] == "decomposition_audit":
+            audits[iteration] = event["data"]
         elif event["type"] == "evidence_appended":
             summary = event["data"]["summary"]
             marker_phase = next(
                 (
                     name
-                    for name in ("socratic", "research", "critique")
+                    for name in (
+                        "socratic",
+                        "research",
+                        "critique",
+                        "red_team",
+                        "evaluation",
+                        "decomposition_audit",
+                    )
                     if summary == f"Appended {name} findings (iteration {iteration})"
                 ),
                 None,
@@ -165,6 +226,12 @@ def render_evidence(events: Iterable[dict]) -> str:
                 content = format_socratic(values)
             elif marker_phase == "research":
                 content = format_research(values, iteration)
+            elif marker_phase == "red_team":
+                content = format_red_team(values[-1], iteration)
+            elif marker_phase == "evaluation":
+                content = format_evaluation(values[-1], iteration)
+            elif marker_phase == "decomposition_audit":
+                content = format_audit(values[-1], audits.pop(iteration), iteration)
             else:
                 content = format_critique(values, debates.pop(iteration, []), iteration)
             sections.append(f"\n\n---\n\n{content}")
