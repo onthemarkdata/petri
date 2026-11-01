@@ -10,6 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from petri.execution.config import ExecutionConfig
+from petri.lifecycle.config import LifecycleConfig
 
 from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode, DebateProtocol
 from petri.telemetry.config import ModelPrice, TelemetryConfig
@@ -141,6 +142,7 @@ class PrePipelineContent(StrictContent):
 
 
 class AgentConfig(StrictContent):
+    lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     auto_export: bool = False
     schema_version: Literal[2]
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
