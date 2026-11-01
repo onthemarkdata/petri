@@ -6,6 +6,7 @@ import asyncio
 import pickle
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from contextvars import copy_context
 from datetime import datetime, timezone
 from collections.abc import Callable, Awaitable
@@ -347,7 +348,7 @@ class DBOSExecutionBackend:
 
     async def submit_run(self, request: RunRequest) -> RunStatus:
         from petri.execution.dashboard_runs import DashboardGrowSpec, dashboard_grow
-        from petri.execution.scheduler import ColonyRunSpec, ReopenRequest
+        from petri.execution.scheduler import ColonyRunSpec, ReopenRequest, current_round
         from petri.query.cells import get_cell, list_colonies
 
         if self.app is None or not self.app.started:
@@ -384,6 +385,26 @@ class DBOSExecutionBackend:
                 ]
             if not colonies:
                 raise KeyError("Colony not found.")
+            # Resume selected children before starting a parent, preserving its checkpoint order.
+            eligible = self.eligible_cells(
+                self.app.petri_dir, colony_filter=request.colony, cell_ids=request.cell_ids
+            )
+            with closing(database.connect(self.app.db_path)) as connection:
+                selected_rounds = {
+                    f"{cell.id}:r{current_round(connection, cell.id)}"
+                    for cell in eligible if cell.id not in self.app.conflicts
+                }
+            cancelled = await DBOS.list_workflows_async(
+                name="petri.validate_cell", status=["CANCELLED"]
+            )
+            for child in cancelled:
+                if child.workflow_id in selected_rounds:
+                    from petri.execution.control import clear_cancellation
+
+                    clear_cancellation(
+                        self.app.petri_dir / "dbos.sqlite", workflow_ids=[child.workflow_id]
+                    )
+                    await DBOS.resume_workflow_async(child.workflow_id, queue_name=QUEUE_NAME)
             specs = tuple(
                 ColonyRunSpec(
                     row["id"],

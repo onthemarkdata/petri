@@ -33,14 +33,20 @@ def record_cancellation(system_path: Path, workflow_ids: list[str], *, force: bo
         conn.commit()
 
 
-def clear_cancellation(system_path: Path) -> None:
+def clear_cancellation(system_path: Path, *, workflow_ids: list[str] | None = None) -> None:
     if not system_path.is_file():
         return
     with closing(sqlite3.connect(system_path, timeout=30)) as conn:
         if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='petri_cancel_requests'"
         ).fetchone():
-            conn.execute("DELETE FROM petri_cancel_requests")
+            if workflow_ids is None:
+                conn.execute("DELETE FROM petri_cancel_requests")
+            else:
+                conn.executemany(
+                    "DELETE FROM petri_cancel_requests WHERE workflow_id=?",
+                    [(workflow_id,) for workflow_id in workflow_ids],
+                )
             conn.commit()
 
 
