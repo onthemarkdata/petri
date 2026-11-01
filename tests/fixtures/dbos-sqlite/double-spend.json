@@ -1,0 +1,30 @@
+[
+  {
+    "name": "seven-source-pass",
+    "sources": [
+      "source-1",
+      "source-2",
+      "source-3",
+      "source-4",
+      "source-5",
+      "source-6",
+      "source-7"
+    ],
+    "attempt_source_counts": [
+      7,
+      7,
+      4
+    ]
+  },
+  {
+    "name": "whole-iteration",
+    "sources": [
+      "research",
+      "validate"
+    ],
+    "attempt_source_counts": [
+      2,
+      2
+    ]
+  }
+]
