@@ -229,3 +229,19 @@ raises `AgentRunError` with the agent identity, diagnostic detail and
 Callers record that marker in the domain event log and treat it as nonconvergent.
 The output validator is attached to the agent itself; execution callers use
 `run_agent` to receive the typed failure and enforce configured usage limits.
+
+### Deterministic mechanical convergence
+
+`petri.agents.convergence` evaluates typed roster facts without YAML reads or LLM
+calls. The latest nonempty verdict per agent wins; leads do not vote. Missing
+blocking verdicts outrank failing verdicts. Conditional triage redirects only
+when its block verdict matches and every other blocking agent passes.
+`CANNOT_DETERMINE` follows the same rule for `needs_experiment`. Short-circuit
+checks consume a precomputed convergence result.
+
+Weakest-link ties now follow `AgentName` definition order. This replaces YAML
+insertion order without changing pass/fail criteria. An `EXECUTION_ERROR` record
+is a present, failing verdict and can never satisfy convergence. The execution
+layer is responsible for appending that failure to the domain event log; this
+pure evaluator does not write events. Circuit-breaker counting remains relative
+to the current cycle: `iteration - cycle_start_iteration >= max_iterations`.
