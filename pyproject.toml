@@ -32,6 +32,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http==1.45.2",
     "pyyaml>=6.0",
     "typer>=0.9",
+    "typing-extensions>=4.12.2",
     "questionary>=2.0",
     "fastapi>=0.100",
     "sse-starlette>=1.6",

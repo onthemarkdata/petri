@@ -152,7 +152,7 @@ async def test_real_typed_pipeline_emits_phase_identity_verdict_and_usage():
             assert span.attributes["petri.iteration"] == 0
             assert span.attributes["petri.outcome"] == "converged"
         else:
-            assert span.attributes["petri.agent_role"] in AgentName
+            assert span.attributes["petri.agent_role"] in {role.value for role in AgentName}
             assert span.attributes["petri.tokens_input"] == 9
             assert span.attributes["petri.tokens_output"] == 4
 

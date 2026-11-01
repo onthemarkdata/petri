@@ -10,7 +10,9 @@ import time
 from collections.abc import Sequence
 from contextlib import closing
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
+
+from typing_extensions import TypedDict
 
 from opentelemetry.context import (
     _SUPPRESS_INSTRUMENTATION_KEY,

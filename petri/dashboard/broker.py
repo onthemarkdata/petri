@@ -6,7 +6,8 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TypedDict
+
+from typing_extensions import TypedDict
 
 
 class AgentProgress(TypedDict):
