@@ -19,7 +19,7 @@ from typing import Any
 
 from petri.models import Event, validate_event_data
 
-MIGRATIONS = ("001_domain.sql", "002_colonies.sql", "003_telemetry.sql", "004_seed_checkpoints.sql", "005_cell_content.sql", "006_analytics.sql")
+MIGRATIONS = ("001_domain.sql", "002_colonies.sql", "003_telemetry.sql", "004_seed_checkpoints.sql", "005_cell_content.sql", "006_analytics.sql", "007_edge_tombstones.sql")
 
 SCHEMA_VERSION = len(MIGRATIONS)
 BUSY_TIMEOUT_MS = 30_000
@@ -294,7 +294,7 @@ def read_edges(db_path: Path) -> list[dict]:
     with closing(connect(db_path)) as conn:
         return [
             dict(row)
-            for row in conn.execute("SELECT * FROM edges ORDER BY from_cell,to_cell,edge_type")
+            for row in conn.execute("SELECT * FROM active_edges ORDER BY from_cell,to_cell,edge_type")
         ]
 
 

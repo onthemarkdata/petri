@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from petri.query.connection import read_connection
+from petri.query.connection import has_table, read_connection
 from petri.query.events import CursorEvent, _event
 
 
@@ -21,7 +21,8 @@ def export_snapshot(db_path: Path) -> ExportSnapshot:
         if connection is None:
             raise FileNotFoundError(f"Dish database does not exist: {db_path}")
         cells = [dict(row) for row in connection.execute("SELECT * FROM cells ORDER BY colony,level,seq,id")]
-        edges = [dict(row) for row in connection.execute("SELECT * FROM edges ORDER BY from_cell,to_cell,edge_type")]
+        edge_table = "active_edges" if has_table(connection, "active_edges") else "edges"
+        edges = [dict(row) for row in connection.execute(f"SELECT * FROM {edge_table} ORDER BY from_cell,to_cell,edge_type")]
         events = [CursorEvent(**_event(row), rowid=row["append_order"]) for row in connection.execute(
             "SELECT rowid AS append_order,* FROM events ORDER BY rowid")]
         return ExportSnapshot(cells, edges, events, events[-1]["rowid"] if events else 0)
