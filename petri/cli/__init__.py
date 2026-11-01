@@ -13,6 +13,7 @@ from petri.cli.agents_cmd import register as register_agents
 from petri.cli.backup import register as register_backup
 from petri.cli.check import register as register_check
 from petri.cli.connect import register as register_connect
+from petri.cli.export import register as register_export
 from petri.cli.feed import register as register_feed
 from petri.cli.graph import register as register_graph
 from petri.cli.grow import register as register_grow
@@ -32,6 +33,7 @@ app = typer.Typer(
 _COMMAND_REGISTRARS = (
     register_agents,
     register_backup,
+    register_export,
     register_init,
     register_seed,
     register_check,

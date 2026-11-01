@@ -21,7 +21,7 @@ def seed(petri_dir, dish="dish"):
         connection.execute("INSERT INTO events VALUES ('event','cell','search_executed','agent',1,'{}','2026-01-01')")
     defaults = petri_dir / "defaults"
     defaults.mkdir(exist_ok=True)
-    (defaults / "petri.yaml").write_text("dish_id: dish\n")
+    (defaults / "petri.yaml").write_text("name: dish\n")
     return path
 
 

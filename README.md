@@ -305,3 +305,15 @@ real local requests only when enabled:
 ```bash
 PETRI_LIVE_GEMMA=1 pytest -q tests/unit/test_cli_agents_run.py -m live
 ```
+
+### Export derived research text
+
+`petri export` writes deterministic per-cell Markdown and append-ordered
+`events.jsonl` files under the dish's `exports/`, plus `edges.jsonl` and a format
+manifest. Use `--colony <slug>` or `--cell <id>` to limit the scope. `--since <rowid>`
+rewrites cells with later events; unchanged cell files retain their timestamps.
+The database remains authoritative. Editing exported text does not change a dish.
+
+`petri grow --export` exports after completion. Set `auto_export: true` in the
+dish config for the same behavior on each run. `petri backup --with-export`
+includes text generated from the snapshot itself, so its database and text agree.

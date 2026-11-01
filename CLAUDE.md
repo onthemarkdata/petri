@@ -44,6 +44,8 @@ petri launch            # Launch REST+SSE dashboard (port 8090)
 petri scan              # Run contradiction scanner
 petri connect <a> <b>   # Inspect or create a dependency edge
 petri inspect           # Check prerequisites
+petri export            # Regenerate derived Markdown/JSONL from SQLite
+petri backup --with-export  # Snapshot domain data and its derived text
 ```
 
 ## Architecture

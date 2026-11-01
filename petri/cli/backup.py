@@ -12,6 +12,7 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def backup(
         dish: Optional[str] = typer.Option(None, "--dish", help="Dish ID; defaults to the current dish"),
+        with_export: bool = typer.Option(False, "--with-export", help="Include derived text in the snapshot"),
         restore: Optional[str] = typer.Option(None, "--restore", help="Restore a saved snapshot by name"),
         force: bool = typer.Option(False, "--force", help="Allow restore to replace an existing dish database"),
         list_only: bool = typer.Option(False, "--list", help="List saved snapshots newest first"),
@@ -20,7 +21,7 @@ def register(app: typer.Typer) -> None:
         petri_dir = find_petri_dir()
         try:
             if restore is not None:
-                if list_only or dish is not None:
+                if list_only or dish is not None or with_export:
                     raise ValueError("Restore selects the snapshot's dish; omit --dish and --list")
                 if any(petri_dir.rglob("dbos.sqlite")):
                     typer.echo("WARNING: DBOS execution state is present. Restoring domain data can "
@@ -36,6 +37,11 @@ def register(app: typer.Typer) -> None:
                                f"{snapshot.cell_count} cells\t{snapshot.size_bytes} bytes")
                 return
             path = snapshot_before_destructive(petri_dir, dish or get_dish_id(petri_dir))
+            if with_export:
+                from petri.storage.export import export_dish
+
+                export_dish(petri_dir, dish or get_dish_id(petri_dir),
+                            source_db=path / "petri.sqlite", output_dir=path / "exports")
             typer.echo(f"Snapshot saved: {path}")
         except (OSError, RuntimeError, ValueError) as error:
             typer.echo(str(error), err=True)
