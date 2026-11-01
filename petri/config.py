@@ -51,8 +51,8 @@ def get_execution_backend(config: dict | None = None) -> str:
     if not isinstance(execution, dict):
         raise ValueError("execution must be a mapping with backend: v1")
     backend = execution.get("backend", "v1")
-    if backend != "v1":
-        raise ValueError(f"Unknown execution.backend {backend!r}; supported value: v1")
+    if not isinstance(backend, str) or backend not in {"v1", "dbos"}:
+        raise ValueError(f"Unknown execution.backend {backend!r}; supported values: v1, dbos")
     return backend
 
 
