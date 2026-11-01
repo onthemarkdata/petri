@@ -169,6 +169,9 @@ def register(app: typer.Typer) -> None:
         from petri.config import get_telemetry_config
         from petri.telemetry.span_store import prune
 
+        from petri.cli._bootstrap import bootstrap_telemetry
+
+        bootstrap_telemetry(petri_dir)
         telemetry = get_telemetry_config(petri_dir)
         if telemetry.enabled and telemetry.local.enabled:
             prune(petri_dir, telemetry.local.retention_days)

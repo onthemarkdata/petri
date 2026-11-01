@@ -18,6 +18,7 @@ def register(app: typer.Typer) -> None:
     def check(
         colony_name: str | None = typer.Option(None, "--colony", help="Filter to one colony"),
         cell: str | None = typer.Option(None, "--cell", help="Detailed view of a single cell"),
+        targets: int = typer.Option(5, "--targets", min=1, help="Maximum validation targets"),
         json_output: bool = typer.Option(False, "--json", help="JSON output"),
     ) -> None:
         """Show current state of the petri dish."""
@@ -47,6 +48,10 @@ def register(app: typer.Typer) -> None:
         if not colonies and not conflicts:
             typer.echo("No colonies found.")
             raise typer.Exit(code=0)
+
+        from petri.query.intelligence import get_intelligence
+
+        intelligence = get_intelligence(petri_dir)
 
         # Detailed cell view
         if cell:
@@ -171,3 +176,11 @@ def register(app: typer.Typer) -> None:
                 if item.get("sync_conflict_reason"):
                     typer.echo(f"    Sync conflict: {item['sync_conflict_reason']}")
         typer.echo("")
+        visible = {row['cell_id'] for row in all_data}
+        ranked = [cell_id for cell_id in intelligence.convergence_points if cell_id in visible][:targets]
+        typer.echo('Validation targets:')
+        if not ranked:
+            typer.echo('  No convergence points found.')
+        for cell_id in ranked:
+            metric = intelligence.cells[cell_id]
+            typer.echo(f'  {cell_id}  importance={metric.importance}  fragility={metric.fragility}')
