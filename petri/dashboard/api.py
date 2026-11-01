@@ -437,6 +437,14 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
             decompose_claim,
             generate_colony_name,
         )
+        from petri.storage.seed_guard import ColonyExistsError, require_empty_colony
+
+        colony_name = colony_name_input or generate_colony_name(claim)
+        colony_path = petri_dir / "petri-dishes" / colony_name
+        try:
+            require_empty_colony(colony_path)
+        except ColonyExistsError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
         # decompose_claim requires an InferenceProvider. Reuse the same
         # factory the CLI commands use so model + allowed_tools come
@@ -447,8 +455,6 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 500,
                 "Could not resolve inference provider: petri.yaml is missing a model entry.",
             )
-
-        colony_name = colony_name_input or generate_colony_name(claim)
 
         try:
             result = decompose_claim(
@@ -487,7 +493,11 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
             created_at=now,
         )
 
-        colony_path = petri_dir / "petri-dishes" / colony_name
+        # Another seed may have finished while this request was decomposing.
+        try:
+            require_empty_colony(colony_path)
+        except ColonyExistsError as exc:
+            raise HTTPException(409, str(exc)) from exc
         serialize_colony(graph, colony_model, colony_path)
 
         for cell in cells:

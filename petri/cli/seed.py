@@ -15,6 +15,7 @@ from petri.cli._bootstrap import (
     resolve_provider,
 )
 from petri.cli_ui import print_error_and_exit
+from petri.storage.seed_guard import ColonyExistsError, require_empty_colony
 from petri.storage.paths import (
     cell_dir as cell_dir_for,
     events_path as events_file_path,
@@ -313,7 +314,12 @@ def register(app: typer.Typer) -> None:
         center_id = build_cell_key(dish_id, colony_name, 0, 0)
         colony_path = petri_dir / "petri-dishes" / colony_name
 
-        # Wipe any leftover from a previous run before we start writing
+        try:
+            require_empty_colony(colony_path)
+        except ColonyExistsError as exc:
+            print_error_and_exit(str(exc), code=1)
+
+        # A cell-free directory may remain after an interrupted initialization.
         if colony_path.exists():
             shutil.rmtree(colony_path)
 
@@ -417,7 +423,7 @@ def register(app: typer.Typer) -> None:
         guidance = ""
         result = None
         while True:
-            # Each re-roll wipes the colony dir and rebuilds — no stale state
+            # Only this run's cells are replaced during regeneration.
             if colony_path.exists():
                 shutil.rmtree(colony_path)
             graph = ColonyGraph(colony_id=colony_id)
@@ -481,6 +487,7 @@ def register(app: typer.Typer) -> None:
             ).ask()
 
             if action is None or action == "Abort":
+                # Only this run's cells are removed when this run is rejected.
                 if colony_path.exists():
                     shutil.rmtree(colony_path)
                 typer.echo("Decomposition rejected.")
@@ -494,6 +501,7 @@ def register(app: typer.Typer) -> None:
                 "What should change? (free text, press Enter to re-roll as-is)"
             ).ask()
             if guidance is None:
+                # Only this run's cells are removed when this run is rejected.
                 if colony_path.exists():
                     shutil.rmtree(colony_path)
                 typer.echo("Cancelled.")
