@@ -5,6 +5,21 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from petri.agents.config import SourceHierarchy
+
+
+def source_hierarchy_instructions(hierarchy: SourceHierarchy) -> str:
+    """Explain the configured grades without assigning a grade to any source."""
+    lines = ["Configured source hierarchy for citation hierarchy_level:"]
+    for level, content in sorted(hierarchy.levels.items()):
+        lines.append(f"Level {level} — {content.name}: {content.description}")
+    lines.append(
+        f"Use these definitions when grading each cited source. EVIDENCE_CONFIRMS and EVIDENCE_REFUTES require at least "
+        f"one source at level 1–{hierarchy.minimum_terminal_level}. A grade does not establish that "
+        "a source was retrieved or that it supports the claim."
+    )
+    return "\n".join(lines)
+
 
 class SourcePolicyResult(BaseModel):
     model_config = ConfigDict(frozen=True)

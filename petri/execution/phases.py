@@ -28,6 +28,7 @@ from petri.agents.contract import AGENT_SPECS, AgentName, Phase
 from petri.agents.factory import typed_role_instruction
 from petri.agents.debates import DebateStatus, log_debate, run_debate
 from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment
+from petri.agents.source_policy import source_hierarchy_instructions
 from petri.execution.evidence import RecordedAssessment, format_socratic, render_agent_context
 from petri.execution.claim_context import render_ancestor_context
 from petri.execution.pipeline import (
@@ -126,7 +127,8 @@ def build_socratic_agent(
         model_settings=config.model_settings.as_model_settings(),
         instructions=constitution + "\n\n" + config.pre_pipeline.socratic_questioner.instruction + "\n\n"
         + "This exploratory phase has no source retrieval tools. Plan what research should retrieve; "
-        "do not claim to have browsed or fabricate citations.\n\n" + ASSESSMENT_FORMAT,
+        "do not claim to have browsed or fabricate citations.\n\n" + ASSESSMENT_FORMAT
+        + "\n\n" + source_hierarchy_instructions(config.source_hierarchy),
         retries=2,
     )
     @agent.output_validator
