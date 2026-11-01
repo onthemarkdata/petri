@@ -89,7 +89,8 @@ class DecompositionInput:
 def initial_instructions(request: DecompositionInput) -> str:
     return SEARCH_INSTRUCTIONS + FLAT_RESULT + QUALITY_BAR + build_decompose_claim_prompt(
         request.claim, request.clarifications, request.guidance,
-    ) + "STEP 4 — EMIT JSON.\nReturn the selected premises using the supplied output schema."
+    ) + ("STEP 4 — EMIT JSON.\nReturn the selected premises using the supplied output schema. "
+         "The only top-level key is nodes; do not wrap the result in InitialDecomposition or another type name.")
 
 
 def why_instructions(request: DecompositionInput) -> str:
@@ -99,7 +100,8 @@ def why_instructions(request: DecompositionInput) -> str:
     ) + (
         COUNTERARGUMENT + "If the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), "
         "return is_atomic=true, no sub-premises, and a bedrock_reason.\n\n"
-        "STEP 4 — EMIT JSON.\nReturn the selected sub-premises using the supplied output schema."
+        "STEP 4 — EMIT JSON.\nReturn the selected sub-premises using the supplied output schema. "
+        "The top-level keys are is_atomic, bedrock_reason, and sub_premises; do not wrap the result in WhyExpansion or another type name."
     )
 
 
