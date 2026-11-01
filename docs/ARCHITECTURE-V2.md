@@ -260,3 +260,57 @@ RunUsage and the configured per-debate limits. A budget or output-validation
 failure returns a typed status, completed exchanges, attempted message history,
 and measured usage. `log_debate` appends through the SQLite event-log seam using
 the standard event envelope; the summary preserves turn output and usage.
+
+### D7 instrumentation decision: native Pydantic AI OpenTelemetry
+
+The instrumentation spike for #65 tested the locked Pydantic AI 2.64.0 runtime
+with OpenTelemetry SDK 1.45.2. Use the first-party
+`Agent.instrument_all(InstrumentationSettings(tracer_provider=provider))` entry
+point. Pass Petri's shared provider explicitly. Disable prompt, completion, binary,
+and model-request-parameter capture; token usage and span relationships remain
+available. No Logfire account, token, SDK configuration, or cloud exporter is
+required for this mechanism.
+
+Both evaluated paths emitted one agent-run span, two model-request spans, and one
+tool-call span to an in-memory exporter. Each model and tool span had the agent
+span as its parent. The model reported 12 input and 5 output tokens in total.
+
+| Path | Configuration | SDK import | Connection attempts |
+|---|---|---|---|
+| Chosen native OTel | `InstrumentationSettings(tracer_provider=provider)` | Logfire import blocked for the probe | 0 |
+| Logfire alternative | `logfire.configure(local=True, send_to_logfire=False, console=False, metrics=False, additional_span_processors=[processor])`, then local `instrument_pydantic_ai()` | Logfire imported | 0 |
+
+The native experiment blocks `logfire` imports before importing Pydantic AI;
+its optional installed Pydantic plugin warns and is skipped. Both experiments
+reject socket connections, clear inherited telemetry export settings within the
+probe process, and use only an in-memory exporter. The Logfire alternative works
+without sending to Logfire, but adds no required capability for Petri. Production
+wiring therefore uses the native mechanism. The current broad `pydantic-ai`
+distribution includes Logfire as a transitive extra, pinned by `uv.lock`; this ADR
+adds no direct Logfire dependency or separate pin. Installed and configured are
+different states: Petri does not call `logfire.configure()`.
+
+The observed attributes are:
+
+| Span | Operation | Token attributes |
+|---|---|---|
+| Agent run | `gen_ai.operation.name=invoke_agent` | `gen_ai.aggregated_usage.input_tokens`, `gen_ai.aggregated_usage.output_tokens` |
+| Model request | `gen_ai.operation.name=chat` | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` |
+| Tool call | `gen_ai.operation.name=execute_tool` | None; tool spans carry `gen_ai.tool.name` |
+
+Keep aggregate usage on the agent span distinct from request usage to avoid
+counting the same tokens twice. This decision uses the default instrumentation
+format version 5 in Pydantic AI 2.64.0; it does not assume the older 2.9.0 API.
+
+Reproduce the two offline experiments with:
+
+```bash
+uv run python scripts/spikes/agent_instrumentation.py native
+uv run python scripts/spikes/agent_instrumentation.py logfire
+uv run pytest tests/unit/test_instrumentation_spike.py
+```
+
+Captured results are in [instrumentation-native.json](validation/instrumentation-native.json)
+and [instrumentation-logfire.json](validation/instrumentation-logfire.json). This
+spike verifies agent/model/tool spans and usage. DBOS parenting and Petri domain
+attributes are implemented and tested separately in #67 and #68.
