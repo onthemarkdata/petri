@@ -354,7 +354,7 @@ class DBOSExecutionBackend:
 
     async def submit_run(self, request: RunRequest) -> RunStatus:
         from petri.execution.dashboard_runs import DashboardGrowSpec, dashboard_grow
-        from petri.execution.scheduler import ColonyRunSpec, ReopenRequest, current_round
+        from petri.execution.scheduler import ColonyRunSpec, ReopenRequest
         from petri.query.cells import get_cell, list_colonies
 
         if self.app is None or not self.app.started:
@@ -391,26 +391,9 @@ class DBOSExecutionBackend:
                 ]
             if not colonies:
                 raise KeyError("Colony not found.")
-            # Resume selected children before starting a parent, preserving its checkpoint order.
-            eligible = self.eligible_cells(
-                self.app.petri_dir, colony_filter=request.colony, cell_ids=request.cell_ids
+            await self._resume_cancelled_cells(
+                colony_filter=request.colony, cell_ids=request.cell_ids
             )
-            with closing(database.connect(self.app.db_path)) as connection:
-                selected_rounds = {
-                    f"{cell.id}:r{current_round(connection, cell.id)}"
-                    for cell in eligible if cell.id not in self.app.conflicts
-                }
-            cancelled = await DBOS.list_workflows_async(
-                name="petri.validate_cell", status=["CANCELLED"]
-            )
-            for child in cancelled:
-                if child.workflow_id in selected_rounds:
-                    from petri.execution.control import clear_cancellation
-
-                    clear_cancellation(
-                        self.app.petri_dir / "dbos.sqlite", workflow_ids=[child.workflow_id]
-                    )
-                    await DBOS.resume_workflow_async(child.workflow_id, queue_name=QUEUE_NAME)
             specs = tuple(
                 ColonyRunSpec(
                     row["id"],
@@ -426,6 +409,30 @@ class DBOSExecutionBackend:
                 handle = await DBOS.start_workflow_async(dashboard_grow, spec)
         status = await DBOS.get_workflow_status_async(handle.workflow_id)
         return self._run_status(status)
+
+    async def _resume_cancelled_cells(self, *, colony_filter=None, cell_ids=None) -> None:
+        from petri.execution.control import clear_cancellation
+        from petri.execution.scheduler import current_round
+
+        if self.app is None or not self.app.started:
+            raise RuntimeError("Start the dish runtime before resuming cells")
+        eligible = self.eligible_cells(
+            self.app.petri_dir, colony_filter=colony_filter, cell_ids=cell_ids
+        )
+        with closing(database.connect(self.app.db_path)) as connection:
+            selected_rounds = {
+                f"{cell.id}:r{current_round(connection, cell.id)}"
+                for cell in eligible if cell.id not in self.app.conflicts
+            }
+        cancelled = await DBOS.list_workflows_async(
+            name="petri.validate_cell", status=["CANCELLED"]
+        )
+        for child in cancelled:
+            if child.workflow_id in selected_rounds:
+                clear_cancellation(
+                    self.app.petri_dir / "dbos.sqlite", workflow_ids=[child.workflow_id]
+                )
+                await DBOS.resume_workflow_async(child.workflow_id, queue_name=QUEUE_NAME)
 
     def preflight(self) -> PreflightCheck:
         settings = self.settings
@@ -673,6 +680,9 @@ class DBOSExecutionBackend:
         _bounded(spec)
         status = await DBOS.get_workflow_status_async(spec.workflow_id)
         if status is not None and status.status == "CANCELLED":
+            from petri.execution.control import clear_cancellation
+
+            clear_cancellation(self.app.petri_dir / "dbos.sqlite", workflow_ids=[spec.workflow_id])
             return await DBOS.resume_workflow_async(spec.workflow_id)
         with SetWorkflowID(spec.workflow_id):
             return await DBOS.start_workflow_async(grow_colony, spec)
@@ -820,7 +830,7 @@ class DBOSExecutionBackend:
         path = dish_db_path(petri_dir)
         if not path.is_file():
             return QueueProcessingResult()
-        self.clear_stop(petri_dir)
+        self._stopped = False
         self.start(petri_dir, db_path=path)
 
         async def poll_progress(done):
@@ -861,12 +871,8 @@ class DBOSExecutionBackend:
                 on_event(ProgressEvent(slot, cell_id, "finished"))
 
         async def run():
-            # Resume children outside their parent replay so no new parent step is inserted.
-            cancelled = await DBOS.list_workflows_async(
-                name="petri.validate_cell", status=["CANCELLED"]
-            )
-            for child in cancelled:
-                await DBOS.resume_workflow_async(child.workflow_id, queue_name=QUEUE_NAME)
+            # Resume outside parent replay so its checkpoint order stays unchanged.
+            await self._resume_cancelled_cells(colony_filter=colony_filter, cell_ids=cell_ids)
             done = asyncio.Event()
             poller = asyncio.create_task(poll_progress(done)) if on_event else None
             try:

@@ -132,8 +132,9 @@ def register(app: typer.Typer) -> None:
                 typer.echo("No eligible cells found.")
             raise typer.Exit(code=0)
 
-        # A new invocation resumes runs cancelled by an earlier user stop.
-        backend.clear_stop(petri_dir)
+        # DBOS clears cancellation only for the rounds selected by process_queue.
+        if not isinstance(backend, DBOSExecutionBackend):
+            backend.clear_stop(petri_dir)
 
         # ── live path: loop until terminal/stopped/no-progress ──
         def _get_states() -> dict[str, int]:
