@@ -23,8 +23,8 @@ The live protocol differs from the frozen #26/#27 descriptions in three places:
 The bridge uses the shared prompt bodies without their legacy JSON suffixes.
 Pydantic AI supplies the output schema and validation feedback. A malformed
 Five Whys result consumes the configured output retries and then raises; only a
-validated atomic result returns an empty list. Outputs over the requested limit
-also trigger validation feedback rather than being silently truncated.
+validated atomic result returns an empty list. The decomposer truncates selected
+premises in code; count limits do not appear in prompts or output schemas.
 
 ## CLI and failure behavior
 
@@ -45,11 +45,11 @@ projection/event schema must retain failure details. Without those changes, type
 cells fail on dict access and diagnostic fields disappear before persistence.
 
 All structured bridge calls use prompted output, including direct providers.
-The generated premise schema contains the requested `maxItems` limit. The bridge
-asks for selected results without intermediate brainstorming, and distinguishes
+The premise schema has no `maxItems` quota. The bridge asks for selected results without intermediate brainstorming, and distinguishes
 result data from the JSON schema. This matters for smaller local models: the
-initial Gemma run copied schema fields and emitted too many premises. The bridge
-rejected those outputs; no parser extracted or repaired a partial result.
+initial Gemma run copied schema fields and emitted too many premises. Malformed
+schema-shaped output is rejected; valid premise lists are capped by the
+decomposer. No parser extracts or repairs partial results.
 
 ## Web research tools
 
@@ -116,3 +116,13 @@ Children that still meet that threshold are dropped before persistence, with a
 `decomposition_warning` event on the parent when a database path is supplied.
 The remaining children must still satisfy the counterargument rule. This guard
 compares a child with its parent only; it does not detect cross-colony duplicates.
+
+Decomposition settings include `per_parent_cap` (default `4`) and `level_one_cap`
+(default `10`). Both must be positive and are bounded by `max_nodes_per_layer`.
+The root uses the level-one cap; later expansions use the parent cap and the
+remaining layer capacity. Truncation retains a counterargument when at least two
+children fit. The existing depth and layer settings remain safety ceilings,
+never prompt targets. Both agents use neutral count guidance: “Let the structure
+determine the count; do not pad to a quota; fewer is fine.” The legacy
+`max_premises` argument remains accepted for compatibility but is not interpolated
+into decomposition prompts or schemas.

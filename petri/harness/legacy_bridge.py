@@ -13,7 +13,7 @@ import weakref
 from collections.abc import Callable, Coroutine, Mapping
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_ai import Agent, ModelRetry, PromptedOutput
 from pydantic_ai.models import Model, infer_model
 from pydantic_ai.exceptions import AgentRunError
@@ -224,15 +224,8 @@ class HarnessInferenceProvider:
                         max_premises: int = 5, on_progress: Progress = None) -> DecompositionResult:
         self._limit(max_premises)
 
-        def validate(output: _ClaimDecomposition):
-            if len(output.nodes) > max_premises:
-                raise ModelRetry(f"Return at most {max_premises} premises.")
-            return output
-
-        schema = create_model("ClaimDecomposition", __base__=_ClaimDecomposition,
-                              nodes=(list[_Premise], Field(min_length=1, max_length=max_premises)))
         result = self._run("decomposition", prompts.build_decompose_claim_prompt(
-            claim, clarifications, guidance, max_premises), schema, on_progress, validate)
+            claim, clarifications, guidance), _ClaimDecomposition, on_progress)
         # These placeholders carry no dish identity. The decomposer assigns real IDs.
         cells = [Cell(id=f"pending-premises-001-{index:03d}", colony_id="pending-premises",
                       claim_text=node.claim_text, level=1) for index, node in enumerate(result.nodes, 1)]
@@ -242,14 +235,9 @@ class HarnessInferenceProvider:
                       max_premises: int = 5, on_progress: Progress = None) -> list[dict]:
         self._limit(max_premises)
 
-        def validate(output: _WhyDecomposition):
-            if len(output.sub_premises) > max_premises:
-                raise ModelRetry(f"Return at most {max_premises} sub-premises.")
-            return output
-
-        prompt = prompts.build_decompose_why_prompt(premise, parent_level, parent_seq, max_premises)
+        prompt = prompts.build_decompose_why_prompt(premise, parent_level, parent_seq)
         prompt += "If this is directly verifiable as a fact, definition, or measurement, mark it atomic with no sub-premises."
-        result = self._run("five-whys", prompt, _WhyDecomposition, on_progress, validate)
+        result = self._run("five-whys", prompt, _WhyDecomposition, on_progress)
         return [item.model_dump() for item in result.sub_premises]
 
     def initial_decomposition(self, request: DecompositionInput, on_progress: Progress = None) -> InitialDecomposition:

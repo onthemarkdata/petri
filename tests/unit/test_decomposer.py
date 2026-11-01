@@ -204,12 +204,7 @@ class TestDecomposeClaim:
 
 
 class TestPerLayerCap:
-    """The seed-time decomposer caps each level at ``max_cells_per_layer``
-    so a single seed run never produces 100+ cells. The cap is enforced
-    in two places: the prompt asks for the top N most important premises,
-    and the decomposer hard-truncates the model's response as a safety
-    net (in case the model ignores the prompt).
-    """
+    """Code enforces layer ceilings without passing numeric quotas to prompts."""
 
     def _force_cap(self, monkeypatch, value: int) -> None:
         """Override the per-layer cap for the duration of one test."""
@@ -244,8 +239,8 @@ class TestPerLayerCap:
         level_one = [cell for cell in result.cells if cell.level == 1]
         assert len(level_one) == 5
 
-    def test_max_premises_passed_to_decompose_claim(self, monkeypatch):
-        """The configured cap must reach the provider as max_premises."""
+    def test_layer_cap_is_not_passed_to_decompose_claim(self, monkeypatch):
+        """The compatibility argument keeps its default instead of receiving a quota."""
         self._force_cap(monkeypatch, 7)
         provider = FakeProvider()
         provider.decompose_response = {
@@ -261,7 +256,7 @@ class TestPerLayerCap:
             provider=provider,
         )
 
-        assert provider.decompose_calls[0]["max_premises"] == 7
+        assert provider.decompose_calls[0]["max_premises"] == 5
 
     def test_five_whys_respects_per_layer_budget(self, monkeypatch):
         """Across multiple parents, the level-2 total never exceeds the cap.
@@ -295,10 +290,8 @@ class TestPerLayerCap:
         level_two = [cell for cell in result.cells if cell.level == 2]
         assert len(level_two) == 5
 
-    def test_remaining_budget_passed_to_decompose_why(self, monkeypatch):
-        """Each Five Whys call should receive the remaining level budget,
-        not the global cap, so the model knows how many slots are left.
-        """
+    def test_remaining_budget_is_not_passed_to_decompose_why(self, monkeypatch):
+        """Layer usage never becomes a model quota."""
         self._force_cap(monkeypatch, 5)
         provider = FakeProvider()
         provider.decompose_response = {
@@ -322,10 +315,8 @@ class TestPerLayerCap:
             provider=provider,
         )
 
-        # First decompose_why call: full budget of 5
         assert provider.why_calls[0]["max_premises"] == 5
-        # After 3 children consumed, second call gets remaining budget of 2
-        assert provider.why_calls[1]["max_premises"] == 2
+        assert provider.why_calls[1]["max_premises"] == 5
 
     def test_skips_decompose_why_when_layer_full(self, monkeypatch):
         """Once a layer is full, subsequent Five Whys calls for that

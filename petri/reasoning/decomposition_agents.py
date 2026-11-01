@@ -56,19 +56,18 @@ class DecompositionInput:
     guidance: str = ""
     parent_level: int = 0
     parent_seq: int = 0
-    max_premises: int = 5
     on_warning: Callable[[str, str, float], None] | None = None
 
 
 def initial_instructions(request: DecompositionInput) -> str:
     return QUALITY_BAR + build_decompose_claim_prompt(
-        request.claim, request.clarifications, request.guidance, request.max_premises,
+        request.claim, request.clarifications, request.guidance,
     ) + "STEP 4 — EMIT JSON.\nReturn the selected premises using the supplied output schema."
 
 
 def why_instructions(request: DecompositionInput) -> str:
     return BEDROCK_TEST + build_decompose_why_prompt(
-        request.claim, request.parent_level, request.parent_seq, request.max_premises,
+        request.claim, request.parent_level, request.parent_seq,
     ) + (
         COUNTERARGUMENT + "If the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), "
         "return is_atomic=true, no sub-premises, and a bedrock_reason.\n\n"

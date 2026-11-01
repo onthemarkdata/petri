@@ -8,6 +8,12 @@ harness:
   provider: anthropic
   tools: []
 max_iterations: 3
+# Safety ceilings only; these values are never model targets.
+max_decomposition_depth: 3
+max_nodes_per_layer: 5
+# Code truncates model output at these limits without exposing quotas.
+per_parent_cap: 4
+level_one_cap: 10
 agent_tools:
 - WebSearch
 - WebFetch

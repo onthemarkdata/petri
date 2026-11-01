@@ -1,4 +1,4 @@
-"""Pure prompt builders extracted without changing the legacy rendered text.
+"""Pure prompt builders shared by typed agents and legacy providers.
 
 Builders return the prompt body; legacy callers append a separate JSON-output
 suffix. Callers supply configuration and dates explicitly.
@@ -70,17 +70,16 @@ def build_decompose_claim_prompt(
         f"{guidance_text}"
         "\n\nWork through this in four explicit steps. Show your reasoning as you go — "
         "the user is watching this stream live.\n\nSTEP 1 — BRAINSTORM (overgenerate).\n"
-        "List 10-15 candidate premises that, if false, would invalidate the claim. "
+        "List candidate premises that, if false, would invalidate the claim. "
         "Cast a wide net. Cover different angles: definitions, mechanisms, scope "
         "boundaries, counterfactuals, hidden assumptions. Number them 1..N. Do NOT "
         "filter at this stage.\n\nSTEP 2 — PRIORITIZE.\nFor each candidate, score on "
         "three dimensions:\n  - LOAD-BEARING: would the claim collapse if this were "
         "false? (HIGH/MED/LOW)\n  - CONTESTABLE: is this actually in question, not "
         "trivially true? (HIGH/MED/LOW)\n  - DISTINCT: does it cover ground the other "
-        "top candidates don't?\nBriefly justify each score.\n\nSTEP 3 — SELECT.\nPick "
-        "the TOP "
-        f"{max_premises}"
-        " premises after ranking. Order them by importance (most important first). "
+        "top candidates don't?\nBriefly justify each score.\n\nSTEP 3 — SELECT.\n"
+        "Let the structure determine the count; do not pad to a quota; fewer is fine. "
+        "Select the strongest premises after ranking. Order them by importance (most important first). "
         "Drop duplicates and trivial restatements. Do not pick the first ones you "
         "wrote down — pick the ones that scored highest.\n\n"
     )
@@ -91,9 +90,7 @@ def decompose_claim_output_suffix(max_premises: int) -> str:
     return (
         'STEP 4 — EMIT JSON.\nReturn a JSON object on the final lines:\n{"nodes": '
         '[{"level": 1, "seq": 1, "claim_text": "..."}, ...], "edges": []}\n\nThe JSON '
-        "must contain AT MOST "
-        f"{max_premises}"
-        " nodes (fewer is fine if fewer genuine first-principles premises exist). "
+        "must contain only genuine first-principles premises; fewer is fine. "
         "Return no commentary after the JSON."
     )
 
@@ -107,15 +104,14 @@ def build_decompose_why_prompt(
         f"{premise}"
         '"\n\nWork through this in four explicit steps. Show your reasoning as you go '
         "— the user is watching this stream live.\n\nSTEP 1 — BRAINSTORM "
-        "(overgenerate).\nList 6-10 candidate sub-premises that must hold for the "
+        "(overgenerate).\nList candidate sub-premises that must hold for the "
         "parent premise to be true. Number them 1..N. Don't filter yet.\n\nSTEP 2 — "
         "PRIORITIZE.\nFor each candidate, score on:\n  - FOUNDATIONALITY: closer to "
         "bedrock = higher (HIGH/MED/LOW)\n  - INDEPENDENCE: separately verifiable "
         "from the others (HIGH/MED/LOW)\n  - LOAD-BEARING: would the parent collapse "
         "if this sub-premise were false?\nBriefly justify each score.\n\nSTEP 3 — "
-        "SELECT.\nPick the TOP "
-        f"{max_premises}"
-        " sub-premises. Drop redundant or surface-level ones. Do not pick the first "
+        "SELECT.\nLet the structure determine the count; do not pad to a quota; fewer is fine. "
+        "Select the strongest sub-premises. Drop redundant or surface-level ones. Do not pick the first "
         "ones you wrote down — pick the ones that scored highest.\n\n"
     )
 
@@ -127,9 +123,8 @@ def decompose_why_output_suffix(max_premises: int) -> str:
         'measurement), skip steps 1-3 and return:\n{"sub_premises": [], "is_atomic": '
         'true, "reason": "why it is atomic"}\n\nSTEP 4 — EMIT JSON.\nReturn: '
         '{"sub_premises": [{"claim_text": "...", "is_atomic": false}, ...], '
-        '"is_atomic": false}\n\nThe sub_premises list must contain AT MOST '
-        f"{max_premises}"
-        " items. Return no commentary after the JSON."
+        '"is_atomic": false}\n\nLet the structure determine the count; do not pad to a quota; fewer is fine. '
+        "Return no commentary after the JSON."
     )
 
 

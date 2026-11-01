@@ -247,11 +247,9 @@ def _provider_decompose(
        the next level down.
     3. Repeat until premises are atomic or max_depth is reached.
 
-    Each level is capped at ``settings.per_layer`` total cells.
-    The provider prompts ask the model to brainstorm broadly, prioritise,
-    and return only the top N most important premises; the decomposer
-    additionally hard-truncates as a safety net so the cap holds even if
-    the model ignores the instruction.
+    Code truncates root premises to ``settings.level_one_cap`` and each
+    later expansion to ``settings.per_parent_cap``. The layer and depth
+    settings are safety ceilings; the prompts do not expose numeric quotas.
 
     Each new cell fires ``on_cell_created`` *immediately* so the CLI can
     persist it to disk and log a ``cell_created`` event before the next
@@ -262,9 +260,7 @@ def _provider_decompose(
     max_per_layer = settings.per_layer
     colony_id = f"{dish_id}-{colony_name}"
 
-    # Per-level usage tracker — used to enforce the cap and to compute
-    # remaining budget for each Five Whys call so the model can be told
-    # how many top-N picks are still available at the target level.
+    # Track per-level usage to enforce the safety ceiling in code.
     cells_per_level: dict[int, int] = {0: 1}  # center already exists
 
     # Step 1: Get initial decomposition (Level 0 + Level 1)
@@ -277,8 +273,7 @@ def _provider_decompose(
         for clarification in clarifications
     ]
     raw = provider.decompose_claim(
-        claim, clarification_dicts, guidance=guidance,
-        max_premises=max_per_layer, on_progress=on_progress,
+        claim, clarification_dicts, guidance=guidance, on_progress=on_progress,
     )
     # Typed bridge cells contain temporary IDs. Only claim/level data enters
     # this reader; the dish assigns every persisted ID below.
@@ -308,13 +303,11 @@ def _provider_decompose(
     all_cells: list[Cell] = [center]
     all_edges: list[Edge] = []
 
-    # Parse Level 1 cells from initial decomposition. Hard-truncate to
-    # the per-layer cap as a safety net (the prompt asks for at most N,
-    # but we don't trust the model to obey).
+    # Truncate root premises in code; no count is sent to the model.
     level_one_cells: list[Cell] = []
     seq_counter = 1
     for raw_cell in raw_cells:
-        if len(level_one_cells) >= max_per_layer:
+        if len(level_one_cells) >= settings.level_one_cap:
             break  # cap reached
         raw_level = raw_cell.get("level", 1)
         if raw_level == 0:
@@ -367,8 +360,7 @@ def _provider_decompose(
             continue
 
         # Stop if the next level is already at the per-layer cap
-        remaining_budget = max_per_layer - cells_per_level.get(next_level, 0)
-        if remaining_budget <= 0:
+        if cells_per_level.get(next_level, 0) >= max_per_layer:
             continue
 
         # Ask "Why is this true?" — if atomic, skip
@@ -379,7 +371,6 @@ def _provider_decompose(
             parent_cell.claim_text,
             parent_level=current_level,
             parent_seq=0,
-            max_premises=remaining_budget,
             on_progress=on_progress,
         )
 
@@ -389,7 +380,8 @@ def _provider_decompose(
 
         child_keys: list[str] = []
         for sub_premise in sub_premises:
-            if cells_per_level.get(next_level, 0) >= max_per_layer:
+            if (len(child_keys) >= settings.per_parent_cap
+                    or cells_per_level.get(next_level, 0) >= max_per_layer):
                 break  # cap reached mid-iteration
             if not isinstance(sub_premise, dict):
                 continue
