@@ -25,6 +25,9 @@ ASSESSMENT_FORMAT = (
     "Each source citation uses only url, title, hierarchy_level, finding, supports_or_contradicts, "
     "confidence, pub_date, and pub_year. Use pub_date for a publication date; put staleness risk "
     "or other analytical labels in arguments or evidence, not inside source citations. "
+    "For each citation, supports_or_contradicts must be exactly supports or contradicts. "
+    "Omit a neutral source from sources_cited and explain its relevance in arguments instead. "
+    "Citation confidence must be HIGH, MEDIUM, LOW, or JSON null. "
     "When no source is available, return an empty sources_cited array; never use a placeholder URL such as N/A."
 )
 
