@@ -75,3 +75,20 @@ to `NEW`. It then appends an idempotent `cell_reopened` event before completing
 its checkpoint. Its child uses the distinct ID
 `{cell_id}:r{next_round}`. Repeating the request attaches to the same parent and
 child; dependents retain their existing status.
+
+## Startup reconciliation
+
+Phase checkpoints include a small receipt: the cell ID, event count, a hash
+of its committed event history, and a hash of its stable cell fields. Before automatic recovery starts, Petri compares
+those receipts with the domain database and checks that a successful cell round
+has its expected terminal status. Additional events after a checkpoint are
+allowed because a crash may occur between an event commit and its checkpoint.
+
+Missing cells, missing checkpointed events, changed event history, and a
+successful workflow paired with a different domain status create a persistent
+`sync_conflict`. Parking metadata lives in an application-owned table in
+`dbos.sqlite`, so restoring an older domain database cannot erase the conflict.
+The runtime returns `SyncConflict` and prevents further work for affected cells.
+`petri check` shows the divergence reason in both text and JSON output.
+Reconciliation does not change cell rows or append, update, or delete events.
+It does not automatically repair a conflict or clear a previous parking decision.

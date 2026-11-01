@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import pickle
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import datetime, timezone
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -31,10 +33,12 @@ from petri.execution.pipeline import (
     PipelineDeps,
     PipelineEnd,
     PipelineInput,
+    SyncConflict,
     run_pipeline,
 )
 from petri.harness.errors import PermanentHarnessError, RateLimitedError
-from petri.models import ProcessCellResult, QueueProcessingResult
+from petri.execution.reconciliation import DomainReceipt, capture_receipt, read_conflicts
+from petri.models import ProcessCellResult, QueueProcessingResult, parse_key
 from petri.storage import database
 from petri.storage.paths import dish_db_path
 
@@ -57,10 +61,20 @@ class CellRunSpec:
 
 
 @dataclass(frozen=True)
+class ParkedCellHandle:
+    workflow_id: str
+    reason: str
+
+    async def get_result(self) -> SyncConflict:
+        return SyncConflict(reason=self.reason)
+
+
+@dataclass(frozen=True)
 class StepResult:
     value: Any = None
     retry_after_seconds: float | None = None
     failure: str | None = None
+    domain_receipt: DomainReceipt | None = None
 
 
 def _bounded(value):
@@ -83,7 +97,11 @@ async def cell_phase(spec: CellRunSpec, phase: str, value: PipelineInput) -> Ste
     deps = active_app().dependencies(spec)
     try:
         output = await getattr(deps, phase)(value)
-        return _bounded(StepResult(value=output))
+        return _bounded(
+            StepResult(
+                value=output, domain_receipt=capture_receipt(active_app().db_path, spec.cell_id)
+            )
+        )
     except RateLimitedError as error:
         return StepResult(
             retry_after_seconds=(
@@ -95,10 +113,19 @@ async def cell_phase(spec: CellRunSpec, phase: str, value: PipelineInput) -> Ste
 
 
 @DBOS.step(name="petri.finish_cell")
-async def finish_cell(spec: CellRunSpec, value: PipelineInput, result: PipelineEnd) -> None:
+async def finish_cell(
+    spec: CellRunSpec, value: PipelineInput, result: PipelineEnd
+) -> DomainReceipt | None:
+    if isinstance(result, SyncConflict):
+        return None
     finish = active_app().dependencies(spec).finish
     if finish is not None:
         await finish(value, result)
+    return _bounded(capture_receipt(active_app().db_path, spec.cell_id))
+
+
+async def _finish(spec, value, result) -> None:
+    await finish_cell(spec, value, result)
 
 
 async def _phase(spec: CellRunSpec, name: str, value: PipelineInput):
@@ -117,6 +144,8 @@ async def validate_cell(spec: CellRunSpec) -> PipelineEnd:
     if spec.application_version != APPLICATION_VERSION:
         raise RuntimeError("The workflow shape changed; run recovery with its original version")
     app = active_app()
+    if spec.cell_id in app.conflicts:
+        return SyncConflict(reason=app.conflicts[spec.cell_id]["reason"])
     await app.acquire_slot()
     try:
         while delay := await asyncio.to_thread(admit_cell, spec):
@@ -130,7 +159,7 @@ async def validate_cell(spec: CellRunSpec) -> PipelineEnd:
             red_team=partial(_phase, spec, "red_team"),
             evaluate=partial(_phase, spec, "evaluate"),
             sync_check=partial(_phase, spec, "sync_check"),
-            finish=partial(finish_cell, spec),
+            finish=partial(_finish, spec),
         )
         try:
             return _bounded(await run_pipeline(state, deps))
@@ -188,10 +217,13 @@ class DBOSExecutionBackend:
         return self.app
 
     async def start_async(self, *args, **kwargs):
-        return await asyncio.to_thread(self.start, *args, **kwargs)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            call = partial(copy_context().run, partial(self.start, *args, **kwargs))
+            return await asyncio.get_running_loop().run_in_executor(executor, call)
 
     async def close_async(self):
-        await asyncio.to_thread(self.close)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            await asyncio.get_running_loop().run_in_executor(executor, self.close)
 
     async def enqueue_cell(self, spec: CellRunSpec, *, level: int = 0):
         if self.app is None or not self.app.started:
@@ -199,6 +231,8 @@ class DBOSExecutionBackend:
         if level < 0:
             raise ValueError("Cell level must be nonnegative")
         _bounded(spec)
+        if spec.cell_id in self.app.conflicts:
+            return ParkedCellHandle(spec.workflow_id, self.app.conflicts[spec.cell_id]["reason"])
         with SetWorkflowID(spec.workflow_id), SetEnqueueOptions(priority=level + 1):
             return await DBOS.enqueue_workflow_async(QUEUE_NAME, validate_cell, spec)
 
@@ -335,7 +369,14 @@ class DBOSExecutionBackend:
                 petri_dir, colony_filter=colony_filter, cell_ids=cell_ids
             )
             colonies = await asyncio.gather(*(handle.get_result() for handle in handles))
-            completed = sorted({cell for colony in colonies for cell in colony.completed})
+            completed = sorted(
+                {
+                    cell
+                    for colony in colonies
+                    for cell in colony.completed
+                    if cell not in self.app.conflicts
+                }
+            )
             results = [
                 ProcessCellResult(cell_id=cell, final_state=database.get_cell(path, cell)["status"])
                 for cell in completed
@@ -360,14 +401,18 @@ class DBOSExecutionBackend:
     def grow_loop(self, *, run_one_pass, get_states, is_stopped):
         result = run_one_pass()
         states = get_states()
-        return GrowOutcome(
-            "not_eligible" if states.get("queued") else "all_terminal", states, result, 1
+        reason = (
+            "sync_conflict"
+            if states.get("sync_conflict")
+            else "not_eligible"
+            if states.get("queued")
+            else "all_terminal"
         )
+        return GrowOutcome(reason, states, result, 1)
 
     def entries(self, petri_dir: Path) -> dict[str, dict]:
         db_path = dish_db_path(petri_dir)
-        if not db_path.is_file():
-            return {}
+        rows = database.list_cells(db_path) if db_path.is_file() else []
         states = {
             "NEW": "queued",
             "RESEARCH": "research_active",
@@ -380,7 +425,7 @@ class DBOSExecutionBackend:
             "STALLED": "needs_human",
             "NEEDS_EXPERIMENT": "needs_human",
         }
-        return {
+        entries = {
             row["id"]: {
                 "cell_id": row["id"],
                 "queue_state": states[row["status"]],
@@ -389,8 +434,24 @@ class DBOSExecutionBackend:
                 "priority": row["level"] + 1,
                 "iteration": 0,
             }
-            for row in database.list_cells(db_path)
+            for row in rows
         }
+        for cell_id, conflict in read_conflicts(petri_dir / "dbos.sqlite").items():
+            entries.setdefault(
+                cell_id,
+                {
+                    "cell_id": cell_id,
+                    "colony_id": parse_key(cell_id).get("colony_prefix", ""),
+                    "level": 0,
+                    "iteration": 0,
+                },
+            )
+            entries[cell_id].update(
+                queue_state="sync_conflict",
+                error=conflict["reason"],
+                sync_conflict_reason=conflict["reason"],
+            )
+        return entries
 
     def list_entries(self, petri_dir: Path) -> list[dict]:
         return list(self.entries(petri_dir).values())

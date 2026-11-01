@@ -27,6 +27,19 @@ def main():
     colony = _build_canonical_colony() if colony_mode else None
     if colony_mode and not domain.exists():
         save_colony(domain, colony["graph"], colony["colony_model"])
+    elif not colony_mode and mode == "start":
+        database.put_cell(
+            domain,
+            {
+                "id": "dish-colony-002-001",
+                "colony": "dish-colony",
+                "level": 2,
+                "seq": 1,
+                "claim_text": "A local recovery fixture",
+                "status": "NEW",
+                "created_at": "2026-11-01T00:00:00Z",
+            },
+        )
     directory.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(directory / "audit.sqlite") as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS calls(phase TEXT, cell_id TEXT)")
@@ -64,12 +77,11 @@ def main():
         return await phases.research(value)
 
     async def finish(value, result):
-        if colony_mode:
-            with database._write(domain) as conn:
-                conn.execute(
-                    "UPDATE cells SET status = ? WHERE id = ?",
-                    (result.status.upper(), value.cell_id),
-                )
+        with database._write(domain) as conn:
+            conn.execute(
+                "UPDATE cells SET status = ? WHERE id = ?",
+                (result.status.upper(), value.cell_id),
+            )
 
     deps = replace(phases.dependencies(), socratic=socratic, research=research, finish=finish)
     backend = DBOSExecutionBackend(config={"execution": {"backend": "dbos"}})
