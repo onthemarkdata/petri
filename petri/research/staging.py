@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.capabilities import AbstractCapability, OutputContext, RawOutput
-from pydantic_ai.messages import InstructionPart, ModelMessage, ToolReturnPart
+from pydantic_ai.messages import InstructionPart, ModelMessage, RetryFeedbackPart, ToolReturnPart
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.settings import ModelSettings
 
@@ -70,6 +70,29 @@ class NativeFunctionPromptedOutput(AbstractCapability[Any]):
     ) -> ModelRequestContext:
         parameters = request.model_request_parameters
         if parameters.output_mode == "prompted" and parameters.declared_function_tools:
+            parts = request.messages[-1].parts if request.messages else []
+            syntax_retry = any(
+                isinstance(part, RetryFeedbackPart) and isinstance(part.content, list)
+                and bool(part.content)
+                and all(error.get("type") == "json_invalid" for error in part.content)
+                for part in parts
+            )
+            if (syntax_retry and has_retrieval_attempt(context.messages)
+                    and not any(isinstance(part, ToolReturnPart) for part in parts)
+                    and request.model.profile.get("supports_json_object_output", False)):
+                request.model_request_parameters = replace(
+                    parameters, function_tools=[], instruction_parts=[
+                        *(parameters.instruction_parts or []), InstructionPart(
+                            "The previous final assessment was invalid JSON. Return one complete JSON "
+                            "object matching the schema. This is a final-output syntax retry; tools are "
+                            "unavailable for this request. Report missing source verification honestly. "
+                            "Evidence and verdict validation still apply."
+                        ),
+                    ],
+                )
+                request.model_settings = (request.model_settings or {}).copy()
+                request.model_settings.pop("tool_choice", None)
+                return request
             prepared = request.model.customize_request_parameters(parameters)
             prepared = replace(prepared, prompted_output_template=(
                 parameters.prompted_output_template or request.model.profile.get("prompted_output_template")))
