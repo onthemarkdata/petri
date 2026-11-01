@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from evals.decomposer.archive import ArchiveGraph, load_archive, retrieval_report
 from evals.decomposer.dataset import (
     assert_neutral_instructions, build_dataset, live_task, load_inputs, negative_fixture, scripted_task,
+    scripted_model, supplied_axiom_task,
 )
 from evals.decomposer.evaluators import (
     BedrockStop, CounterargumentPresence, CrossColonyReferenceRate, DepthOrganic, NoQuotaFill,
@@ -20,6 +21,7 @@ from evals.decomposer.evaluators import (
 )
 from evals.decomposer.types import EvalBatch, EvalInput
 from petri.models import Cell, DecompositionResult, Edge
+from petri.harness.legacy_bridge import HarnessInferenceProvider
 
 
 def shape(counts, *, name="sample"):
@@ -55,7 +57,7 @@ def test_offline_dataset_runs_real_agents_without_network_or_subprocess(monkeypa
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     report = build_dataset(include_negatives=False).evaluate_sync(scripted_task, max_concurrency=1, progress=False)
     assert not report.failures
-    assert len(report.cases) == 3
+    assert len(report.cases) == 4
     for case in report.cases:
         assert case.assertions and all(item.value for item in case.assertions.values())
 
@@ -96,9 +98,24 @@ def test_axiom_stop_requires_the_expected_axiom_and_reason():
     batch = scripted_task(inputs)
     ctx = SimpleNamespace(inputs=inputs, output=batch)
     assert BedrockStop().evaluate(ctx)
-    batch.results[0].cells[1].is_atomic = False
-    batch.trivial_cell_ids.add(batch.results[0].cells[1].id)
+    assert batch.results[0].cells[0].claim_text == inputs.claims[0]
+    batch.results[0].cells[0].is_atomic = False
     assert not BedrockStop().evaluate(ctx)
+    batch.results[0].cells[0].is_atomic = True
+    batch.results[0].cells[0].bedrock_reason = None
+    assert not BedrockStop().evaluate(ctx)
+
+
+def test_expanding_a_supplied_definition_still_fails_bedrock_stop():
+    inputs = next(item for item in load_inputs() if item.kind == "axiom")
+    plan = {inputs.claims[0]: {"is_atomic": False, "sub_premises": [
+        {"claim_text": "Unit conversions require arithmetic operations.", "relation": "supports"},
+        {"claim_text": "Measurement errors can limit comparisons of empirical lengths.", "relation": "limits"},
+    ]}}
+    with HarnessInferenceProvider(scripted_model(plan)) as runner:
+        batch = supplied_axiom_task(inputs, runner)
+    assert len(batch.results[0].edges) == 2
+    assert not BedrockStop().evaluate(SimpleNamespace(inputs=inputs, output=batch))
 
 
 def test_reference_targets_must_be_specific_existing_non_root_cells():
@@ -191,7 +208,8 @@ def test_opt_in_live_dataset_report():
     model = os.environ.get("PETRI_EVAL_MODEL")
     if os.environ.get("PETRI_LIVE_EVALS") != "1" or not model:
         pytest.skip("Set PETRI_LIVE_EVALS=1 and PETRI_EVAL_MODEL for an explicit live report.")
-    report = build_dataset(include_negatives=False).evaluate_sync(partial(live_task, model_name=model),
+    report = build_dataset(include_negatives=False).evaluate_sync(partial(live_task, model_name=model,
+                                                                 max_tokens=int(os.environ.get("PETRI_EVAL_MAX_TOKENS", "4096"))),
                                                                  max_concurrency=1, progress=False)
     report.print(include_input=False, include_output=False)
     assert not report.failures
