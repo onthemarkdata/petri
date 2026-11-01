@@ -20,22 +20,65 @@ https://github.com/user-attachments/assets/ef47dc07-741d-4ac5-9f35-2afb12fc9046
 
 ## ⚠️ Cost Warning ⚠️
 
-**Petri uses Claude via Claude Code, which costs money.** Each cell goes through 13 agents across multiple iterations, generating significant token usage. A single colony with 10+ cells can produce **thousands of LLM calls** across Socratic analysis, research, critique, debate, red team, and evaluation phases.
+**Hosted inference costs money regardless of the selected backend.** Each cell goes through 13 agents across multiple iterations. A colony with 10+ cells can generate thousands of calls across decomposition, research, critique, debate, red team, and evaluation.
 
-The default model is `claude-sonnet-4-6`. You can switch models in `petri.yaml` or the setup wizard:
+With **pi**, charges follow its configured provider or subscription. **Claude Code** follows your Claude Code account and plan. A direct **provider** backend uses that provider's API credentials and billing. Local models avoid hosted API charges but still require suitable hardware and runtime resources. Start with a small claim and monitor usage before running a large colony.
+
+## Choosing an inference backend
+
+The v2 harness block in `.petri/defaults/petri.yaml` selects inference independently of agent content. Fresh dishes select pi. Existing dishes without a harness block retain the legacy Claude Code provider path.
+
+For pi, use an exact model ID and provider name recognized by your pi installation:
 
 ```yaml
-model:
-  name: claude-opus-4-6  # most capable, higher cost
+model: anthropic:claude-sonnet-4-6
+harness:
+  backend: pi
+  model: claude-sonnet-4-6
+  provider: anthropic
+  tools: []
 ```
 
-**Monitor your usage.** Start with small claims to understand the cost profile before running large colonies.
+For the Claude Code adapter:
 
-Alternatively, you can [use an open-source model in Claude Code via Ollama, by following this documentation](https://docs.ollama.com/integrations/claude-code). But this requires a bit of setup on your side, and you need hardware capable of running a model locally.
+```yaml
+model: anthropic:claude-sonnet-4-6
+harness:
+  backend: claude-code
+  model: claude-sonnet-4-6
+  tools: [Read, WebSearch, WebFetch]
+```
+
+For a direct Pydantic AI provider, supply its provider-qualified model string. Petri passes this string through unchanged:
+
+```yaml
+model: anthropic:claude-sonnet-4-6
+harness:
+  backend: provider
+  model: anthropic:claude-sonnet-4-6
+```
+
+`harness.model` overrides the top-level model. If omitted, CLI adapters split the top-level `provider:model` string; explicit harness model IDs remain unchanged. `harness.tools` grants tools belonging to the selected CLI. Empty lists disable those tools. Pi's built-in coding tools do not include Claude Code's `WebSearch` or `WebFetch`.
+
+The initial pi and Claude Code adapters support prompted structured output and validation retries. They reject Pydantic AI function-tool declarations and unsupported model settings; they do not silently discard them. Domain tools such as `search_cells` require a separate bridge before these adapters can run those agents. Direct provider models support the tools exposed by Pydantic AI.
+
+### Install pi and Node.js
+
+The npm installation requires Node.js. Petri checks for **Node.js 22.19.0 or newer**, the floor selected by the RPC spike. Install Node from [nodejs.org](https://nodejs.org/en/download), then install the pi version exercised by the local adapter validation:
+
+```bash
+npm install -g @mariozechner/pi-coding-agent@0.73.1
+node --version
+pi --version
+```
+
+Configure your provider in pi before starting a research run. The adapter uses pi's provider configuration and authentication; installing the CLI does not authenticate a provider. `PETRI_PI_BIN` can point to a different pi executable. Petri neither installs Node nor changes your shell configuration. The checked installation path uses npm; standalone pi binaries have not been validated by Petri's preflight.
+
+If Node cannot be installed, select `harness.backend: claude-code` and install [Claude Code](https://docs.anthropic.com/en/docs/claude-code), or use a direct provider backend. Run `petri inspect` from the dish directory to check Python and the selected CLI without making a model call. Outside a dish, it checks pi as the fresh-dish default. Provider credentials are not validated by this command.
 
 ## Setup
 
-Petri needs **Python 3.11+** and the **Claude Code CLI** (which provides the LLM inference). The cleanest path is to install both into a fresh [uv](https://docs.astral.sh/uv/) environment.
+Petri needs **Python 3.11+** and an inference backend. Use a [uv](https://docs.astral.sh/uv/) environment for the Python package; install pi and Node separately for the default backend.
 
 ### 1. Install uv
 
@@ -59,13 +102,9 @@ Every command from here on assumes this venv is active. If you open a new shell,
 uv pip install petri-grow
 ```
 
-### 4. Install and authenticate Claude Code
+### 4. Install an inference backend
 
-Petri uses [Claude Code](https://claude.com/claude-code) as its agent harness. Follow the install + login steps at https://docs.anthropic.com/en/docs/claude-code, then verify:
-
-```bash
-claude --version
-```
+Follow [Install pi and Node.js](#install-pi-and-nodejs) for the default backend, or choose one of the alternatives above.
 
 ### 5. Verify the full prerequisite chain
 
@@ -73,7 +112,7 @@ claude --version
 petri inspect
 ```
 
-This reports any missing pieces (Python version, Claude Code login, PATH issues) without modifying your system.
+This reports missing prerequisites and version mismatches without modifying your system or making an inference request.
 
 ## Quickstart
 
