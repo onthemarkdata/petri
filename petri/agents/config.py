@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import ceil
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -103,7 +104,7 @@ class DebateContent(StrictContent):
     def protocol(self) -> DebateProtocol:
         return DebateProtocol(
             pairing=self.pair,
-            rounds=int(self.rounds),
+            rounds=ceil(self.rounds),
             final_word=self.pair[0] if self.rounds % 1 else None,
             purpose=self.purpose,
         )

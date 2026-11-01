@@ -304,7 +304,7 @@ AGENT_SPECS: dict[AgentName, AgentSpec] = {
 
 
 class DebateProtocol(BaseModel):
-    """Whole exchanges followed by an optional final word from one participant."""
+    """First-participant turn count, with an optional final partial exchange."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     pairing: tuple[AgentName, AgentName]
@@ -314,7 +314,7 @@ class DebateProtocol(BaseModel):
 
     @model_validator(mode="after")
     def validate_protocol(self):
-        if self.rounds < 0 or (self.rounds == 0 and self.final_word is None):
+        if self.rounds < 1:
             raise ValueError("A debate must contain at least one turn.")
         if self.pairing[0] == self.pairing[1]:
             raise ValueError("Debate participants must be distinct.")

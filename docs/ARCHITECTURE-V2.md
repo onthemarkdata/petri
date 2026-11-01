@@ -205,7 +205,8 @@ passing value. In 2.64.0, tool-output retries are represented by a ToolReturnPar
 with `outcome='retried'`, rather than always by RetryPromptPart.
 
 Fractional YAML rounds normalize through `DebateContent.protocol`: `1.5` becomes
-one whole exchange plus a final word from the first participant. Agent phases
+two first-participant turns, with the final partial exchange ending after that
+participant speaks. Agent phases
 and blocking semantics come solely from `AgentSpec`; the v2 content loader
 rejects legacy numeric phase and structural fields instead of duplicating them.
 
@@ -245,3 +246,17 @@ is a present, failing verdict and can never satisfy convergence. The execution
 layer is responsible for appending that failure to the domain event log; this
 pure evaluator does not write events. Circuit-breaker counting remains relative
 to the current cycle: `iteration - cycle_start_iteration >= max_iterations`.
+
+### Real debate hand-off
+
+A `DebateProtocol.rounds` value counts the first participant's scheduled turns.
+YAML `1.5` normalizes to `rounds=2, final_word=pair[0]`, producing A, B, A;
+YAML `1` produces A, B. The final partial round contains only `final_word`.
+This makes the fractional-round behavior explicit without adding an LLM mediator.
+
+`run_debate` passes each completed run's actual messages to the next participant
+and accepts retained history from an earlier iteration. All turns share one
+RunUsage and the configured per-debate limits. A budget or output-validation
+failure returns a typed status, completed exchanges, attempted message history,
+and measured usage. `log_debate` appends through the SQLite event-log seam using
+the standard event envelope; the summary preserves turn output and usage.
