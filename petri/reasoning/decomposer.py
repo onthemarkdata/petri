@@ -10,9 +10,14 @@ template-stamped tree.
 from __future__ import annotations
 
 import re
+from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Callable, Optional
 
 from petri.reasoning.decomposition_settings import DecompositionSettings
+
+if TYPE_CHECKING:
+    from petri.reasoning.decomposition_runner import DecompositionRunner
 
 from petri.models import (
     Cell,
@@ -69,6 +74,8 @@ def decompose_claim(
     on_cell_created: Optional[OnCellCreated] = None,
     center: Optional[Cell] = None,
     settings: DecompositionSettings | None = None,
+    agent_runner: DecompositionRunner | None = None,
+    db_path: Path | None = None,
 ) -> DecompositionResult:
     """Decompose a claim into a colony of cells and edges.
 
@@ -94,6 +101,15 @@ def decompose_claim(
     When ``center`` is None, the decomposer constructs its own level-0
     cell internally (backwards-compatible default used by unit tests).
     """
+    if agent_runner is not None:
+        from petri.reasoning.decomposition_runner import decompose_typed
+
+        return decompose_typed(
+            claim, clarifications, dish_id, colony_name, agent_runner,
+            settings=settings or DecompositionSettings.defaults(), guidance=guidance,
+            db_path=db_path, center=center, on_progress=on_progress, on_cell_created=on_cell_created,
+        )
+
     if provider is None:
         raise ValueError(
             "decompose_claim requires an InferenceProvider; "

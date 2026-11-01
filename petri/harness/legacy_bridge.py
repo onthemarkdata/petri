@@ -11,7 +11,7 @@ from datetime import date
 import threading
 import weakref
 from collections.abc import Callable, Coroutine, Mapping
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 from pydantic_ai import Agent, ModelRetry, PromptedOutput
@@ -21,6 +21,10 @@ from pydantic_ai.exceptions import AgentRunError
 from petri.models import AssessmentResult, Cell, ClarifyingQuestion, DecompositionResult, EvidenceMatch
 from petri.harness.errors import FailureDetail, HarnessError
 from petri.reasoning import prompts
+
+if TYPE_CHECKING:
+    from petri.reasoning.decomposition_agents import DecompositionInput
+    from petri.reasoning.decomposition_schemas import InitialDecomposition, WhyExpansion
 
 T = TypeVar("T")
 Progress = Callable[[str], None] | None
@@ -247,6 +251,20 @@ class HarnessInferenceProvider:
         prompt += "If this is directly verifiable as a fact, definition, or measurement, mark it atomic with no sub-premises."
         result = self._run("five-whys", prompt, _WhyDecomposition, on_progress, validate)
         return [item.model_dump() for item in result.sub_premises]
+
+    def initial_decomposition(self, request: DecompositionInput, on_progress: Progress = None) -> InitialDecomposition:
+        from petri.reasoning.decomposition_agents import initial_decomposer, run_decomposition_agent
+
+        return self._worker.run(lambda: run_decomposition_agent(
+            initial_decomposer, request, model=self.model, on_progress=on_progress,
+        ))
+
+    def expand_why(self, request: DecompositionInput, on_progress: Progress = None) -> WhyExpansion:
+        from petri.reasoning.decomposition_agents import five_whys, run_decomposition_agent
+
+        return self._worker.run(lambda: run_decomposition_agent(
+            five_whys, request, model=self.model, on_progress=on_progress,
+        ))
 
     def assess_cell(self, cell_id: str, claim_text: str, context: dict, agent_role: str,
                     on_progress: Progress = None) -> AssessmentResult:

@@ -269,6 +269,9 @@ class Cell(BaseModel):
     claim_text: str
     level: int = Field(ge=0)
     status: CellStatus = CellStatus.NEW
+    relation: str = "supports"
+    is_atomic: bool = False
+    bedrock_reason: str | None = None
     dependencies: list[str] = Field(default_factory=list)  # composite cell keys
     dependents: list[str] = Field(default_factory=list)  # composite cell keys
     created_at: str = ""  # ISO 8601 UTC
