@@ -243,13 +243,27 @@ def _resume_colony(
     typer.echo(format_colony_display(result))
     import sys
 
-    if (
-        sys.stdin.isatty()
-        and not no_questions
-        and not typer.confirm("Accept this colony?", default=True)
-    ):
-        typer.echo("Draft retained. Run seed --resume to review it again.")
-        return
+    if sys.stdin.isatty() and not no_questions:
+        try:
+            import questionary
+        except ImportError:
+            if not typer.confirm("Accept this colony?", default=True):
+                typer.echo("Draft retained. Run seed --resume to review it again.")
+                return
+        else:
+            while True:
+                action = questionary.select(
+                    "What would you like to do?", choices=["Accept", "Edit", "Keep draft"], default="Accept",
+                ).ask()
+                if action == "Accept":
+                    break
+                if action != "Edit":
+                    typer.echo("Draft retained. Run seed --resume to review it again.")
+                    return
+                from petri.cli.seed_edit import edit_pending_result
+
+                result = edit_pending_result(result, arguments["settings"], path, petri_dir, dish_id, questionary)
+                typer.echo(format_colony_display(result))
     _log_cell_event(
         SQLiteEventLog(path), center_id, "colony_approved", {"cell_count": len(result.cells)}
     )
@@ -550,19 +564,27 @@ def register(app: typer.Typer) -> None:
                 {"cell_count": len(result.cells)},
             )
 
-            typer.echo(format_colony_display(result))
+            while True:
+                typer.echo(format_colony_display(result))
+                if not interactive:
+                    action = "Accept"
+                    break
+                assert questionary is not None
+                action = questionary.select(
+                    "What would you like to do?",
+                    choices=["Accept", "Edit", "Regenerate with guidance", "Abort"],
+                    default="Accept",
+                ).ask()
+                if action != "Edit":
+                    break
+                from petri.cli.seed_edit import edit_pending_result
 
-            if not interactive:
-                break  # non-interactive: auto-accept (used by --no-questions)
-
-            # Reaching here means interactive is True, so the questionary
-            # import above succeeded; narrow away the Optional for mypy.
-            assert questionary is not None
-            action = questionary.select(
-                "What would you like to do?",
-                choices=["Accept", "Regenerate with guidance", "Abort"],
-                default="Accept",
-            ).ask()
+                result = edit_pending_result(result, settings, colony_path, petri_dir, dish_id, questionary)
+                graph = ColonyGraph(colony_id=colony_id)
+                for cell in result.cells:
+                    graph.add_cell(cell)
+                for edge in result.edges:
+                    graph.add_edge(edge)
 
             if action is None or action == "Abort":
                 # Only this run's cells are removed when this run is rejected.
@@ -574,7 +596,8 @@ def register(app: typer.Typer) -> None:
             if action == "Accept":
                 break
 
-            # Regenerate path — Claude-Code-style free-text feedback
+            # Regeneration uses the reviewer's guidance on the next model call.
+            assert questionary is not None
             guidance = questionary.text(
                 "What should change? (free text, press Enter to re-roll as-is)"
             ).ask()

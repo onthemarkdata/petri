@@ -23,7 +23,7 @@ from petri.reasoning.decomposition_schemas import (
 )
 from petri.reasoning.decomposition_settings import DecompositionSettings
 from petri.storage import database, edge_registry, event_log
-from petri.reasoning.seed_events import current_attempt
+from petri.reasoning.seed_events import current_attempt, latest_edited_state
 from petri.reasoning.seed_graph import ExpansionNode, InitialNode, SeedState
 
 Progress = Callable[[str], None] | None
@@ -72,6 +72,14 @@ def decompose_typed(
     if not center.created_at:
         center.created_at = created_at
     attempt = current_attempt(db_path, center.id) if db_path else 0
+    if resume and db_path:
+        edited = latest_edited_state(db_path, center.id, attempt)
+        if edited is not None:
+            from petri.reasoning.seed_edit import materialize_edited_state
+
+            materialize_edited_state(db_path, edited)
+            return DecompositionResult(cells=edited.cells, edges=edited.edges,
+                                       colony_name=colony_name, center_claim=edited.claim)
     rebuilding = True
     center.dependencies = []
     center.dependents = []
