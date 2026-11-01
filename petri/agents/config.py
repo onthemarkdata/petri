@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from petri.analysis.analyst import AnalystConfig
 from petri.execution.config import ExecutionConfig, SchedulingConfig
 from petri.lifecycle.config import LifecycleConfig
+from petri.research.config import ResearchConfig
 
 from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode, DebateProtocol
 from petri.telemetry.config import ModelPrice, TelemetryConfig
@@ -145,6 +146,7 @@ class PrePipelineContent(StrictContent):
 class AgentConfig(StrictContent):
     scheduling: SchedulingConfig = Field(default_factory=SchedulingConfig)
     analyst: AnalystConfig = Field(default_factory=AnalystConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     auto_export: bool = False
     schema_version: Literal[2]
