@@ -14,6 +14,7 @@ from pydantic import (
 
 from petri.agents.config import AgentContent
 from petri.agents.contract import AgentName
+from petri.structured_output import NamedOutput
 
 
 ASSESSMENT_FORMAT = (
@@ -46,7 +47,7 @@ class SourceCitation(BaseModel):
         return value
 
 
-class AgentAssessment(BaseModel):
+class AgentAssessment(NamedOutput):
     model_config = ConfigDict(extra="forbid")
 
     agent: AgentName
