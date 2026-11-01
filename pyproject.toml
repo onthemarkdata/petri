@@ -20,8 +20,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "pydantic-ai>=2.9,<3",
     "pydantic>=2.0",
+    "pydantic-ai>=2.64,<3",
     "pyyaml>=6.0",
     "typer>=0.9",
     "questionary>=2.0",

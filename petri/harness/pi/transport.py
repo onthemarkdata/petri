@@ -57,9 +57,11 @@ class PiRpcTransport:
         binary = self.binary or os.environ.get("PETRI_PI_BIN") or shutil.which("pi")
         if not binary:
             raise PermanentHarnessError("pi is unavailable. Install pi or set PETRI_PI_BIN.")
-        command = [binary, "--mode", "rpc", "--no-session"]
+        command = [binary, "--mode", "rpc"]
         if self._session_dir is not None:
             command += ["--session-dir", self._session_dir.name]
+        else:
+            command += ["--no-session"]
         if self.provider:
             command += ["--provider", self.provider]
         if self.model:
