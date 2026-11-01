@@ -30,7 +30,7 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#12](https://github.com/onthemarkdata/petri/issues/12) | [EPIC] M4-dbos — Durable execution | In progress; see child PRs and validation notes |
 | [#13](https://github.com/onthemarkdata/petri/issues/13) | [EPIC] M5-otel — OpenTelemetry | In progress; see child PRs and validation notes |
 | [#14](https://github.com/onthemarkdata/petri/issues/14) | [EPIC] M6-storage — Storage & dashboard reads | In progress; see child PRs and validation notes |
-| [#15](https://github.com/onthemarkdata/petri/issues/15) | [EPIC] M7-lifecycle — Iterative lifecycle | Pending |
+| [#15](https://github.com/onthemarkdata/petri/issues/15) | [EPIC] M7-lifecycle — Iterative lifecycle | In progress; see child PRs and validation notes |
 | [#18](https://github.com/onthemarkdata/petri/issues/18) | Create petri/harness error taxonomy and retry core | Integrated in [PR #127](https://github.com/onthemarkdata/petri/pull/127); final v2 acceptance pending |
 | [#19](https://github.com/onthemarkdata/petri/issues/19) | Add TestModel and FunctionModel offline fixtures | Integrated in [PR #128](https://github.com/onthemarkdata/petri/pull/128); final v2 acceptance pending |
 | [#20](https://github.com/onthemarkdata/petri/issues/20) | Add fake_pi stub and the tests/README testing tiers | Integrated in [PR #129](https://github.com/onthemarkdata/petri/pull/129); final v2 acceptance pending |
@@ -101,7 +101,7 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#85](https://github.com/onthemarkdata/petri/issues/85) | Detect re-decomposition triggers from verdict history | Integrated in [PR #186](https://github.com/onthemarkdata/petri/pull/186); final v2 acceptance pending |
 | [#86](https://github.com/onthemarkdata/petri/issues/86) | Build the re-decomposition proposal workflow | Integrated in [PR #199](https://github.com/onthemarkdata/petri/pull/199); final v2 acceptance pending |
 | [#87](https://github.com/onthemarkdata/petri/issues/87) | Add the re-decomposition approval gate to petri grow | Integrated in [PR #208](https://github.com/onthemarkdata/petri/pull/208); final v2 acceptance pending |
-| [#88](https://github.com/onthemarkdata/petri/issues/88) | Re-validate fed evidence by forking workflows | Pending |
+| [#88](https://github.com/onthemarkdata/petri/issues/88) | Re-validate fed evidence by forking workflows | Integrated in [PR #231](https://github.com/onthemarkdata/petri/pull/231); final v2 acceptance pending |
 | [#89](https://github.com/onthemarkdata/petri/issues/89) | Re-scope the contradiction scanner and schedule it | Integrated in [PR #189](https://github.com/onthemarkdata/petri/pull/189); final v2 acceptance pending |
 | [#90](https://github.com/onthemarkdata/petri/issues/90) | Extend the edge registry with dish-level graph queries | Integrated in [PR #191](https://github.com/onthemarkdata/petri/pull/191); final v2 acceptance pending |
 | [#91](https://github.com/onthemarkdata/petri/issues/91) | Compute edge-intelligence metrics from the dish graph | Integrated in [PR #193](https://github.com/onthemarkdata/petri/pull/193); final v2 acceptance pending |
@@ -206,3 +206,31 @@ the latest complete matrix must still pass before final approval.
 Live Gemma grow runs exposed malformed tool-call envelopes and an unbounded
 response. The decoder fix is integrated; response limits and repeated live runs
 remain under validation. No failed or stalled run counts as a successful grow.
+
+## Integration checks through PR #235
+
+PR #229 records the public preservation policy. PR #230 adds native response
+limits. PR #231 forks completed workflows to revalidate fed evidence, preserves
+the evidence in SQLite and exports, and recovers interrupted feed operations.
+PRs #232–235 correct dashboard dish labels, align the axiom evaluation with its
+supplied input, add prompted final output for native providers, and preserve
+claim conditions in decomposition premises.
+
+The combined offline run passed 1,340 tests and failed one stale REST key-set
+assertion after `dish_id` was added. Coverage was 88.73%. The corrected REST suite
+passed all five tests; the next combined run also includes the subsequent live
+diagnostic and configuration fixes. Full-source mypy checked 147 files; Ruff
+passed. Selected feed, cancellation, export, dashboard, and process-recovery
+checks passed 27 tests.
+
+Browser checks on a copy of a real Pi dish covered the Lab graph, cell details,
+usage totals, trace waterfall, SSE logs, and a durable empty grow run. The dish
+contained stalled research, so these checks establish UI behavior rather than
+successful research. Backup and SQLite-only restore preserved its logical rows
+and all eight exported files. A separate controlled evidence fixture verified
+that restored exports retain fed text without the original evidence files.
+
+Continuous Gemma grow acceptance remains open. Live runs exposed shared context
+exhaustion with concurrent model requests, so acceptance inference now runs
+serially. Failed and stalled runs remain diagnostic evidence and do not satisfy
+the seed-to-grow or live-feed gates.
