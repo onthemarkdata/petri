@@ -70,11 +70,11 @@ class PiModel(Model):
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
         settings, parameters = self.prepare_request(model_settings, model_request_parameters)
-        if settings:
+        if settings and (set(settings) != {"tool_choice"} or settings["tool_choice"] not in ("auto", "required")):
             raise UserError("PiModel does not support per-request model settings; configure the pi provider.")
         if parameters.output_tools:
             raise UserError("PiModel supports prompted output and pi tool allowlists, not output tools.")
-        prompt = render_history(messages, parameters) + tool_instructions(parameters)
+        prompt = render_history(messages, parameters) + tool_instructions(parameters, required=bool(settings and settings.get("tool_choice") == "required"))
         async with self._lock:
             async def invoke():
                 # Pydantic AI owns history; resetting avoids duplicating it in pi.

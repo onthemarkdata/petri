@@ -148,3 +148,45 @@ async def test_paraphrases_cannot_skip_search_when_earlier_colonies_exist(founda
                     model=FunctionModel(response))
     assert len(calls) == 3
     assert result.nodes[0].claim_text == "Sunlight supports daytime power"
+
+
+@pytest.mark.asyncio
+async def test_search_is_required_only_until_the_first_tool_result(foundation):
+    settings = []
+    modes = []
+
+    class RecordingModel(FunctionModel):
+        async def request(self, messages, model_settings, parameters):
+            modes.append(parameters.output_mode)
+            return await super().request(messages, model_settings, parameters)
+
+    async def response(messages, info):
+        settings.append(info.model_settings)
+        if len(settings) == 1:
+            return ModelResponse(parts=[ToolCallPart("search_cells", {"query": "Solar panels generate electricity"})])
+        return ModelResponse(parts=[TextPart(json.dumps({"nodes": [{
+            "existing_cell_id": "dish-foundation-001-001", "reason": "The generation premise already exists",
+        }]}))])
+
+    await run_decomposition_agent(initial_decomposer,
+          DecompositionInput("A dependent claim", db_path=foundation, colony_id="dish-dependent"),
+          model=RecordingModel(response))
+    assert modes == ["text", "prompted"]
+    assert settings[0]["tool_choice"] == "required"
+    assert not settings[1] or settings[1].get("tool_choice") != "required"
+
+
+def test_named_initial_agent_executes_pi_search_envelope(foundation, fake_pi):
+    from petri.harness.pi.model import PiModel
+    from petri.harness.pi.transport import PiRpcTransport
+
+    fake_pi.scenario(
+        {"text": '{"tool_calls": [{"name": "search_cells", "arguments": {"query": "Solar panels generate electricity"}}]}'},
+        {"text": '{"nodes": [{"existing_cell_id": "dish-foundation-001-001", "reason": "Existing generation"}]}'},
+    )
+    model = PiModel("fake", transport=PiRpcTransport(binary=str(fake_pi.path)))
+    with HarnessInferenceProvider(model) as runner:
+        result = runner.initial_decomposition(DecompositionInput("A dependent claim", db_path=foundation,
+                                                                colony_id="dish-dependent"))
+    assert result.nodes[0].existing_cell_id == "dish-foundation-001-001"
+    assert model.round_trips == 2

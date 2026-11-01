@@ -193,11 +193,11 @@ class ClaudeCodeModel(Model):
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
         settings, parameters = self.prepare_request(model_settings, model_request_parameters)
-        if settings:
+        if settings and (set(settings) != {"tool_choice"} or settings["tool_choice"] not in ("auto", "required")):
             raise UserError("ClaudeCodeModel does not support per-request model settings.")
         if parameters.output_tools:
             raise UserError("ClaudeCodeModel supports prompted output and CLI tool allowlists.")
-        prompt = render_history(messages, parameters) + tool_instructions(parameters)
+        prompt = render_history(messages, parameters) + tool_instructions(parameters, required=bool(settings and settings.get("tool_choice") == "required"))
 
         async def invoke():
             result = await self.runner(self.command(prompt), self.timeout)

@@ -60,3 +60,41 @@ def test_local_gemma_seed_and_dry_run(tmp_path, monkeypatch, backend):
         harness = {"backend": "provider", "model": f"openai-chat:{GEMMA_MODEL}"}
     dish = prepare_dish(tmp_path, harness)
     seed_and_dry_run(dish)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["pi", "provider"])
+def test_local_gemma_cross_colony_reference(tmp_path, monkeypatch, backend):
+    if os.environ.get("PETRI_RUN_LOCAL_BRIDGE") != "1":
+        pytest.skip("Set PETRI_RUN_LOCAL_BRIDGE=1 to call only local Docker Model Runner.")
+    monkeypatch.chdir(tmp_path)
+    if backend == "pi":
+        binary = os.environ.get("PETRI_PI_BIN")
+        if not binary or not Path(binary).is_file() or not os.environ.get("PI_CODING_AGENT_DIR"):
+            pytest.skip("Set PETRI_PI_BIN and PI_CODING_AGENT_DIR for the local pi provider.")
+        harness = {"backend": "pi", "provider": "petri-local", "model": GEMMA_MODEL, "tools": []}
+    else:
+        monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:12434/engines/llama.cpp/v1")
+        monkeypatch.setenv("OPENAI_API_KEY", "local-no-auth")
+        harness = {"backend": "provider", "model": f"openai-chat:{GEMMA_MODEL}"}
+    dish = prepare_dish(tmp_path, harness)
+    path = dish / "defaults" / "petri.yaml"
+    config = yaml.safe_load(path.read_text())
+    config.update(max_nodes_per_layer=8, level_one_cap=3)
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    runner = CliRunner()
+    first = runner.invoke(app, ["seed", "Photovoltaic generation can supply daytime electrical loads when incident sunlight and panel area are adequate.",
+                                "--no-questions", "--colony", "foundation"])
+    assert first.exit_code == 0, first.output
+    from petri.storage.database import list_cells, read_edges
+    from petri.storage.paths import dish_db_path
+
+    database = dish_db_path(dish)
+    foundation = next(cell for cell in list_cells(database, colony="bridge-test-foundation") if cell["level"] == 1)
+    claim = foundation["claim_text"].rstrip(".") + ", allowing daytime grid electricity imports to fall when generation coincides with demand."
+    second = runner.invoke(app, ["seed", claim, "--no-questions", "--colony", "dependent"])
+    assert second.exit_code == 0, second.output
+    rows = {cell["id"]: cell for cell in list_cells(database)}
+    references = [edge for edge in read_edges(database) if edge["edge_type"] == "cross_colony"]
+    assert any(rows[edge["to_cell"]]["level"] > 0 for edge in references)
+    assert all(edge["reason"] for edge in references)

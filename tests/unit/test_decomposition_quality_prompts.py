@@ -148,3 +148,16 @@ def test_bedrock_decision_precedes_children_in_output_schema():
     assert list(WhyExpansion.model_json_schema()["properties"]) == [
         "is_atomic", "bedrock_reason", "sub_premises",
     ]
+
+
+def test_flat_premise_errors_do_not_suggest_an_unrelated_reference_shape():
+    from petri.reasoning.decomposition_schemas import WhyExpansion
+
+    with pytest.raises(ValidationError) as caught:
+        WhyExpansion.model_validate({"is_atomic": False, "sub_premises": [
+            {"claim_text": "A testable premise", "relation": "supports", "sub_premises": []},
+        ]})
+    errors = caught.value.errors()
+    assert len(errors) == 1 and errors[0]["type"] == "extra_forbidden"
+    assert "existing_cell_id" not in str(caught.value)
+    assert "Never put sub_premises" in why_instructions(DecompositionInput("claim"))
