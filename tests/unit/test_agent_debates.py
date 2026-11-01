@@ -82,10 +82,12 @@ async def test_debate_receives_research_and_per_speaker_tool_context():
 
     result = await run_debate(config.debates[0].protocol, agents, "A fixture claim.",
                              config.limits.debate, prior_evidence="VERIFIED_RESEARCH_FINDING",
+                             claim_context="Unverified ancestor context: CONTEXT_IS_NOT_EVIDENCE",
                              deps_factory=context)
     assert result.status == DebateStatus.COMPLETE
     assert "VERIFIED_RESEARCH_FINDING" in str(calls[0][1])
     assert "VERIFIED_RESEARCH_FINDING" in str(calls[1][1])
+    assert all("CONTEXT_IS_NOT_EVIDENCE" in str(call[1]) for call in calls)
     assert contexts == [AgentName.SKEPTIC, AgentName.CHAMPION, AgentName.SKEPTIC]
 
 
