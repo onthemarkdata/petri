@@ -203,8 +203,8 @@ pre_pipeline:
   socratic_questioner:
     instruction: "Ask Socratic questions to surface hidden assumptions, define terms, and map the\
       \ evidence space before research begins. When the claim references specific numbers, versions,\
-      \ released products, or recent events, use WebSearch to ground the question in current facts\
-      \ rather than training-data recollections. This agent is exploratory \u2014 it does not block\
+      \ released products, or recent events, identify the current sources that research must retrieve\
+      \ rather than relying on training-data recollections. This agent is exploratory \u2014 it does not block\
       \ convergence.\n"
     verdicts_pass:
     - CLARIFIED

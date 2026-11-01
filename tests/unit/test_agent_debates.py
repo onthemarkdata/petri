@@ -72,6 +72,24 @@ async def test_real_handoff_and_shared_usage(index, order):
 
 
 @pytest.mark.asyncio
+async def test_debate_receives_research_and_per_speaker_tool_context():
+    config, agents, calls = setup_debate()
+    contexts = []
+
+    def context(name):
+        contexts.append(name)
+        return {"speaker": name.value, "cell": "fixture-cell"}
+
+    result = await run_debate(config.debates[0].protocol, agents, "A fixture claim.",
+                             config.limits.debate, prior_evidence="VERIFIED_RESEARCH_FINDING",
+                             deps_factory=context)
+    assert result.status == DebateStatus.COMPLETE
+    assert "VERIFIED_RESEARCH_FINDING" in str(calls[0][1])
+    assert "VERIFIED_RESEARCH_FINDING" in str(calls[1][1])
+    assert contexts == [AgentName.SKEPTIC, AgentName.CHAMPION, AgentName.SKEPTIC]
+
+
+@pytest.mark.asyncio
 async def test_limit_returns_partial_exchanges():
     config, agents, _ = setup_debate()
     config.limits.debate.total_tokens_limit = 15

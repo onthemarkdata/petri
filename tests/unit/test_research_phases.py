@@ -185,6 +185,51 @@ def inputs(cell_id):
 
 
 @pytest.mark.asyncio
+async def test_research_handoff_contains_current_investigator_findings(phase_services):
+    services, signals = phase_services
+    prompts = {}
+
+    def respond(messages, info):
+        name = next(name for name in AgentName if f"Act as {name.value}." in info.instructions)
+        prompts[name] = str(messages)
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+            "verdict": services.config.agents[name].verdicts_pass[0],
+            "summary": "CURRENT_INVESTIGATOR_FINDING" if name == AgentName.INVESTIGATOR else name.value,
+            "arguments": "FULL_ARGUMENT_HANDOFF",
+            "evidence": "FULL_EVIDENCE_HANDOFF",
+        })])
+
+    services.agents = build_agents(services.config, constitution="Preserve source attribution.",
+                                  model=FunctionModel(respond), output_mode="tool")
+    cell_id = database.list_cells(services.db_path)[0]["id"]
+    await run_research(inputs(cell_id), services)
+    assert "CURRENT_INVESTIGATOR_FINDING" in prompts[AgentName.FRESHNESS_CHECKER]
+    assert "CURRENT_INVESTIGATOR_FINDING" in prompts[AgentName.DEPENDENCY_AUDITOR]
+    assert "FULL_ARGUMENT_HANDOFF" in prompts[AgentName.FRESHNESS_CHECKER]
+    assert "FULL_EVIDENCE_HANDOFF" in prompts[AgentName.DEPENDENCY_AUDITOR]
+
+
+@pytest.mark.asyncio
+async def test_socratic_steps_receive_previous_analysis(phase_services):
+    services, signals = phase_services
+    prompts = []
+
+    def respond(messages, info):
+        prompts.append(str(messages))
+        verdict = ["CLARIFIED", "ASSUMPTIONS_CHALLENGED", "EVIDENCE_MAPPED", "VERIFIED"][len(prompts) - 1]
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+            "verdict": verdict, "summary": f"PREVIOUS_STEP_{len(prompts)}",
+        })])
+
+    services.socratic_agent = build_socratic_agent(services.config,
+        constitution="Preserve source attribution.", model=FunctionModel(respond))
+    await run_socratic(inputs(database.list_cells(services.db_path)[0]["id"]), services)
+    assert "PREVIOUS_STEP_1" in prompts[1]
+    assert "PREVIOUS_STEP_1" in prompts[2] and "PREVIOUS_STEP_2" in prompts[2]
+    assert "PREVIOUS_STEP_3" in prompts[3]
+
+
+@pytest.mark.asyncio
 async def test_diamond_graph_runs_real_phases_and_replays_idempotently(
     phase_services, canonical_colony, monkeypatch
 ):

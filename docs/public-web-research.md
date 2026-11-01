@@ -8,8 +8,9 @@ research:
   public_web: true
 ```
 
-The default is `false`. When enabled, agents in the RESEARCH phase receive
-`web_search(query, limit=5)` and `web_fetch(url)`. The flag also works with CLI
+The default is `false`. When enabled, research, critique, red-team, and evaluation
+agents receive `web_search(query, limit=5)` and `web_fetch(url)`, including during
+debates. Decomposition and cell leads do not receive these tools. The flag also works with CLI
 harnesses that support Petri's function-tool bridge; their native CLI tool
 allowlists remain separate. Constructing agents makes no network requests.
 

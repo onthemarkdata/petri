@@ -50,7 +50,8 @@ def generate_clarifying_questions_output_suffix() -> str:
 
 
 def build_decompose_claim_prompt(
-    claim: str, clarifications: list[dict], guidance: str = "", max_premises: int = 5
+    claim: str, clarifications: list[dict], guidance: str = "", max_premises: int = 5,
+    *, show_reasoning: bool = True,
 ) -> str:
     """Build the claim decomposition prompt body."""
     clarification_text = ""
@@ -68,8 +69,10 @@ def build_decompose_claim_prompt(
         '"'
         f"{clarification_text}"
         f"{guidance_text}"
-        "\n\nWork through this in four explicit steps. Show your reasoning as you go — "
-        "the user is watching this stream live.\n\nSTEP 1 — BRAINSTORM (overgenerate).\n"
+        + ("\n\nWork through this in four explicit steps. Show your reasoning as you go — "
+           "the user is watching this stream live." if show_reasoning else
+           "\n\nUse these steps to select premises. Return only the final structured result.")
+        + "\n\nSTEP 1 — BRAINSTORM (overgenerate).\n"
         "List candidate premises that, if false, would invalidate the claim. "
         "Cast a wide net. Cover different angles: definitions, mechanisms, scope "
         "boundaries, counterfactuals, hidden assumptions. Number them 1..N. Do NOT "
@@ -96,14 +99,17 @@ def decompose_claim_output_suffix(max_premises: int) -> str:
 
 
 def build_decompose_why_prompt(
-    premise: str, parent_level: int, parent_seq: int, max_premises: int = 5
+    premise: str, parent_level: int, parent_seq: int, max_premises: int = 5,
+    *, show_reasoning: bool = True,
 ) -> str:
     """Build the premise decomposition prompt body."""
     return (
         'FIVE WHYS — drill one level deeper into a parent premise.\n\nPremise: "'
         f"{premise}"
-        '"\n\nWork through this in four explicit steps. Show your reasoning as you go '
-        "— the user is watching this stream live.\n\nSTEP 1 — BRAINSTORM "
+        + ('"\n\nWork through this in four explicit steps. Show your reasoning as you go '
+           "— the user is watching this stream live." if show_reasoning else
+           '"\n\nUse these steps to select sub-premises. Return only the final structured result.')
+        + "\n\nSTEP 1 — BRAINSTORM "
         "(overgenerate).\nList candidate sub-premises that must hold for the "
         "parent premise to be true. Number them 1..N. Don't filter yet.\n\nSTEP 2 — "
         "PRIORITIZE.\nFor each candidate, score on:\n  - FOUNDATIONALITY: closer to "

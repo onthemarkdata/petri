@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -53,6 +53,8 @@ async def run_debate(
     limits: UsageLimitConfig,
     *,
     message_history: Sequence[ModelMessage] = (),
+    prior_evidence: str = "",
+    deps_factory: Callable[[AgentName], Any] | None = None,
 ) -> DebateResult:
     """Retain actual messages between turns and return partial progress on failure."""
     if any(name not in agents for name in protocol.pairing):
@@ -77,11 +79,14 @@ async def run_debate(
             f"Turn {len(result.exchanges) + 1}: respond as {name.value} to the prior "
             "participant, using the actual conversation history. Preserve source attribution."
         )
+        if not result.exchanges and prior_evidence:
+            prompt += f"\n\nPrior recorded research and assessments:\n{prior_evidence}"
         with capture_run_messages() as attempted:
             try:
                 response = await agents[name].run(
                     prompt,
                     message_history=result.message_history,
+                    deps=deps_factory(name) if deps_factory else None,
                     usage=result.usage,
                     usage_limits=budget,
                 )
