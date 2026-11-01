@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode
+from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode, DebateProtocol
 
 Nonempty = Annotated[str, Field(min_length=1)]
 PositiveInt = Annotated[int, Field(strict=True, gt=0)]
@@ -98,6 +98,15 @@ class DebateContent(StrictContent):
         if self.rounds * 2 != int(self.rounds * 2):
             raise ValueError("Debate rounds must be whole or half rounds.")
         return self
+
+    @property
+    def protocol(self) -> DebateProtocol:
+        return DebateProtocol(
+            pairing=self.pair,
+            rounds=int(self.rounds),
+            final_word=self.pair[0] if self.rounds % 1 else None,
+            purpose=self.purpose,
+        )
 
 
 class SourceLevel(StrictContent):
