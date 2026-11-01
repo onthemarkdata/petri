@@ -601,6 +601,14 @@ class DBOSExecutionBackend:
                         petri_dir, colony_filter=colony_filter, cell_ids=cell_ids
                     )
                     colonies.extend(await asyncio.gather(*(handle.get_result() for handle in handles)))
+                    # Another colony may have validated a previously blocking premise.
+                    if any(
+                        cell.id not in self.app.conflicts
+                        for cell in self.eligible_cells(
+                            petri_dir, cell_ids=cell_ids, colony_filter=colony_filter
+                        )
+                    ):
+                        continue
                     if self.after_pass is None or not await self.after_pass(petri_dir):
                         break
                 completed = sorted({

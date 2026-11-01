@@ -18,6 +18,64 @@ from tests.pipeline_stubs import StubPhases
 
 
 @pytest.mark.integration
+def test_one_grow_drains_cells_unblocked_by_another_colony(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    (tmp_path / "petri.yaml").write_text("name: dish\n")
+    path = dish_db_path(tmp_path)
+    dependent, premise = "dish-alpha-000-000", "dish-beta-000-000"
+    for colony_id, cell_id in [("dish-alpha", dependent), ("dish-beta", premise)]:
+        graph = ColonyGraph(colony_id)
+        graph.add_cell(Cell(id=cell_id, colony_id=colony_id, claim_text="Fixture claim", level=0))
+        save_colony(path, graph, Colony(id=colony_id, dish="dish", center_claim="Fixture claim",
+                                       center_cell_id=cell_id))
+    append(path, EdgeRecord(from_cell=dependent, to_cell=premise, edge_type="cross_colony",
+                            created_at="2026-11-01"))
+    alpha_finished = threading.Event()
+    starts = []
+    phases = StubPhases()
+
+    async def research(value):
+        if value.cell_id == premise:
+            assert await asyncio.to_thread(alpha_finished.wait, 10)
+        else:
+            assert database.get_cell(path, premise)["status"] == "VALIDATED"
+        starts.append(value.cell_id)
+        return await phases.research(value)
+
+    async def finish(value, result):
+        with database.write_connection(path) as connection:
+            connection.execute("UPDATE cells SET status=? WHERE id=?",
+                               (result.status.upper(), value.cell_id))
+
+    deps = replace(phases.dependencies(), research=research, finish=finish)
+    backend = DBOSExecutionBackend(config={"execution": {"backend": "dbos", "worker_concurrency": 1}})
+    start, enqueue = backend.start, backend.enqueue_colony
+    monkeypatch.setattr(backend, "start", lambda directory, **options:
+                        start(directory, **options, dependencies=lambda _: deps))
+
+    async def enqueue_observed(spec):
+        handle = await enqueue(spec)
+
+        async def get_result():
+            result = await handle.get_result()
+            if spec.colony_id == "dish-alpha":
+                alpha_finished.set()
+            return result
+
+        return SimpleNamespace(get_result=get_result)
+
+    monkeypatch.setattr(backend, "enqueue_colony", enqueue_observed)
+    result = backend.process_queue(petri_dir=tmp_path)
+    assert result.processed == 2
+    assert starts == [premise, dependent]
+    assert all(database.get_cell(path, cell)["status"] == "VALIDATED"
+               for cell in [premise, dependent])
+
+
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_only_dependent_of_validated_external_premise_runs(tmp_path):
     (tmp_path / "petri.yaml").write_text("name: dish\n")
