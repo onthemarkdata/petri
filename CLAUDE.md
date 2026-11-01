@@ -78,6 +78,7 @@ petri/
 ├── graph/                 # DAG structure
 │   └── colony.py          # DAG operations, cycle detection, level computation
 │
+├── telemetry/            # Local SQLite span/usage sink and optional OTLP traces
 ├── defaults/              # Opinionated config (13 agents, 4 debates, constitution)
 ├── templates/             # Plain-text templates for adapter config generation
 ├── dashboard/             # FastAPI REST+SSE, SQLite migration
