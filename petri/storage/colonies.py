@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
 from petri.graph.colony import ColonyGraph
-from petri.models import Cell, Colony, Edge, parse_key
+from petri.models import Cell, Colony, parse_key
+from petri.storage.edge_registry import EdgeRecord, append, retire_cell
 from petri.storage import database
+
+logger = logging.getLogger(__name__)
 
 
 def colony_exists(db_path: Path, colony_id: str) -> bool:
@@ -56,8 +60,10 @@ def save_colony(db_path: Path, graph: ColonyGraph, colony: Colony) -> None:
             (colony.id, colony.dish, colony.center_cell_id, colony.center_claim,
              json.dumps(colony.clarifications), colony.created_at or now),
         )
-    for edge in graph.get_edges():
-        database.add_edge(db_path, **edge.model_dump(), created_at=now)
+    for cell_id in graph.removed_cell_ids:
+        retire_cell(db_path,cell_id)
+    for edge in graph.get_edge_records():
+        append(db_path,edge)
 
 
 def load_colony(db_path: Path, colony: str) -> tuple[ColonyGraph, Colony]:
@@ -69,9 +75,13 @@ def load_colony(db_path: Path, colony: str) -> tuple[ColonyGraph, Colony]:
     for row in rows:
         graph.add_cell(Cell.model_validate({**row, "colony_id": row["colony"]}))
     own_ids = {row["id"] for row in rows}
+    all_ids = {row['id'] for row in database.list_cells(db_path)}
     for row in database.read_edges(db_path):
-        if row["from_cell"] in own_ids:
-            graph.add_edge(Edge.model_validate(row))
+        if row['from_cell'] in own_ids or row['to_cell'] in own_ids:
+            edge = EdgeRecord.model_validate(row)
+            if edge.from_cell not in all_ids or edge.to_cell not in all_ids:
+                raise ValueError(f'Edge references a missing dish cell: {edge.from_cell} -> {edge.to_cell}')
+            graph.add_edge(edge)
     for cell in graph.get_all_cells():
         cell.dependencies = sorted(graph.get_dependencies(cell.id))
         cell.dependents = sorted(graph.get_dependents(cell.id))
@@ -92,7 +102,13 @@ def list_colonies(db_path: Path) -> list[tuple[ColonyGraph, Colony]]:
     if not db_path.is_file():
         return []
     names = sorted({row["colony"] for row in database.list_cells(db_path)})
-    return [load_colony(db_path, name) for name in names]
+    result = []
+    for name in names:
+        try:
+            result.append(load_colony(db_path,name))
+        except (ValueError,KeyError,sqlite3.Error) as error:
+            logger.error('Cannot load dish %s colony %s: %s',db_path.parent.name,name,error)
+    return result
 
 
 def clear_unapproved_colony(db_path: Path, colony_id: str) -> None:

@@ -149,3 +149,16 @@ def read_tombstones(db_path: Path) -> list[EdgeTombstone]:
         if connection is None or not has_table(connection,'edge_tombstones'):
             return []
         return [EdgeTombstone.model_validate(dict(row)) for row in connection.execute('SELECT * FROM edge_tombstones ORDER BY created_at,from_cell,to_cell,edge_type,edge_created_at')]
+
+
+def retire_cell(db_path: Path, cell_id: str, *, reason: str = 'Removed from colony topology') -> bool:
+    """Retire a cell and incident edges atomically, preserving historical references."""
+    now = datetime.now(timezone.utc).isoformat()
+    with database._write(db_path) as connection:
+        if connection.execute('SELECT 1 FROM active_cells WHERE id=?',(cell_id,)).fetchone() is None:
+            return False
+        for row in connection.execute('SELECT * FROM active_edges WHERE from_cell=? OR to_cell=?',(cell_id,cell_id)).fetchall():
+            connection.execute('INSERT OR IGNORE INTO edge_tombstones VALUES (?,?,?,?,?,?)',
+                (row['from_cell'],row['to_cell'],row['edge_type'],row['created_at'],reason,now))
+        connection.execute('INSERT INTO cell_tombstones VALUES (?,?,?)',(cell_id,reason,now))
+    return True
