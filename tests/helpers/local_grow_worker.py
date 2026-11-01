@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import traceback
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -115,7 +116,7 @@ def main() -> int:
                 "debate": {"request_limit": 24, "total_tokens_limit": 100000, "tool_calls_limit": 20},
             }
         config["harness"] = (
-            {"backend": "provider", "model": f"openai-chat:{GEMMA}"}
+            {"backend": "provider", "model": f"openai-chat:{GEMMA}", "provider": None, "tools": []}
             if args.harness == "provider"
             else {"backend": "pi", "model": GEMMA, "provider": "petri-local", "tools": []}
         )
@@ -134,6 +135,8 @@ def main() -> int:
         seeded = runner.invoke(app, ["seed", claim, "--colony", args.case, "--no-questions"])
         (root / "seed.log").write_text(seeded.output)
         seed_exit = seeded.exit_code
+        if seeded.exception:
+            (root / "seed-exception.log").write_text("".join(traceback.format_exception(seeded.exception)))
     else:
         center = Cell(
             id=f"{colony_id}-000-000",
@@ -214,6 +217,7 @@ def main() -> int:
         "case": args.case,
         "expected_status": expected,
         "seed_exit": seed_exit,
+        "seed_exception": repr(seeded.exception) if args.seed and not args.resume and seeded.exception else None,
         "grow_exit": grown.exit_code if grown else None,
         "grow_exception": repr(grown.exception) if grown and grown.exception else None,
         "center_status": center["status"] if center else None,

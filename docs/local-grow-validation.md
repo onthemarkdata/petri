@@ -88,3 +88,6 @@ Model/schema/usage failures append `agent_execution_failed` with the phase,
 error type, bounded raw output, validation feedback, and available backend
 diagnostics. Decomposition failures expose the same diagnostic detail on
 `DecompositionError.detail`. Neither record is a validated research verdict.
+Failed debates retain bounded raw output and validation feedback in the
+`debate_mediated` event's `exchange_summary.failure_detail`, alongside any
+completed, validated turns.

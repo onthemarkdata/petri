@@ -54,7 +54,8 @@ def test_cells_detail_edges_and_legacy_exclusion(rest_env, monkeypatch):
     monkeypatch.setattr('petri.graph.colony.deserialize_colony', lambda *args: pytest.fail('legacy read'))
     cells = client.get('/api/cells').json()
     assert len(cells) == 2
-    assert set(cells[0]) == {'cell_id','colony_id','claim_text','level','status','dependencies','dependents'}
+    assert set(cells[0]) == {'cell_id','colony_id','dish_id','claim_text','level','status','dependencies','dependents'}
+    assert {cell['dish_id'] for cell in cells} == {'dish'}
     parent = client.get('/api/cell/parent').json()
     assert parent['dependencies'] == ['child']
     assert parent['evidence_md'] == 'Evidence one\n\nEvidence two'

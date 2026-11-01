@@ -34,6 +34,10 @@ def load_dish_config(petri_dir: Path) -> AgentConfig:
         overrides = yaml.load(path.read_text(), Loader=_UniqueKeyLoader)
         if not isinstance(overrides, dict):
             raise ValueError(f"Dish config must be a mapping: {path}")
+        if isinstance(overrides.get("harness"), dict):
+            # Adapter options belong to the supplied block. Keep only the default
+            # backend for partial overrides; omitted model IDs use the top level.
+            values["harness"] = {"backend": values["harness"]["backend"]}
         def merge(target, source):
             for key, value in source.items():
                 if isinstance(value, dict) and isinstance(target.get(key), dict):

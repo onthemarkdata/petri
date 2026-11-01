@@ -34,6 +34,8 @@ SCOPE_CONTEXT = (
     "Make each child independently assessable. Preserve the parent's named system, version, "
     "mode, quantities, and conditions whenever they are needed for that child's truth. "
     "Do not turn a scoped statement into an unrestricted claim by dropping its conditions. "
+    "When a child describes a named system's behavior, include that system's name in the child. "
+    "A later assessor sees that child alone; context in the parent or a neighboring child is insufficient. "
     "Do not invent scope or copy the entire parent merely to carry context; state a distinct "
     "premise with only the context needed to test it.\n\n"
 )

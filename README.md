@@ -26,7 +26,7 @@ With **pi**, charges follow its configured provider or subscription. **Claude Co
 
 ## Choosing an inference backend
 
-The v2 harness block in `.petri/defaults/petri.yaml` selects inference independently of agent content. Fresh dishes select pi. Existing dishes without a harness block retain the legacy Claude Code provider path.
+The v2 harness block in `.petri/defaults/petri.yaml` selects inference independently of agent content. Fresh dishes select pi. The v2 commands require validated v2 settings; use v0.3.7 for existing v1 dishes, as described in the [retirement guide](docs/v2/RETIRE_V1.md).
 
 For pi, use an exact model ID and provider name recognized by your pi installation:
 
@@ -60,7 +60,9 @@ harness:
 
 `harness.model` overrides the top-level model. If omitted, CLI adapters split the top-level `provider:model` string; explicit harness model IDs remain unchanged. `harness.tools` grants tools belonging to the selected CLI. Empty lists disable those tools. Pi's built-in coding tools do not include Claude Code's `WebSearch` or `WebFetch`.
 
-The initial pi and Claude Code adapters support prompted structured output and validation retries. They reject Pydantic AI function-tool declarations and unsupported model settings; they do not silently discard them. Domain tools such as `search_cells` require a separate bridge before these adapters can run those agents. Direct provider models support the tools exposed by Pydantic AI.
+The pi and Claude Code adapters support prompted structured output, validation retries, and declared host function calls through text envelopes. Pydantic AI validates and executes those calls independently of the CLI's built-in tool allowlist. Configured agents can use `search_cells` and the opt-in `web_search` and `web_fetch` tools. Unsupported model settings are rejected.
+
+Direct providers use native final-result tools by default. Set `harness.output_mode: prompted` to request strict JSON final results while retaining native host function calls. The optional `model_settings.max_tokens` bounds each native response; configure CLI response limits in the CLI provider. See the [local grow validation guide](docs/local-grow-validation.md) for the Gemma configuration and its acceptance checks.
 
 ### Install pi and Node.js
 

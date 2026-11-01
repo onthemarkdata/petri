@@ -72,6 +72,26 @@ async def test_failed_model_output_is_durable_without_a_verdict(phase_services):
 
 
 @pytest.mark.asyncio
+async def test_provider_http_failure_is_durable_without_a_verdict(phase_services):
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    services, signals = phase_services
+    cell_id = database.list_cells(services.db_path)[0]["id"]
+
+    def failed(messages, info):
+        raise ModelHTTPError(500, "local-test", body={"error": "Local provider unavailable"})
+
+    services.socratic_agent = build_socratic_agent(services.config,
+        constitution="Preserve source attribution.", model=FunctionModel(failed))
+    with pytest.raises(ModelHTTPError):
+        await run_socratic(inputs(cell_id), services)
+    failure = database.read_events(services.db_path, event_type="agent_execution_failed")[0]
+    assert failure["data"]["error_type"] == "ModelHTTPError"
+    assert "Local provider unavailable" in failure["data"]["message"]
+    assert not database.read_events(services.db_path, event_type="verdict_issued")
+
+
+@pytest.mark.asyncio
 async def test_permanent_harness_failure_keeps_backend_diagnostics(phase_services):
     from petri.harness.errors import FailureDetail, PermanentHarnessError
 
@@ -194,6 +214,10 @@ async def test_research_handoff_contains_current_investigator_findings(phase_ser
     def respond(messages, info):
         name = next(name for name in AgentName if f"Act as {name.value}." in info.instructions)
         prompts[name] = str(messages)
+        if public_web and name == AgentName.INVESTIGATOR and not any(
+            part.part_kind == "tool-return" for message in messages for part in message.parts
+        ):
+            return ModelResponse(parts=[ToolCallPart("web_search", {"query": "fixture evidence"})])
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
             "verdict": services.config.agents[name].verdicts_pass[0],
             "summary": "CURRENT_INVESTIGATOR_FINDING" if name == AgentName.INVESTIGATOR else name.value,
@@ -201,8 +225,15 @@ async def test_research_handoff_contains_current_investigator_findings(phase_ser
             "evidence": "FULL_EVIDENCE_HANDOFF",
         })])
 
+    class Sources:
+        async def search(self, query, *, limit=5):
+            return []
+
+        async def fetch(self, url):
+            raise AssertionError("This handoff fixture only searches.")
+
     services.agents = build_agents(services.config, constitution="Preserve source attribution.",
-                                  model=FunctionModel(respond), output_mode="tool")
+                                  model=FunctionModel(respond), output_mode="tool", research_client=Sources())
     cell_id = database.list_cells(services.db_path)[0]["id"]
     await run_research(inputs(cell_id), services)
     assert "CURRENT_INVESTIGATOR_FINDING" in prompts[AgentName.FRESHNESS_CHECKER]

@@ -102,8 +102,10 @@ inference. An actual grow run also records instrumented agent activity.
 
 Verified on November 1, 2026: an actual `petri grow --dry-run` selected one seeded
 cell, exported its `petri.grow` span, and the matching trace ID was read back from
-Jaeger 2.22.0 through `/api/v3/traces/<trace_id>`. The Jaeger UI screenshot remains
-pending; API verification does not complete that visual check.
+Jaeger 2.22.0 through `/api/v3/traces/<trace_id>`. The same trace was opened in the
+Jaeger UI: its timeline showed one 64.3 ms `petri.grow` span with the command and
+dish attributes. This verifies command export; the dry run contains no model
+or workflow child spans.
 
 ## Optional external backend: SigNoz
 
