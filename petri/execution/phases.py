@@ -123,6 +123,7 @@ def build_socratic_agent(
         selected,
         name="socratic_questioner",
         output_type=output,
+        model_settings=config.model_settings.as_model_settings(),
         instructions=constitution + "\n\n" + config.pre_pipeline.socratic_questioner.instruction + "\n\n"
         + "This exploratory phase has no source retrieval tools. Plan what research should retrieve; "
         "do not claim to have browsed or fabricate citations.\n\n" + ASSESSMENT_FORMAT,

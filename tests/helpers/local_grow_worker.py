@@ -42,6 +42,8 @@ def main() -> int:
     parser.add_argument("--case", required=True, choices=CASES)
     parser.add_argument("--expanded-budget", action="store_true",
                         help="Use a bounded acceptance budget for the full roster and source retrieval.")
+    parser.add_argument("--max-tokens", type=int, default=4096,
+                        help="Bound each native provider response; Pi uses its provider's explicit cap.")
     parser.add_argument(
         "--seed",
         action="store_true",
@@ -58,6 +60,8 @@ def main() -> int:
         help="Start an explicit new validation round in a preserved dish.",
     )
     args = parser.parse_args()
+    if args.max_tokens <= 0:
+        parser.error("--max-tokens must be positive.")
     if os.environ.get("PETRI_RUN_LOCAL_GROW") != "1":
         parser.error(
             "Set PETRI_RUN_LOCAL_GROW=1 to enable real local inference and public source retrieval."
@@ -79,6 +83,9 @@ def main() -> int:
             parser.error(
                 "The petri-local Pi provider must point at the local Docker Model Runner endpoint."
             )
+        selected = next((model for model in provider.get("models", []) if model.get("id") == GEMMA), {})
+        if selected.get("maxTokens") != args.max_tokens:
+            parser.error("The Pi provider's maxTokens must match --max-tokens.")
     root = args.directory.resolve()
     if root.exists() and any(root.iterdir()) and not args.resume:
         parser.error("Use an empty output directory; existing artifacts are preserved.")
@@ -98,6 +105,8 @@ def main() -> int:
             level_one_cap=2,
         )
         config["model"] = f"openai-chat:{GEMMA}"
+        if args.harness == "provider":
+            config["model_settings"] = {"max_tokens": args.max_tokens}
         if args.expanded_budget:
             config["limits"] = {
                 "run": {"request_limit": 120, "total_tokens_limit": 600000, "tool_calls_limit": 100},
@@ -195,6 +204,8 @@ def main() -> int:
         "harness": args.harness,
         "model": GEMMA,
         "configured_limits": config["limits"],
+        "response_max_tokens": config.get("model_settings", {}).get("max_tokens")
+        if args.harness == "provider" else selected.get("maxTokens"),
         "usage": usage,
         "case": args.case,
         "expected_status": expected,
