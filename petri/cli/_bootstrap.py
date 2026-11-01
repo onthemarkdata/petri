@@ -12,46 +12,27 @@ from pathlib import Path
 from petri.storage.dish import resolve_dish_id
 
 from petri.cli_ui import print_error_and_exit
-from petri.config import get_agent_tools, load_dish_config
+from petri.config import load_dish_config
 
 get_dish_id = resolve_dish_id
 
 
 def resolve_provider(petri_dir: Path):
-    """Resolve an InferenceProvider from petri.yaml config.
+    """Resolve the typed inference bridge from this dish's validated settings."""
+    from click import get_current_context
+    from petri.harness.legacy_bridge import HarnessInferenceProvider
+    from petri.harness.resolve import resolve_model
 
-    Explicit harness mappings use the typed bridge. Dishes without that
-    mapping retain the legacy Claude Code path and agent_tools grants.
-    """
     config = load_dish_config(petri_dir)
     bootstrap_telemetry(petri_dir, config=config)
-    if isinstance(config.get("harness"), dict):
-        from click import get_current_context
-        from petri.harness.legacy_bridge import HarnessInferenceProvider
-        from petri.harness.resolve import resolve_model
-
-        provider = HarnessInferenceProvider(resolve_model(config), config=config)
-        context = get_current_context(silent=True)
-        if context is not None:
-            context.call_on_close(provider.close)
-        return provider
-
-    model_cfg = config.get("model", {})
-    if isinstance(model_cfg, dict):
-        model_name = model_cfg.get("name")
-    else:
-        model_name = str(model_cfg) if model_cfg else None
-
-    if not model_name:
-        return None
-
-    allowed_tools = get_agent_tools(config)
-
-    from petri.reasoning.claude_code_provider import ClaudeCodeProvider
-    return ClaudeCodeProvider(model=model_name, allowed_tools=allowed_tools)
+    provider = HarnessInferenceProvider(resolve_model(config.model_dump(mode="json")), config=config.model_dump(mode="json"))
+    context = get_current_context(silent=True)
+    if context is not None:
+        context.call_on_close(provider.close)
+    return provider
 
 
-def bootstrap_telemetry(petri_dir: Path, *, config: dict | None = None):
+def bootstrap_telemetry(petri_dir: Path, *, config=None):
     """Initialize local tracing and agent instrumentation for the current dish."""
     from petri.config import get_telemetry_config
     from petri.telemetry import init_telemetry
@@ -59,7 +40,7 @@ def bootstrap_telemetry(petri_dir: Path, *, config: dict | None = None):
 
     dish = config if config is not None else load_dish_config(petri_dir)
     provider = init_telemetry(
-        get_telemetry_config(petri_dir), dish_id=dish.get("name", petri_dir.parent.name),
+        get_telemetry_config(petri_dir), dish_id=dish.name,
         petri_dir=petri_dir,
     )
     instrument_agents(provider)

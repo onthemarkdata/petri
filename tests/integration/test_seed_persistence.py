@@ -16,7 +16,6 @@ later serializes.
 
 from __future__ import annotations
 
-import json
 
 import shutil
 from pathlib import Path
@@ -25,7 +24,8 @@ import pytest
 from typer.testing import CliRunner
 
 from petri.cli import app
-from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+from petri.config import load_config
+import yaml
 from petri.models import build_cell_key
 
 from tests.conftest import FakeProvider
@@ -57,6 +57,17 @@ class SeedFakeProvider(FakeProvider):
         # Force atomic level-1 cells — no Five Whys recursion.
         self.why_response = []
 
+    def initial_decomposition(self, request, on_progress=None):
+        from petri.reasoning.decomposition_schemas import InitialDecomposition
+        self.decompose_calls.append({"claim": request.claim})
+        return InitialDecomposition.model_validate({"nodes": [
+            {"claim_text": node["claim_text"]} for node in self.decompose_response["nodes"]
+        ]})
+
+    def expand_why(self, request, on_progress=None):
+        from petri.reasoning.decomposition_schemas import WhyExpansion
+        return WhyExpansion(is_atomic=True, bedrock_reason="A local fixture premise", sub_premises=[])
+
 
 # ── Test fixture: a real .petri/ directory ready for `petri seed` ──────
 
@@ -82,18 +93,9 @@ def petri_dir_for_seed(tmp_path, monkeypatch):
     dst_defaults = petri_dir / "defaults"
     shutil.copytree(src_defaults, dst_defaults)
 
-    (dst_defaults / "petri.yaml").write_text(
-        "name: test-dish\n"
-        "model:\n"
-        f"  name: {LLM_INFERENCE_MODEL}\n"
-        "  provider: local\n"
-        "harness: claude-code\n"
-        f"max_iterations: {MAX_ITERATIONS}\n"
-        f"max_concurrent: {MAX_CONCURRENT}\n"
-    )
-
-    queue_data = {"version": 1, "last_updated": None, "entries": {}}
-    (petri_dir / "queue.json").write_text(json.dumps(queue_data, indent=2) + "\n")
+    values = load_config().model_dump(mode="json")
+    values["name"] = "test-dish"
+    (dst_defaults / "petri.yaml").write_text(yaml.safe_dump(values, sort_keys=False))
 
     return tmp_path
 

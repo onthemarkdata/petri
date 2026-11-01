@@ -334,182 +334,25 @@ class _RecordingSpinner:
 
 
 class TestGrowStatusLoop:
-    def test_exits_when_stop_event_set(self, tmp_path, monkeypatch):
-        # Stop event is already set before the loop runs — it should exit
-        # on the very first wait() and return within ~2× the interval.
-        petri_dir = tmp_path / ".petri"
-        petri_dir.mkdir()
-        queue_path = petri_dir / "queue.json"
-
-        # Patch out storage imports so no real filesystem access is needed.
-        import petri.storage.event_log as event_log_mod
-        import petri.storage.queue as queue_mod
-
-        monkeypatch.setattr(
-            queue_mod, "get_state_summary", lambda _path: {}, raising=True
-        )
-        monkeypatch.setattr(
-            event_log_mod, "query_events", lambda *args, **kwargs: [], raising=True
-        )
-
+    def test_exits_when_stop_event_set(self, tmp_path):
+        stop = threading.Event()
+        stop.set()
         spinner = _RecordingSpinner()
-        stop_event = threading.Event()
-        stop_event.set()  # Pre-set: loop should not iterate at all.
-
-        interval_seconds = 0.05
-        start_time = time.monotonic()
-        grow_status_loop(
-            petri_dir=petri_dir,
-            queue_path=queue_path,
-            spinner=spinner,
-            stop_event=stop_event,
-            interval_seconds=interval_seconds,
-        )
-        elapsed = time.monotonic() - start_time
-
-        # Should have returned well under 2× the interval since stop was pre-set.
-        assert elapsed < interval_seconds * 2 + 0.2
-        # And should never have called print_line, because the loop exited
-        # on the very first while-check without advancing.
+        grow_status_loop(petri_dir=tmp_path, queue_path=tmp_path / "unused", spinner=spinner,
+                         stop_event=stop, interval_seconds=5, get_states=lambda: {}, format_states=str)
         assert spinner.lines == []
 
-    def test_calls_print_line_with_status_header(self, tmp_path, monkeypatch):
-        petri_dir = tmp_path / ".petri"
-        petri_dir.mkdir()
-        queue_path = petri_dir / "queue.json"
-
-        # Stub storage so we get one deterministic state snapshot.
-        import petri.storage.event_log as event_log_mod
-        import petri.storage.queue as queue_mod
-
-        monkeypatch.setattr(
-            queue_mod,
-            "get_state_summary",
-            lambda _path: {"research_active": 2, "done": 1},
-            raising=True,
-        )
-        monkeypatch.setattr(
-            event_log_mod, "query_events", lambda *args, **kwargs: [], raising=True
-        )
-
+    def test_first_tick_uses_backend_state_and_stops_promptly(self, tmp_path):
+        stop = threading.Event()
         spinner = _RecordingSpinner()
-        stop_event = threading.Event()
-
-        # Fire a background thread that signals stop after one tick has
-        # definitely elapsed. Interval is tiny.
-        interval_seconds = 0.05
-
-        def stop_after_one_tick() -> None:
-            time.sleep(interval_seconds * 2)
-            stop_event.set()
-
-        stopper = threading.Thread(target=stop_after_one_tick)
-        stopper.start()
-
-        grow_status_loop(
-            petri_dir=petri_dir,
-            queue_path=queue_path,
-            spinner=spinner,
-            stop_event=stop_event,
-            interval_seconds=interval_seconds,
-        )
-
-        stopper.join(timeout=1.0)
-
-        # At least one status line should have been printed, and it should
-        # start with the "status:" header.
-        assert spinner.lines, "expected at least one print_line call"
-        status_lines = [line for line in spinner.lines if "status" in line]
-        assert status_lines, f"no status header in recorded lines: {spinner.lines}"
-        # And the state summary text should include the counts we stubbed.
-        joined = " ".join(status_lines)
-        assert "research_active=2" in joined
-        assert "done=1" in joined
-
-    def test_empty_state_summary_prints_queue_empty(self, tmp_path, monkeypatch):
-        petri_dir = tmp_path / ".petri"
-        petri_dir.mkdir()
-        queue_path = petri_dir / "queue.json"
-
-        import petri.storage.event_log as event_log_mod
-        import petri.storage.queue as queue_mod
-
-        monkeypatch.setattr(
-            queue_mod, "get_state_summary", lambda _path: {}, raising=True
-        )
-        monkeypatch.setattr(
-            event_log_mod, "query_events", lambda *args, **kwargs: [], raising=True
-        )
-
-        spinner = _RecordingSpinner()
-        stop_event = threading.Event()
-        interval_seconds = 0.05
-
-        def stop_after_one_tick() -> None:
-            time.sleep(interval_seconds * 2)
-            stop_event.set()
-
-        stopper = threading.Thread(target=stop_after_one_tick)
-        stopper.start()
-        grow_status_loop(
-            petri_dir=petri_dir,
-            queue_path=queue_path,
-            spinner=spinner,
-            stop_event=stop_event,
-            interval_seconds=interval_seconds,
-        )
-        stopper.join(timeout=1.0)
-
-        assert any("queue empty" in line for line in spinner.lines)
-
-    def test_first_status_tick_is_immediate(self, tmp_path, monkeypatch):
-        """The first status line should land BEFORE any wait — earlier
-        behavior delayed the first tick by one full interval, so a
-        60s default left users staring at a static spinner."""
-        petri_dir = tmp_path / ".petri"
-        petri_dir.mkdir()
-        queue_path = petri_dir / "queue.json"
-
-        import petri.storage.event_log as event_log_mod
-        import petri.storage.queue as queue_mod
-
-        monkeypatch.setattr(
-            queue_mod, "get_state_summary",
-            lambda _path: {"socratic_active": 4}, raising=True
-        )
-        monkeypatch.setattr(
-            event_log_mod, "query_events",
-            lambda *args, **kwargs: [], raising=True
-        )
-
-        spinner = _RecordingSpinner()
-        stop_event = threading.Event()
-        # Long interval — if the first tick still runs, we know it's
-        # because the loop printed BEFORE waiting.
-        interval_seconds = 5.0
-
-        def stop_after_short_delay() -> None:
-            time.sleep(0.1)
-            stop_event.set()
-
-        stopper = threading.Thread(target=stop_after_short_delay)
-        stopper.start()
-        start_time = time.monotonic()
-        grow_status_loop(
-            petri_dir=petri_dir,
-            queue_path=queue_path,
-            spinner=spinner,
-            stop_event=stop_event,
-            interval_seconds=interval_seconds,
-        )
-        elapsed = time.monotonic() - start_time
-        stopper.join(timeout=1.0)
-
-        # Returned in well under one full interval — proving the loop
-        # printed first and then exited via the stop signal during wait.
-        assert elapsed < interval_seconds
-        # And actually printed something meaningful via print_line.
-        assert any("socratic_active=4" in line for line in spinner.lines)
+        def states():
+            stop.set()
+            return {"research_active": 2}
+        start = time.monotonic()
+        grow_status_loop(petri_dir=tmp_path, queue_path=tmp_path / "unused", spinner=spinner,
+                         stop_event=stop, interval_seconds=5, get_states=states, format_states=str)
+        assert time.monotonic() - start < 1
+        assert spinner.lines == ["status: {'research_active': 2}"]
 
     def test_format_status_event_truncates_long_summary(self):
         """Verdict summaries can be hundreds of words; the CLI must keep

@@ -39,12 +39,9 @@ class TestInit:
         # petri-dishes/ directory
         assert (petri_dir / "petri-dishes").is_dir()
 
-        # queue.json with valid JSON
-        queue_path = petri_dir / "queue.json"
-        assert queue_path.is_file()
-        queue = json.loads(queue_path.read_text())
-        assert "version" in queue
-        assert "entries" in queue
+        from petri.storage.paths import dish_db_path
+        assert dish_db_path(petri_dir).is_file()
+        assert not (petri_dir / "queue.json").exists()
 
     def test_init_with_name(self, clean_dir):
         result = runner.invoke(app, ["init", "--name", "my-research"])

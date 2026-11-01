@@ -5,16 +5,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
+from petri.storage import database
 from petri.graph.colony import ColonyGraph
-from petri.storage.event_log import append_event, load_events
-from petri.storage.database import SQLiteEventLog, get_cell, put_cell
+from petri.storage.event_log import load_events
+from petri.storage.database import SQLiteEventLog, get_cell
 from petri.storage.paths import dish_db_path
 from petri.storage.colonies import save_colony
 from petri.models import CellStatus, Colony
-from petri.engine.propagation import get_impact_report, propagate_upward, reopen_cell
-from petri.storage.queue import add_to_queue, load_queue
+from petri.lifecycle.propagation import get_impact_report, propagate_upward
 
 from tests.conftest import make_cell, make_edge
 
@@ -24,159 +23,6 @@ def _resolve_cell_dir(petri_dir: Path, colony_name: str, cell_id: str) -> SQLite
 
 
 # ── reopen_cell ─────────────────────────────────────────────────────────
-
-
-class TestReopenCell:
-    def test_reopens_validated_cell(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        result = reopen_cell(
-            env["petri_dir"], env["cell2"].id, trigger="New paper published"
-        )
-
-        assert result["cell_id"] == env["cell2"].id
-        assert result["prior_status"] == "VALIDATED"
-        assert result["new_status"] == "NEW"
-
-    def test_updates_metadata_to_new(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        reopen_cell(env["petri_dir"], env["cell2"].id, trigger="test")
-
-        cell_path = _resolve_cell_dir(
-            env["petri_dir"], env["colony_name"], env["cell2"].id
-        )
-        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
-        assert metadata["status"] == "NEW"
-
-    def test_logs_cell_reopened_event(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        reopen_cell(
-            env["petri_dir"], env["cell2"].id, trigger="Contradicting evidence"
-        )
-
-        cell_path = _resolve_cell_dir(
-            env["petri_dir"], env["colony_name"], env["cell2"].id
-        )
-        events = load_events(cell_path)
-        reopened_events = [event for event in events if event["type"] == "cell_reopened"]
-        assert len(reopened_events) == 1
-        assert reopened_events[0]["data"]["trigger"] == "Contradicting evidence"
-        assert reopened_events[0]["data"]["prior_status"] == "VALIDATED"
-
-    def test_adds_cell_back_to_queue(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        reopen_cell(env["petri_dir"], env["cell2"].id, trigger="test")
-
-        queue = load_queue(env["petri_dir"] / "queue.json")
-        assert env["cell2"].id in queue["entries"]
-        assert queue["entries"][env["cell2"].id]["queue_state"] == "queued"
-
-    def test_preserves_prior_evidence(self, petri_env_with_colony):
-        """Re-opening must NOT delete existing events (append-only)."""
-        env = petri_env_with_colony
-        cell_path = _resolve_cell_dir(
-            env["petri_dir"], env["colony_name"], env["cell2"].id
-        )
-        events_path = cell_path
-
-        # Add some prior evidence events
-        append_event(
-            events_path,
-            cell_id=env["cell2"].id,
-            event_type="source_reviewed",
-            agent="investigator",
-            iteration=1,
-            data={"url": "https://example.com", "title": "Prior evidence"},
-        )
-        append_event(
-            events_path,
-            cell_id=env["cell2"].id,
-            event_type="verdict_issued",
-            agent="investigator",
-            iteration=1,
-            data={"verdict": "EVIDENCE_SUFFICIENT", "summary": "Looks good"},
-        )
-
-        events_before = load_events(events_path)
-        count_before = len(events_before)
-
-        reopen_cell(env["petri_dir"], env["cell2"].id, trigger="new data")
-
-        events_after = load_events(events_path)
-        # Should have all prior events PLUS the cell_reopened event
-        assert len(events_after) == count_before + 1
-        # Prior events still present
-        types = [event["type"] for event in events_after]
-        assert "source_reviewed" in types
-        assert "verdict_issued" in types
-        assert "cell_reopened" in types
-
-    def test_reopens_disproven_cell(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        cell_path = _resolve_cell_dir(
-            env["petri_dir"], env["colony_name"], env["premise1"].id
-        )
-        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
-        metadata["status"] = "DISPROVEN"
-        put_cell(cell_path.db_path, metadata)
-
-        result = reopen_cell(env["petri_dir"], env["premise1"].id, trigger="test")
-        assert result["prior_status"] == "DISPROVEN"
-        assert result["new_status"] == "NEW"
-
-    def test_reopens_defer_open_cell(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        cell_path = _resolve_cell_dir(
-            env["petri_dir"], env["colony_name"], env["premise1"].id
-        )
-        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
-        metadata["status"] = "DEFER_OPEN"
-        put_cell(cell_path.db_path, metadata)
-
-        result = reopen_cell(env["petri_dir"], env["premise1"].id, trigger="test")
-        assert result["prior_status"] == "DEFER_OPEN"
-        assert result["new_status"] == "NEW"
-
-    def test_rejects_new_status(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        with pytest.raises(ValueError, match="not re-openable"):
-            reopen_cell(env["petri_dir"], env["center"].id, trigger="test")
-
-    def test_rejects_research_status(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        cell_path = _resolve_cell_dir(
-            env["petri_dir"], env["colony_name"], env["cell2"].id
-        )
-        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
-        metadata["status"] = "RESEARCH"
-        put_cell(cell_path.db_path, metadata)
-
-        with pytest.raises(ValueError, match="not re-openable"):
-            reopen_cell(env["petri_dir"], env["cell2"].id, trigger="test")
-
-    def test_rejects_stalled_status(self, petri_env_with_colony):
-        env = petri_env_with_colony
-        cell_path = _resolve_cell_dir(
-            env["petri_dir"], env["colony_name"], env["cell2"].id
-        )
-        metadata = get_cell(cell_path.db_path, cell_path.cell_id)
-        metadata["status"] = "STALLED"
-        put_cell(cell_path.db_path, metadata)
-
-        with pytest.raises(ValueError, match="not re-openable"):
-            reopen_cell(env["petri_dir"], env["cell2"].id, trigger="test")
-
-    def test_handles_cell_already_in_queue(self, petri_env_with_colony):
-        """If cell is already queued, reopen should still succeed."""
-        env = petri_env_with_colony
-        queue_path = env["petri_dir"] / "queue.json"
-        add_to_queue(queue_path, env["cell2"].id)
-
-        # Should not raise — removes old entry and re-adds
-        result = reopen_cell(env["petri_dir"], env["cell2"].id, trigger="test")
-        assert result["new_status"] == "NEW"
-
-
-# ── propagate_upward ────────────────────────────────────────────────────
 
 
 class TestPropagateUpward:
@@ -337,7 +183,7 @@ class TestGetImpactReport:
         )
         metadata_before = get_cell(cell_path.db_path, cell_path.cell_id)
         events_before = load_events(cell_path)
-        queue_before = (env["petri_dir"] / "queue.json").read_text()
+        cells_before = database.list_cells(dish_db_path(env["petri_dir"]))
 
         get_impact_report(
             env["petri_dir"], env["cell2"].id, env["graph"], env["dish_id"]
@@ -346,4 +192,4 @@ class TestGetImpactReport:
         # Nothing changed
         assert get_cell(cell_path.db_path, cell_path.cell_id) == metadata_before
         assert load_events(cell_path) == events_before
-        assert (env["petri_dir"] / "queue.json").read_text() == queue_before
+        assert database.list_cells(dish_db_path(env["petri_dir"])) == cells_before

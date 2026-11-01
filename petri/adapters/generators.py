@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from string import Template
 
-from petri.models import AgentRole, EventType, QueueState
+from petri.models import AgentRole, EventType
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -54,13 +54,16 @@ def generate_data_model_rule(
         + "\n".join(lines)
     )
 
-    # Queue states
-    queue_states = "\n".join(f"- `{s.value}`" for s in QueueState)
+    from petri.execution.pipeline import PIPELINE_NODES, declared_transitions
 
     return tmpl.safe_substitute(
         event_types=event_types,
         verdict_table=verdict_table,
-        queue_states=queue_states,
+        pipeline_states="\n".join(
+            f"- `{node.__name__}` → `{target.__name__}`"
+            for node in PIPELINE_NODES
+            for target in sorted(set.union(*declared_transitions(node)), key=lambda value: value.__name__)
+        ),
     )
 
 
@@ -69,11 +72,11 @@ def generate_feedback_loop_rule(
     max_iterations: int | None = None,
 ) -> str:
     """Generate the feedback-loop rule file content."""
-    from petri.config import MAX_ITERATIONS
+    from petri.config import load_config
     tmpl = _load_template("rule_feedback_loop.txt")
 
     if max_iterations is None:
-        max_iterations = MAX_ITERATIONS
+        max_iterations = load_config().max_iterations
 
     blocking_lines = []
     for name, role in sorted(agent_roles.items()):
@@ -243,7 +246,7 @@ def generate_skill(name: str, petri_dir: str, config: dict | None = None) -> str
     Parameters
     ----------
     name:
-        One of: event_log_write, event_log_read, queue_update,
+        One of: event_log_write, event_log_read,
         convergence_check, read_cell.
     petri_dir:
         The ``.petri/`` directory path (for template substitution).
@@ -259,17 +262,9 @@ def generate_skill(name: str, petri_dir: str, config: dict | None = None) -> str
     if name == "event_log_write":
         event_types = "\n".join(f"- `{e.value}`" for e in EventType)
         subs["event_types"] = event_types
-    elif name == "queue_update":
-        from petri.storage.queue import VALID_TRANSITIONS
-
-        lines = []
-        for state, targets in VALID_TRANSITIONS.items():
-            targets_str = ", ".join(f"`{t}`" for t in targets) if targets else "(terminal)"
-            lines.append(f"- `{state}` → {targets_str}")
-        subs["state_transitions"] = "\n".join(lines)
     elif name == "convergence_check":
-        from petri.config import MAX_ITERATIONS
-        subs["max_iterations"] = str(config.get("max_iterations", MAX_ITERATIONS))
+        from petri.config import load_config
+        subs["max_iterations"] = str(config.get("max_iterations", load_config().max_iterations))
 
     return tmpl.safe_substitute(**subs)
 
@@ -318,19 +313,19 @@ _COMMAND_DEFS: dict[str, dict[str, str]] = {
             "# See petri/cli.py feed command for full implementation"
         ),
     },
-    "analyze": {
-        "description": "Analysis and visualization tools",
-        "help": "Run dashboard, scanner, graph, or connect sub-tools.",
-        "usage": "petri analyze [--dashboard] [--scan] [--graph] [--connect N1 N2]",
+    "launch": {
+        "description": "Local research dashboard",
+        "help": "Open the local dashboard.",
+        "usage": "petri launch",
         "implementation": (
             "from petri.cli import app\n"
-            "# Runs: petri analyze\n"
-            "# See petri/cli.py analyze command for full implementation"
+            "# Runs: petri launch\n"
+            "# See petri/cli/launch.py command for full implementation"
         ),
     },
     "stop": {
         "description": "Gracefully stop all running tasks",
-        "help": "Signal active processor to finish current phase and stop.",
+        "help": "Cancel durable runs after their current step; use --force to interrupt.",
         "usage": "petri stop [--force]",
         "implementation": (
             "from petri.cli import app\n"
@@ -367,17 +362,20 @@ def generate_petri_yaml(config: dict) -> str:
     This is a simple YAML serializer using string assembly (no PyYAML
     dependency required for generation).
     """
-    lines = ["# Petri Dish Configuration"]
-    lines.append(f"name: {config.get('name', 'petri-dish')}")
-    lines.append("model:")
+    import yaml
+    from petri.config import load_config
+    from petri.agents.config import AgentConfig
 
-    model = config.get("model", {})
-    from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
-    lines.append(f"  name: {model.get('name', LLM_INFERENCE_MODEL)}")
-    lines.append(f"  provider: {model.get('provider', 'local')}")
-
-    lines.append(f"harness: {config.get('harness', 'claude-code')}")
-    lines.append(f"max_iterations: {config.get('max_iterations', MAX_ITERATIONS)}")
-    lines.append(f"max_concurrent: {config.get('max_concurrent', MAX_CONCURRENT)}")
-
-    return "\n".join(lines) + "\n"
+    values = load_config().model_dump(mode="json")
+    values["name"] = config.get("name", values["name"])
+    model = config.get("model", values["model"])
+    values["model"] = model.get("name", values["model"]) if isinstance(model, dict) else model
+    values["max_iterations"] = config.get("max_iterations", values["max_iterations"])
+    values["execution"]["worker_concurrency"] = config.get("max_concurrent", values["execution"]["worker_concurrency"])
+    harness = config.get("harness")
+    if isinstance(harness, dict):
+        values["harness"] = harness
+    elif harness:
+        values["harness"]["backend"] = harness
+    values["harness"]["model"] = values["model"]
+    return yaml.safe_dump(AgentConfig.model_validate(values).model_dump(mode="json"), sort_keys=False)

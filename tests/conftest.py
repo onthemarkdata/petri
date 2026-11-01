@@ -10,11 +10,17 @@ from pathlib import Path
 
 import pytest
 
-from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+from petri.config import load_config
+import yaml
+
 from petri.graph.colony import ColonyGraph, serialize_colony
 from petri.storage.colonies import save_colony
 from petri.storage.paths import dish_db_path
 from petri.models import Cell, CellStatus, Colony, Edge, Verdict, build_cell_key
+
+LLM_INFERENCE_MODEL = load_config().model
+MAX_CONCURRENT = load_config().execution.worker_concurrency
+MAX_ITERATIONS = load_config().max_iterations
 
 # ── Fake InferenceProvider ───────────────────────────────────────────────
 # A dependency-injectable InferenceProvider used by unit tests. It is passed
@@ -115,6 +121,29 @@ class FakeProvider:
         )
         self._emit_progress(on_progress)
         return self.why_response
+
+
+class TypedFakeProvider(FakeProvider):
+    """Use the existing scripted responses through the durable typed seed seam."""
+
+    def initial_decomposition(self, request, on_progress=None):
+        from petri.reasoning.decomposition_schemas import InitialDecomposition
+        raw = self.decompose_claim(request.claim, request.clarifications, request.guidance,
+                                   on_progress=on_progress)
+        return InitialDecomposition.model_validate({"nodes": [
+            {key: value for key, value in node.items() if key not in {"level", "seq"}}
+            for node in raw["nodes"]
+        ]})
+
+    def expand_why(self, request, on_progress=None):
+        from petri.reasoning.decomposition_schemas import WhyExpansion
+        children = self.decompose_why(request.claim, request.parent_level, request.parent_seq,
+                                      on_progress=on_progress)
+        return WhyExpansion.model_validate({
+            "is_atomic": not children,
+            "bedrock_reason": "A scripted test premise" if not children else "",
+            "sub_premises": children,
+        })
 
 
 # ── Canonical Constants ──────────────────────────────────────────────────
@@ -230,10 +259,6 @@ def tmp_petri_dir(tmp_path):
         f"max_iterations: {config['max_iterations']}\n"
     )
 
-    # Empty queue
-    queue = {"version": 1, "last_updated": None, "entries": {}}
-    (petri_dir / "queue.json").write_text(json.dumps(queue, indent=2) + "\n")
-
     return tmp_path
 
 
@@ -261,18 +286,13 @@ def petri_env(tmp_path):
     src_defaults = Path(__file__).parent.parent / "petri" / "defaults"
     dst_defaults = petri_dir / "defaults"
     shutil.copytree(src_defaults, dst_defaults)
-    shutil.copyfile(src_defaults / "legacy-petri.yaml", dst_defaults / "petri.yaml")
 
     # Write petri.yaml
-    (petri_dir / "petri.yaml").write_text(
-        "name: test-dish\n"
-        "model:\n"
-        f"  name: {LLM_INFERENCE_MODEL}\n"
-        "  provider: local\n"
-        "harness: claude-code\n"
-        f"max_iterations: {MAX_ITERATIONS}\n"
-        f"max_concurrent: {MAX_CONCURRENT}\n"
-    )
+    config_values = load_config().model_dump(mode="json")
+    config_values["name"] = CANONICAL_DISH_ID
+    config_target = petri_dir / "defaults" / "petri.yaml"
+    config_target.parent.mkdir(exist_ok=True)
+    config_target.write_text(yaml.safe_dump(config_values, sort_keys=False))
 
     # Empty queue
     queue = {"version": 1, "last_updated": None, "entries": {}}
@@ -416,18 +436,13 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
     src_defaults = Path(__file__).parent.parent / "petri" / "defaults"
     dst_defaults = petri_dir / "defaults"
     shutil.copytree(src_defaults, dst_defaults)
-    shutil.copyfile(src_defaults / "legacy-petri.yaml", dst_defaults / "petri.yaml")
 
     # Override petri.yaml with canonical test config (matches CANONICAL_DISH_ID)
-    (dst_defaults / "petri.yaml").write_text(
-        f"name: {CANONICAL_DISH_ID}\n"
-        "model:\n"
-        f"  name: {LLM_INFERENCE_MODEL}\n"
-        "  provider: local\n"
-        "harness: claude-code\n"
-        f"max_iterations: {MAX_ITERATIONS}\n"
-        f"max_concurrent: {MAX_CONCURRENT}\n"
-    )
+    config_values = load_config().model_dump(mode="json")
+    config_values["name"] = CANONICAL_DISH_ID
+    config_target = petri_dir / "defaults" / "petri.yaml"
+    config_target.parent.mkdir(exist_ok=True)
+    config_target.write_text(yaml.safe_dump(config_values, sort_keys=False))
 
     # Serialize the canonical colony to disk via the production code path
     colony_path = petri_dir / "petri-dishes" / canonical_colony["colony_name"]
@@ -464,19 +479,11 @@ def petri_env_with_colony(tmp_path, canonical_colony_validated_cells):
     colony = canonical_colony_validated_cells
     petri_dir = tmp_path / ".petri"
     petri_dir.mkdir()
-    (petri_dir / "petri-dishes").mkdir()
-
-    (petri_dir / "petri.yaml").write_text(
-        "name: test-dish\n"
-        "model:\n"
-        f"  name: {LLM_INFERENCE_MODEL}\n"
-        "  provider: local\n"
-        "harness: claude-code\n"
-        f"max_iterations: {MAX_ITERATIONS}\n"
-    )
-
-    queue_data = {"version": 1, "last_updated": None, "entries": {}}
-    (petri_dir / "queue.json").write_text(json.dumps(queue_data, indent=2) + "\n")
+    config_values = load_config().model_dump(mode="json")
+    config_values["name"] = CANONICAL_DISH_ID
+    config_target = petri_dir / "defaults" / "petri.yaml"
+    config_target.parent.mkdir(exist_ok=True)
+    config_target.write_text(yaml.safe_dump(config_values, sort_keys=False))
 
     colony_path = petri_dir / "petri-dishes" / colony["colony_name"]
     serialize_colony(colony["graph"], colony["colony_model"], colony_path)

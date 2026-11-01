@@ -15,7 +15,7 @@ SCHEDULE_NAME = 'petri-research-analyst'
 
 
 def analyst_settings() -> AnalystConfig:
-    return AnalystConfig.model_validate(load_dish_config(active_app().petri_dir).get('analyst',{}))
+    return load_dish_config(active_app().petri_dir).analyst
 
 
 @DBOS.step(name='petri.analyst_report')

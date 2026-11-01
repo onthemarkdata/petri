@@ -16,6 +16,7 @@ from petri.storage import database
 
 @pytest.fixture
 def rest_env(tmp_path):
+    (tmp_path / "petri.yaml").write_text("name: dish\n")
     path = tmp_path / 'petri-dishes' / 'dish' / 'petri.sqlite'
     with closing(database.connect(path)) as connection:
         for cell, colony, level in [('parent','alpha',0),('child','beta',1)]:
@@ -73,8 +74,8 @@ def test_stats_preserve_event_and_queue_contracts(rest_env):
     stats = client.get('/api/stats').json()
     for key, value in query.event_stats(path).items():
         assert stats[key] == value
-    assert stats['queue_size'] == 1
-    assert stats['cells_by_state'] == {'queued':1}
+    assert stats['queue_size'] == 2
+    assert stats['cells_by_state'] == {'queued':2}
 
 
 def test_no_database_returns_empty_contracts(tmp_path):

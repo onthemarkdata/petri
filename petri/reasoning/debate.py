@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
 from petri.storage.event_log import append_event
 from petri.models import Debate, DebateExchange, DebateResult, InferenceProvider
 
@@ -32,26 +30,10 @@ _DEFAULTS_DIR = Path(__file__).parent.parent / "defaults"
 
 
 def load_debate_pairings(config_path: Path | None = None) -> list[Debate]:
-    """Load debate pairings from a YAML file.
+    """Read debate pairings from validated settings at call time."""
+    from petri.config import load_config
 
-    Falls back to ``petri/defaults/legacy-petri.yaml`` when *config_path* is None
-    or points to a file that does not exist.
-
-    Returns a list of ``Debate`` models.
-    """
-    path = config_path if config_path and config_path.exists() else _DEFAULTS_DIR / "legacy-petri.yaml"
-    raw = yaml.safe_load(path.read_text())
-    debates: list[Debate] = []
-    for entry in raw.get("debates", []):
-        pair = tuple(entry["pair"])
-        debates.append(
-            Debate(
-                pair=pair,
-                rounds=entry["rounds"],
-                purpose=entry["purpose"],
-            )
-        )
-    return debates
+    return [Debate.model_validate(item.model_dump()) for item in load_config(config_path).debates]
 
 
 # ── Debate Mediation ──────────────────────────────────────────────────────

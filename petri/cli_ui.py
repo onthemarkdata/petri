@@ -541,15 +541,8 @@ def grow_status_loop(
     walks event logs for recent verdicts. Shuts down promptly when
     ``stop_event`` is set.
     """
-    if get_states is None:
-        from petri.storage.queue import get_state_summary
-
-        def get_states():
-            return get_state_summary(queue_path)
-    if format_states is None:
-        from petri.engine.grow_loop import format_state_summary
-
-        format_states = format_state_summary
+    if get_states is None or format_states is None:
+        raise ValueError("Provide backend state and formatting callbacks")
 
     set_header = getattr(spinner, "set_header", None)
 

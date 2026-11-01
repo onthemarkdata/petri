@@ -231,7 +231,7 @@ def test_editor_reprompts_on_invalid_yaml_before_any_writes(tmp_path, monkeypatc
 
 def test_cli_edit_choice_uses_editor_without_regeneration(seeded_petri_dir, monkeypatch):
     from click.testing import _NamedTextIOWrapper
-    from tests.conftest import FakeProvider
+    from tests.conftest import TypedFakeProvider as FakeProvider
 
     provider = FakeProvider()
     provider.questions_response = []

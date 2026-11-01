@@ -7,8 +7,6 @@ import pytest
 
 from petri.cli._bootstrap import get_dish_id
 from petri.dashboard.api import _get_dish_id as dashboard_dish
-from petri.engine.processor import _get_dish_id as engine_dish
-from petri.engine.propagation import _get_dish_id as propagation_dish
 from petri.models import parse_key
 from petri.storage.dish import resolve_dish_id
 from petri.storage.paths import parse_cell_id
@@ -17,7 +15,7 @@ from petri.storage.paths import parse_cell_id
 def test_all_entry_points_share_resolver(tmp_path):
     petri_dir = tmp_path / ".petri"
     (petri_dir / "defaults").mkdir(parents=True)
-    resolvers = [get_dish_id, dashboard_dish, engine_dish, propagation_dish]
+    resolvers = [get_dish_id, dashboard_dish]
     assert all(resolver is resolve_dish_id for resolver in resolvers)
     assert resolve_dish_id(petri_dir) == tmp_path.name
     (petri_dir / "petri.yaml").write_text('name: "old-dish"\n')

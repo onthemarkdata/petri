@@ -1,4 +1,4 @@
-"""Typed inference behind the synchronous v1 provider protocol.
+"""Typed inference for synchronous seed and compatibility call sites.
 
 A private event loop owns each model's async resources. Calls are serialized;
 close() reaps subprocesses and the worker thread, including after failed runs.
@@ -275,12 +275,15 @@ class HarnessInferenceProvider:
 
     def assess_cell(self, cell_id: str, claim_text: str, context: dict, agent_role: str,
                     on_progress: Progress = None) -> AssessmentResult:
-        from petri.config import get_agent_instruction, get_agent_verdicts, load_config
+        from petri.config import load_config
+        from petri.agents.config import AgentContent
+        from petri.agents.contract import AgentName
 
-        config = self.config if self.config is not None else load_config()
-        if not config.get("agents"):
-            raise ValueError("Agent content is required for cell assessment.")
-        verdicts = get_agent_verdicts(agent_role, config)
+        content = (
+            AgentContent.model_validate(self.config["agents"][agent_role])
+            if self.config is not None else load_config().agents[AgentName(agent_role)]
+        )
+        verdicts = content.verdicts_pass + content.verdicts_block
         if not verdicts:
             raise ValueError(f"No verdict vocabulary configured for agent {agent_role!r}.")
 
@@ -293,7 +296,7 @@ class HarnessInferenceProvider:
 
         prompt = prompts.build_assess_cell_prompt(
             cell_id, claim_text, context, agent_role, valid_verdicts=verdicts,
-            role_instruction=get_agent_instruction(agent_role, config), today_iso=date.today().isoformat(),
+            role_instruction=content.instruction, today_iso=date.today().isoformat(),
         )
         try:
             return self._run("assessment", prompt, AssessmentResult, on_progress, validate)

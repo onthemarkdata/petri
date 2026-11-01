@@ -84,8 +84,6 @@ def test_connect_and_stop_use_rows(seeded_petri_dir):
     linked = CliRunner().invoke(app, ["connect", env["cell1"].id, other_cell.id])
     assert linked.exit_code == 0, linked.output
     assert any(edge["to_cell"] == other_cell.id for edge in database.read_edges(db))
-    config_path = env["petri_dir"] / "defaults" / "petri.yaml"
-    config_path.write_text(config_path.read_text() + "execution:\n  backend: dbos\n")
     before = database.get_cell(db, other_cell.id)
     stopped = CliRunner().invoke(app, ["stop"])
     assert stopped.exit_code == 0, stopped.output

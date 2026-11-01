@@ -86,9 +86,9 @@ class TestLoadDebatePairings:
         assert ("simplifier", "impact_assessor") in pairs
         assert ("triage", "impact_assessor") in pairs
 
-    def test_fallback_to_defaults_on_missing_path(self):
-        pairings = load_debate_pairings(Path("/nonexistent/debates.yaml"))
-        assert len(pairings) == 4
+    def test_missing_explicit_config_fails(self):
+        with pytest.raises(FileNotFoundError):
+            load_debate_pairings(Path("/nonexistent/debates.yaml"))
 
 
 # ── mediate_debate ───────────────────────────────────────────────────────

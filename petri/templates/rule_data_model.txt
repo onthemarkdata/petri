@@ -19,12 +19,13 @@ $event_types
 
 $verdict_table
 
-## Queue States
+## Pipeline Transitions
 
-$queue_states
+$pipeline_states
 
 ## Rules
 
 - NEVER write directly to `.jsonl` files. Use the event log skills instead.
-- NEVER modify queue state outside of the queue update skill.
+- Start and cancel durable runs through the execution backend.
+- Research data and events live in SQLite; text exports are derived views.
 - All verdicts MUST use the exact strings from the vocabulary above.

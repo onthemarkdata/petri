@@ -1,12 +1,10 @@
 """Pin extracted prompts to text captured from the original provider."""
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
-from petri.reasoning import claude_code_provider as legacy
 from petri.reasoning import prompts
 
 SNAPSHOTS = [case for case in json.loads(
@@ -32,23 +30,3 @@ def test_builder_and_separate_suffix_match_original(case):
     assert case["prompt"][:len(body)] == body
     assert "EMIT JSON" not in body
     assert "Return ONLY a JSON" not in body
-
-
-@pytest.mark.parametrize("case", SNAPSHOTS, ids=lambda case: case["method"])
-def test_legacy_provider_still_sends_original_prompt(case, monkeypatch):
-    class FixedDate:
-        @classmethod
-        def now(cls, tz):
-            return datetime(2026, 11, 1, tzinfo=timezone.utc)
-
-    monkeypatch.setattr(legacy, "datetime", FixedDate)
-    provider = legacy.ClaudeCodeProvider()
-    sent = []
-
-    def capture(prompt, **kwargs):
-        sent.append(prompt)
-        return "{}"
-
-    monkeypatch.setattr(provider, "_ask", capture)
-    getattr(provider, case["method"])(*case["args"])
-    assert sent == [case["prompt"]]

@@ -125,6 +125,8 @@ def test_completed_cli_resume_does_not_resolve_provider(tmp_path, monkeypatch):
             center_cell_id="dish-units-000-000",
         ),
     )
+    from petri.cli.init import create_petri_dish
+    create_petri_dish(petri, dish_name="dish")
     monkeypatch.setattr(seed_module, "find_petri_dir", lambda: petri)
     monkeypatch.setattr(seed_module, "get_dish_id", lambda _: "dish")
     monkeypatch.setattr(

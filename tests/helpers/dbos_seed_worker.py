@@ -17,7 +17,9 @@ def main():
     root = Path(sys.argv[1])
     mode = sys.argv[2]
     root.mkdir(parents=True, exist_ok=True)
-    (root / "petri.yaml").write_text(
+    from petri.cli.init import create_petri_dish
+    create_petri_dish(root, dish_name="dish")
+    (root / "defaults" / "petri.yaml").write_text(
         "name: dish\nmodel: test\nexecution:\n  backend: dbos\ntelemetry:\n  enabled: false\n"
     )
     audit = root / "audit.sqlite"

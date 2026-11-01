@@ -3,17 +3,16 @@
 import ast
 import importlib
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import typer
 from typer.testing import CliRunner
 
-from petri.config import get_execution_backend
+from petri.execution.config import ExecutionConfig
 from petri.execution import resolve_backend
 from petri.execution.backend import ExecutionBackend
 from petri.execution.models import CellPipelineState, GrowOutcome, PipelineOutcome, PreflightCheck
-from petri.execution.v1_engine import V1ExecutionBackend
+from petri.execution.dbos_backend import DBOSExecutionBackend
 from petri.models import QueueProcessingResult
 
 
@@ -130,10 +129,10 @@ def test_cli_rejects_unknown_backend_before_execution(command, monkeypatch, tmp_
 
 
 def test_config_and_state_round_trip(tmp_path):
-    assert get_execution_backend({}) == "v1"
-    assert isinstance(resolve_backend(tmp_path), V1ExecutionBackend)
-    with pytest.raises(ValueError, match="execution must be a mapping"):
-        get_execution_backend({"execution": []})
+    assert ExecutionConfig().backend == "dbos"
+    assert isinstance(resolve_backend(tmp_path), DBOSExecutionBackend)
+    with pytest.raises(ValueError, match="v0.3.7"):
+        ExecutionConfig(backend="v1")
     with pytest.raises(ValueError):
         PipelineOutcome("unknown")
     state = CellPipelineState(
@@ -168,75 +167,3 @@ def test_cli_and_protocol_import_boundaries():
                 not name.startswith(("petri.engine", "petri.storage.queue", "dbos"))
                 for name in modules
             ), filename
-
-
-def test_v1_adapter_delegations(monkeypatch, tmp_path):
-    from petri.execution import v1_engine as adapter
-
-    backend = V1ExecutionBackend()
-    assert isinstance(backend, ExecutionBackend)
-    calls = []
-
-    def record(name, result=None):
-        def call(*args, **kwargs):
-            calls.append((name, args, kwargs))
-            return result
-
-        return call
-
-    check = adapter.preflight.CheckResult("cli", True, "ready")
-    monkeypatch.setattr(adapter.preflight, "check_claude_cli", record("preflight", check))
-    assert backend.preflight() == PreflightCheck("cli", True, "ready")
-    result = QueueProcessingResult(processed=1)
-    monkeypatch.setattr(adapter.processor, "process_queue", record("process_queue", result))
-    assert backend.process_queue(petri_dir=tmp_path) is result
-    outcome = SimpleNamespace(
-        reason="terminal", final_states={"done": 1}, last_result=result, passes_run=1
-    )
-    monkeypatch.setattr(adapter.loop, "grow_loop", record("grow_loop", outcome))
-    assert backend.grow_loop(run_one_pass="stub").last_result is result
-    monkeypatch.setattr(adapter.loop, "format_state_summary", record("format", "done: 1"))
-    assert backend.format_state_summary({"done": 1}) == "done: 1"
-    assert backend.status_interval == adapter.loop.GROW_STATUS_INTERVAL_SECONDS
-    for name in ["clear_stop_file", "is_stop_file_present", "request_stop", "request_stop_file"]:
-        monkeypatch.setattr(adapter.processor, name, record(name, name == "is_stop_file_present"))
-    backend.clear_stop(tmp_path)
-    assert backend.is_stopped(tmp_path)
-    backend.request_stop(tmp_path)
-    for name, value in [
-        ("get_state_summary", {"done": 1}),
-        ("load_queue", {"entries": {"c": {}}}),
-        ("list_queue", [{"cell_id": "c"}]),
-        ("update_state", None),
-    ]:
-        monkeypatch.setattr(adapter.queue, name, record(name, value))
-    assert backend.state_summary(tmp_path) == {"done": 1}
-    assert backend.entries(tmp_path) == {"c": {}}
-    assert backend.list_entries(tmp_path) == [{"cell_id": "c"}]
-    assert backend.update_state(tmp_path, "c", "stalled") is None
-    assert calls == [
-        ("preflight", (), {}),
-        ("process_queue", (), {"petri_dir": tmp_path}),
-        ("grow_loop", (), {"run_one_pass": "stub"}),
-        ("format", ({"done": 1},), {}),
-        ("clear_stop_file", (tmp_path,), {}),
-        ("is_stop_file_present", (tmp_path,), {}),
-        ("request_stop", (), {}),
-        ("request_stop_file", (tmp_path,), {}),
-        ("get_state_summary", (tmp_path / "queue.json",), {}),
-        ("load_queue", (tmp_path / "queue.json",), {}),
-        ("list_queue", (tmp_path / "queue.json",), {}),
-        ("update_state", (tmp_path / "queue.json", "c", "stalled"), {}),
-    ]
-
-
-def test_adapter_translates_provider_error(monkeypatch):
-    from petri.execution import v1_engine as adapter
-    from petri.execution.models import NoProviderError
-
-    def fail(**kwargs):
-        raise adapter.processor.NoProviderError()
-
-    monkeypatch.setattr(adapter.processor, "process_queue", fail)
-    with pytest.raises(NoProviderError, match="No InferenceProvider configured"):
-        V1ExecutionBackend().process_queue()

@@ -27,8 +27,8 @@ def load_source_hierarchy(config_path: Path) -> dict:
     sensible defaults.
     """
     if yaml is None:
-        from petri.config import get_minimum_terminal_level
-        return {"minimum_terminal_level": get_minimum_terminal_level(), "levels": {}}
+        from petri.config import load_config
+        return {"minimum_terminal_level": load_config().source_hierarchy.minimum_terminal_level, "levels": {}}
 
     # Try consolidated petri.yaml first
     petri_yaml = config_path / "petri.yaml"
@@ -41,8 +41,8 @@ def load_source_hierarchy(config_path: Path) -> dict:
     # Legacy fallback
     hierarchy_file = config_path / "source_hierarchy.yaml"
     if not hierarchy_file.exists():
-        from petri.config import get_minimum_terminal_level
-        return {"minimum_terminal_level": get_minimum_terminal_level(), "levels": {}}
+        from petri.config import load_config
+        return {"minimum_terminal_level": load_config().source_hierarchy.minimum_terminal_level, "levels": {}}
 
     with open(hierarchy_file) as f:
         return yaml.safe_load(f) or {}
@@ -98,8 +98,8 @@ def validate_terminal_sources(
         }
 
     if min_level is None:
-        from petri.config import get_minimum_terminal_level
-        min_level = get_minimum_terminal_level()
+        from petri.config import load_config
+        min_level = load_config().source_hierarchy.minimum_terminal_level
 
     highest = min(levels)  # Lower number = higher quality
     passes = highest <= min_level
