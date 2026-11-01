@@ -92,3 +92,11 @@ backend digest `sha256:aa3e239c5737a7fa56f3908a865eb75dfae214b9cfec2cdd929e4d535
 and Docker Model Runner plugin v1.1.29. The model is pinned; Docker Desktop owns
 backend upgrades, so record backend identity with each new validation run.
 These short checks do not measure full-workflow memory use or research quality.
+
+The opt-in `tests/unit/test_cli_agents_run.py` test also passed against this
+model using the shipped skeptic instructions, constitution, typed output, and
+usage reporting. A repeated invocation is recorded in
+[gemma-agent-cli.json](validation/gemma-agent-cli.json): one request, 1,108 input
+tokens, and 173 output tokens. Both runs used prompted JSON output. This verifies
+a single-agent CLI run; it does not establish that a multi-agent research workflow
+passes end to end.
