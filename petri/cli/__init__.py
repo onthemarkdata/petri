@@ -10,6 +10,7 @@ from __future__ import annotations
 import typer
 
 from petri.cli.agents_cmd import register as register_agents
+from petri.cli.backup import register as register_backup
 from petri.cli.check import register as register_check
 from petri.cli.connect import register as register_connect
 from petri.cli.feed import register as register_feed
@@ -30,6 +31,7 @@ app = typer.Typer(
 )
 _COMMAND_REGISTRARS = (
     register_agents,
+    register_backup,
     register_init,
     register_seed,
     register_check,
