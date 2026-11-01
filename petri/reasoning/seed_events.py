@@ -5,11 +5,26 @@ from typing import Literal
 
 from petri.storage import database
 from petri.reasoning.seed_graph import SeedState
+from petri.storage.event_log import append_event
 
 
 def current_attempt(db_path: Path, center_id: str) -> int:
     """Regeneration starts a new event namespace; resume retains the last one."""
     return len(database.read_events(db_path, cell_id=center_id, event_type="decomposition_started"))
+
+
+def record_completion(db_path: Path, center_id: str, *, attempt: int, cell_count: int) -> None:
+    """Record completion once per seed attempt, including replay after a crash."""
+    append_event(
+        database.SQLiteEventLog(db_path),
+        center_id,
+        "decomposition_completed",
+        "decomposition_lead",
+        0,
+        {"attempt": attempt, "cell_count": cell_count},
+        round_number=attempt,
+        node="seed-completion",
+    )
 
 
 def classify_cells(
