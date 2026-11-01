@@ -85,7 +85,7 @@ def eligible_cells(spec: ColonyRunSpec) -> list[tuple[CellRunSpec, int]]:
     path = active_app().db_path
     graph, _ = load_colony(path, spec.colony_id)
     prepare_priority_pass(active_app(),spec.colony_id)
-    statuses = {cell.id: cell.status for cell in graph.get_all_cells()}
+    statuses = {row["id"]:CellStatus(row["status"]) for row in database.list_cells(path)}
     with closing(database.connect(path)) as conn:
         return _bounded(
             [
