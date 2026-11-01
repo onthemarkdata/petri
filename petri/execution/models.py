@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import hashlib
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,3 +59,17 @@ class PreflightCheck:
 
 class NoProviderError(RuntimeError):
     """Execution requires an inference provider that has not been configured."""
+
+
+@dataclass(frozen=True)
+class ReopenRequest:
+    cell_id: str
+    request_id: str
+    today_iso: str
+    trigger: str = "human_revalidation"
+    max_iterations: int = 5
+
+    @property
+    def workflow_id(self):
+        request = hashlib.sha256(self.request_id.encode()).hexdigest()
+        return f"{self.cell_id}:reopen:{request}"

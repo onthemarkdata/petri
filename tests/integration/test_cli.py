@@ -169,12 +169,11 @@ class TestColonyOnDiskIntegrity:
             meta = json.loads(meta_path.read_text())
             assert "id" in meta, f"metadata missing 'id' in {cell_path.name}"
 
-        # queue.json must be present, valid JSON, and have an entry per cell
-        queue_path = petri_dir / "queue.json"
-        queue = json.loads(queue_path.read_text())
-        assert "entries" in queue
-        assert "version" in queue
-        assert len(queue["entries"]) == 5
+        from petri.storage import database
+        from petri.storage.paths import dish_db_path
+
+        assert len(database.list_cells(dish_db_path(petri_dir))) == 5
+        assert not (petri_dir / "queue.json").exists()
 
 
 

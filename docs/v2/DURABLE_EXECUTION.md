@@ -92,3 +92,37 @@ The runtime returns `SyncConflict` and prevents further work for affected cells.
 `petri check` shows the divergence reason in both text and JSON output.
 Reconciliation does not change cell rows or append, update, or delete events.
 It does not automatically repair a conflict or clear a previous parking decision.
+
+## Grow, stop, and feed
+
+Re-running `petri grow` attaches to pending work or resumes cancelled cell rounds
+and colony parents with their original checkpoint identities. Completed cell
+rounds are reused. New eligible cells added after a completed parent receive a
+new parent generation; their cell round numbers still come from the domain
+round records. The spinner polls workflow state and new domain events through
+the backend.
+
+`petri stop` records cancellation intent in the system database. A running step
+finishes and commits its checkpoint before the workflow becomes `CANCELLED`.
+`petri stop --force` cancels immediately and interrupts an active async inference
+call; that unfinished call can run again on resume. Neither form changes domain
+status or writes a stalled verdict. Stopping an idle dish is a no-op. Grow exits
+0 for all-terminal completion or a user stop, including Ctrl+C, and 1 for blocked,
+conflicted, or failed work. SIGKILL recovery uses the same grow command.
+
+`petri feed` reports transitive impact, submits a stable revalidation request,
+and appends idempotent propagation flags for dependents. Flags preserve those
+cells' statuses and do not enqueue them. Only the explicitly reopened cell gets
+the next round.
+
+The DBOS adapter accepts an optional async `after_pass(petri_dir) -> bool` hook.
+It runs after the selected parents settle and before the runtime closes. A true
+result starts another parent generation for newly approved work; the default
+has no hook.
+
+The CLI recovery regression covers real SIGKILL and Ctrl+C with local fake
+phases:
+
+```sh
+pytest tests/integration/test_grow_resume.py -m integration -q
+```

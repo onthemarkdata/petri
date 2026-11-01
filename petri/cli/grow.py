@@ -43,16 +43,7 @@ def register(app: typer.Typer) -> None:
             False, "--dry-run", help="Show what would process without running"
         ),
     ) -> None:
-        """Run the validation pipeline.
-
-        By default, every eligible cell across every colony is processed.
-        Scope to a subset with ``--cell`` (repeatable) or ``--colony``.
-
-        Internally loops ``process_queue`` until every queue entry is in a
-        terminal state, the cross-process stop sentinel appears, or two
-        consecutive passes make no progress.  A daemon status thread
-        prints periodic progress lines above a persistent spinner.
-        """
+        """Start or resume validation for the selected cells or colonies."""
         import threading
 
         petri_dir = find_petri_dir()
@@ -79,12 +70,12 @@ def register(app: typer.Typer) -> None:
             typer.echo(check.message)
 
         # Resolve the inference provider from petri.yaml config
-        provider = resolve_provider(petri_dir)
+        provider = (
+            None if getattr(backend, "backend_name", "") == "dbos"
+            else resolve_provider(petri_dir)
+        )
 
         queue_path = petri_dir / "queue.json"
-
-        # Drop any stale stop sentinel from a previous interrupted run.
-        backend.clear_stop(petri_dir)
 
         # ── dry-run path: single pass, no loop, no spinner ──
         if dry_run:
@@ -113,6 +104,9 @@ def register(app: typer.Typer) -> None:
                 typer.echo("No eligible cells found.")
             raise typer.Exit(code=0)
 
+        # A new invocation resumes runs cancelled by an earlier user stop.
+        backend.clear_stop(petri_dir)
+
         # ── live path: loop until terminal/stopped/no-progress ──
         def _get_states() -> dict[str, int]:
             try:
@@ -138,7 +132,7 @@ def register(app: typer.Typer) -> None:
                     multi.update_slot(slot_index, "idle")
 
                 def _on_event(event: ProgressEvent) -> None:
-                    """Translate a processor lifecycle event into a row update."""
+                    """Render backend progress in the matching spinner row."""
                     if event.slot_idx < 0 or event.slot_idx >= max_concurrent:
                         return
                     cell_label = short_cell_id(event.cell_id)
@@ -217,7 +211,6 @@ def register(app: typer.Typer) -> None:
             status_stop_event.set()
             if status_thread is not None:
                 status_thread.join(timeout=2.0)
-            backend.clear_stop(petri_dir)
 
         if no_provider:
             print_error_and_exit(
@@ -226,7 +219,7 @@ def register(app: typer.Typer) -> None:
             )
 
         if interrupted:
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=0)
 
         assert outcome is not None  # set unless an exception bubbled up
 
@@ -257,6 +250,6 @@ def register(app: typer.Typer) -> None:
                     f"{cell_result.events_logged} events)"
                 )
 
-        if outcome.reason == "all_terminal":
+        if outcome.reason in {"all_terminal", "user_stop"}:
             raise typer.Exit(code=0)
         raise typer.Exit(code=1)

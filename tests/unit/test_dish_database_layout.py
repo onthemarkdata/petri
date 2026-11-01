@@ -72,7 +72,6 @@ def test_connect_and_stop_use_rows(seeded_petri_dir):
     from petri.graph.colony import ColonyGraph
     from petri.models import Cell
     from petri.storage.colonies import save_colony
-    from petri.storage.queue import add_to_queue, update_state
 
     env = seeded_petri_dir
     db = dish_db_path(env["petri_dir"])
@@ -85,12 +84,12 @@ def test_connect_and_stop_use_rows(seeded_petri_dir):
     linked = CliRunner().invoke(app, ["connect", env["cell1"].id, other_cell.id])
     assert linked.exit_code == 0, linked.output
     assert any(edge["to_cell"] == other_cell.id for edge in database.read_edges(db))
-    queue_path = env["petri_dir"] / "queue.json"
-    add_to_queue(queue_path, other_cell.id)
-    update_state(queue_path, other_cell.id, "socratic_active")
-    update_state(queue_path, other_cell.id, "research_active")
+    config_path = env["petri_dir"] / "defaults" / "petri.yaml"
+    config_path.write_text(config_path.read_text() + "execution:\n  backend: dbos\n")
+    before = database.get_cell(db, other_cell.id)
     stopped = CliRunner().invoke(app, ["stop"])
     assert stopped.exit_code == 0, stopped.output
-    events = database.read_events(db, cell_id=other_cell.id)
-    assert any(event["data"].get("verdict") == "PIPELINE_STALLED" for event in events)
+    assert "No active runs" in stopped.output
+    assert database.get_cell(db, other_cell.id) == before
+    assert database.read_events(db, cell_id=other_cell.id) == []
     assert not list(dish_dir(env["petri_dir"]).rglob("metadata.json"))

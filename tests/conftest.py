@@ -393,8 +393,7 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
         expect)
       - ``petri-dishes/<canonical colony>/`` serialized via the same
         ``serialize_colony`` path the production seed command uses
-      - ``queue.json`` with a queue entry for every cell in the canonical
-        colony, in the default ``new`` state
+      - the canonical colony in the dish's SQLite database
 
     Sets cwd to ``tmp_path`` so ``runner.invoke(app, [...])`` finds the
     petri dir without further plumbing. Returned dict mirrors
@@ -437,26 +436,6 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
     )
 
     save_colony(dish_db_path(petri_dir), canonical_colony["graph"], canonical_colony["colony_model"])
-
-    # Populate queue.json with entries for every cell — matches the state
-    # the engine expects after seeding (all cells NEW / queued state empty).
-    queue_entries: dict = {}
-    for cell in canonical_colony["graph"].get_all_cells():
-        queue_entries[cell.id] = {
-            "cell_id": cell.id,
-            "queue_state": "",
-            "iteration": 0,
-            "entered_at": "2026-01-01T00:00:00+00:00",
-            "last_activity": "2026-01-01T00:00:00+00:00",
-        }
-    queue_data = {
-        "version": 1,
-        "last_updated": "2026-01-01T00:00:00+00:00",
-        "entries": queue_entries,
-    }
-    (petri_dir / "queue.json").write_text(
-        json.dumps(queue_data, indent=2) + "\n"
-    )
 
     return {
         "tmp_path": tmp_path,
