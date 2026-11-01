@@ -15,6 +15,7 @@ from petri.agents.config import AgentConfig
 from petri.agents.contract import AgentName
 from petri.agents.factory import AgentRunError, build_agents, run_agent
 from petri.cli._bootstrap import load_colonies
+from petri.harness.errors import HarnessError
 
 
 def resolve_claim(petri_dir: Path, config: AgentConfig, claim: str | None, cell: str | None) -> str:
@@ -56,10 +57,13 @@ async def execute_agent(
     with capture_run_messages() as messages:
         try:
             result = await run_agent(agents, name, claim, config, usage=usage)
-        except (UsageLimitExceeded, AgentRunError) as error:
+        except (UsageLimitExceeded, AgentRunError, HarnessError) as error:
             failed = True
             label = "Over-budget" if isinstance(error, UsageLimitExceeded) else "Execution failed"
             typer.echo(f"{label}: {error}", err=True)
+            if isinstance(error, HarnessError) and error.detail and error.detail.partial_output:
+                typer.echo("Partial backend output (not a validated verdict):")
+                typer.echo(error.detail.partial_output)
             responses = [message for message in messages if isinstance(message, ModelResponse)]
             if responses:
                 typer.echo("Partial model output (not a validated verdict):")
@@ -153,7 +157,7 @@ def register(agents: typer.Typer) -> None:
                     output_mode=output_mode,  # type: ignore[arg-type]
                 )
             )
-        except (ValueError, OSError, RuntimeError) as error:
+        except (ValueError, OSError, RuntimeError, HarnessError) as error:
             typer.echo(f"Cannot run agent: {error}", err=True)
             raise typer.Exit(1) from error
         if code:

@@ -208,3 +208,31 @@ def test_live_local_gemma_cli(v2_dish, monkeypatch):
     assert "Usage: requests=" in result.output
     assert "input_tokens=0" not in result.output
     assert "$" not in result.output
+
+
+def test_harness_failure_reports_partial_output_and_measured_usage(v2_dish, monkeypatch):
+    from petri.harness.errors import FailureDetail, TransientHarnessError
+
+    calls = 0
+
+    def respond(messages, info):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ModelResponse(
+                parts=[TextPart('{"verdict":"EVIDENCE_CONFIRMS","sources_cited":[]}')],
+                usage=RequestUsage(input_tokens=41, output_tokens=19),
+            )
+        raise TransientHarnessError(
+            "Local model process disconnected.",
+            detail=FailureDetail(partial_output="Unfinished reply"),
+        )
+
+    monkeypatch.setattr("petri.agents.factory._resolve", lambda _: FunctionModel(respond))
+    result = run("evidence_evaluator", "--verbose")
+    assert result.exit_code == 1
+    assert "Execution failed: Local model process disconnected." in result.output
+    assert "Partial backend output (not a validated verdict)" in result.output
+    assert "Unfinished reply" in result.output
+    assert "input_tokens=41, output_tokens=19" in result.output
+    assert "Retries: 1" in result.output
