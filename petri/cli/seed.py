@@ -157,6 +157,73 @@ def _make_cell_created_callback(
     return _on_cell_created
 
 
+def _resume_colony(petri_dir: Path, dish_id: str, colony_name: str, no_questions: bool) -> None:
+    """Resume a typed seed without clearing draft rows or repeating its wizard."""
+    from petri.graph.colony import ColonyGraph
+    from petri.reasoning.decomposer import decompose_claim, format_colony_display
+    from petri.reasoning.decomposition_settings import DecompositionSettings
+    from petri.reasoning.seed_checkpoint import SeedCheckpointStore, current_attempt
+    from petri.storage import database
+    from petri.storage.colonies import load_colony
+
+    path = dish_db_path(petri_dir, dish_id)
+    colony_id = f"{dish_id}-{colony_name}"
+    if not colony_exists(path, colony_id):
+        print_error_and_exit(f"Colony '{colony_name}' does not exist; seed it first.", code=1)
+    graph, colony_model = load_colony(path, colony_id)
+    center_id = colony_model.center_cell_id
+    attempt = current_attempt(path, center_id)
+    checkpoint = SeedCheckpointStore(path).load(colony_id, attempt)
+    events = database.read_events(path, cell_id=center_id)
+    if any(event["type"] == "colony_approved" for event in events):
+        typer.echo(f"Colony '{colony_name}': nothing to resume.")
+        return
+    complete = checkpoint is not None and checkpoint.complete
+    provider = None
+    if not complete:
+        provider = resolve_provider(petri_dir)
+        if provider is None or not hasattr(provider, "initial_decomposition"):
+            print_error_and_exit("Seed resume requires the configured typed agent backend.", code=2)
+    try:
+        result = decompose_claim(
+            claim=colony_model.center_claim,
+            clarifications=_clarifications_to_models(colony_model.clarifications),
+            dish_id=dish_id, colony_name=colony_name, provider=provider,
+            settings=DecompositionSettings.from_dish(petri_dir),
+            agent_runner=provider if provider is not None else _CompletedSeedRunner(),
+            db_path=path, resume=True,
+        )
+    except Exception as error:
+        print_error_and_exit(f"Seed resume failed: {error}", code=2)
+    finally:
+        if provider is not None and hasattr(provider, "close"):
+            provider.close()
+    graph = ColonyGraph(colony_id=colony_id)
+    for cell in result.cells:
+        graph.add_cell(cell)
+    for edge in result.edges:
+        graph.add_edge(edge)
+    save_colony(path, graph, colony_model)
+    typer.echo(format_colony_display(result))
+    import sys
+
+    if sys.stdin.isatty() and not no_questions and not typer.confirm("Accept this colony?", default=True):
+        typer.echo("Draft retained. Run seed --resume to review it again.")
+        return
+    _log_cell_event(SQLiteEventLog(path), center_id, "colony_approved", {"cell_count": len(result.cells)})
+    typer.echo(f"Colony '{colony_name}' resumed with {len(result.cells)} cells.")
+
+
+class _CompletedSeedRunner:
+    """A completed checkpoint needs no inference provider."""
+
+    def initial_decomposition(self, request, on_progress=None):
+        raise RuntimeError("Completed checkpoint unexpectedly requested inference")
+
+    def expand_why(self, request, on_progress=None):
+        raise RuntimeError("Completed checkpoint unexpectedly requested inference")
+
+
 # ── Command registration ────────────────────────────────────────────────
 
 
@@ -165,11 +232,12 @@ def register(app: typer.Typer) -> None:
     @traced_command("seed")
     def seed(
         source: str = typer.Argument(
-            ..., help="Claim text, URL, or file path to decompose"
+            "", help="Claim text, URL, or file path to decompose"
         ),
         colony: Optional[str] = typer.Option(
             None, help="Colony name (default: auto-generated)"
         ),
+        resume: bool = typer.Option(False, "--resume", help="Continue an interrupted seed; requires --colony"),
         no_questions: bool = typer.Option(
             False, "--no-questions", help="Skip clarifying questions and auto-accept"
         ),
@@ -177,6 +245,13 @@ def register(app: typer.Typer) -> None:
         """Seed a new colony from a claim, URL, or file using the configured backend."""
         petri_dir = find_petri_dir()
         dish_id = get_dish_id(petri_dir)
+        if resume:
+            if not colony:
+                print_error_and_exit("Use --colony to identify the seed to resume.", code=2)
+            _resume_colony(petri_dir, dish_id, colony, no_questions)
+            return
+        if not source:
+            print_error_and_exit("Provide a claim, URL, or file path to seed.", code=2)
         from petri.reasoning.decomposition_settings import DecompositionSettings
         from petri.harness.legacy_bridge import HarnessInferenceProvider
 
@@ -285,7 +360,7 @@ def register(app: typer.Typer) -> None:
         if colony_exists(colony_path, colony_id):
             print_error_and_exit(
                 f"Colony '{colony_name}' already exists. Choose another name; "
-                "use --resume for an interrupted seed when resume support is enabled.", code=1,
+                "use seed --resume --colony with this name to continue an interrupted seed.", code=1,
             )
 
         center_cell = Cell(

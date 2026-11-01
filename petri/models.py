@@ -65,6 +65,8 @@ class EventType(str, Enum):
     decomposition_created = "decomposition_created"
     decomposition_audit = "decomposition_audit"
     decomposition_warning = "decomposition_warning"
+    cell_expansion_completed = "cell_expansion_completed"
+    cell_marked_atomic = "cell_marked_atomic"
     # Agent lifecycle events fired incrementally during `petri seed`
     seed_started = "seed_started"
     clarifying_questions_requested = "clarifying_questions_requested"
@@ -218,6 +220,8 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "decomposition_created": DecompositionCreatedData,
     "decomposition_audit": DecompositionAuditData,
     "decomposition_warning": DecompositionWarningData,
+    "cell_expansion_completed": AgentStepData,
+    "cell_marked_atomic": AgentStepData,
     # Agent lifecycle events fired incrementally by `petri seed` so the
     # on-disk event log reflects what each agent has done at the moment
     # the work happens (instead of being batched at the end).
