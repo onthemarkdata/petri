@@ -43,6 +43,10 @@ mock at the provider seam. Never call a network or a real CLI from tests.
 
 ## Claiming and working an issue
 
+Codex users can follow [the optional setup guide](docs/codex-setup.md). Shared
+agent instructions live in [AGENTS.md](AGENTS.md); personal tools and hooks stay
+in ignored local files or user-level settings.
+
 1. **Comment on the issue** ("I'd like to take this"), and the maintainer will assign it to you.
 2. **Check its "Blocked by" relationships first.** If a blocking issue is open, start there
    instead, or pick something unblocked.
