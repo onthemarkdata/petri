@@ -173,6 +173,9 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
         task.cancel()
 
     app = FastAPI(title="Petri Dashboard API", lifespan=lifespan)
+    from petri.dashboard.traces_api import create_traces_router
+
+    app.include_router(create_traces_router(petri_dir))
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
