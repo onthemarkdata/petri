@@ -61,6 +61,8 @@ def test_named_agents_preserve_the_initial_step_wording():
     assert initial_decomposer.name != five_whys.name
     for instructions in (initial_instructions(DecompositionInput("claim")), why_instructions(DecompositionInput("claim"))):
         assert "Show your reasoning as you go" not in instructions
+        assert "Make each child independently assessable" in instructions
+        assert "Do not invent scope" in instructions
         for step in ("STEP 1 — BRAINSTORM", "STEP 2 — PRIORITIZE", "STEP 3 — SELECT", "STEP 4 — EMIT JSON"):
             assert step in instructions
 

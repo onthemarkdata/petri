@@ -30,6 +30,13 @@ BAD CLAIM (too vague): "The technology will be good." It has no measurable outco
 Prefer claims with quantified thresholds where the claim supports them, explicit scope and exclusions, and a clear falsification test. Do not invent measurements or precision.
 
 """
+SCOPE_CONTEXT = (
+    "Make each child independently assessable. Preserve the parent's named system, version, "
+    "mode, quantities, and conditions whenever they are needed for that child's truth. "
+    "Do not turn a scoped statement into an unrestricted claim by dropping its conditions. "
+    "Do not invent scope or copy the entire parent merely to carry context; state a distinct "
+    "premise with only the context needed to test it.\n\n"
+)
 BEDROCK_TEST = """FIRST — BEDROCK TEST.
 Before generating children, ask whether the parent is a definition, an axiom, or a directly verifiable measurement. If so, STOP: skip all brainstorming, prioritization, and selection below. Return is_atomic=true, an empty sub_premises list, and a specific bedrock_reason. Do not turn its wording into more premises.
 For example, for "One meter equals one hundred centimeters", return {"is_atomic": true, "sub_premises": [], "bedrock_reason": "The metric unit conversion is definitional."}.
@@ -90,7 +97,7 @@ class DecompositionInput:
 
 
 def initial_instructions(request: DecompositionInput) -> str:
-    return SEARCH_INSTRUCTIONS + FLAT_RESULT + QUALITY_BAR + build_decompose_claim_prompt(
+    return SEARCH_INSTRUCTIONS + FLAT_RESULT + QUALITY_BAR + SCOPE_CONTEXT + build_decompose_claim_prompt(
         request.claim, request.clarifications, request.guidance, show_reasoning=False,
     ) + ("STEP 4 — EMIT JSON.\nReturn the selected premises using the supplied output schema. "
          "The only top-level key is nodes; do not wrap the result in InitialDecomposition or another type name.")
@@ -98,7 +105,7 @@ def initial_instructions(request: DecompositionInput) -> str:
 
 def why_instructions(request: DecompositionInput) -> str:
     context = f"Guidance and trigger context:\n{request.guidance}\n\n" if request.guidance else ""
-    return BEDROCK_TEST + context + SEARCH_INSTRUCTIONS + FLAT_RESULT + build_decompose_why_prompt(
+    return BEDROCK_TEST + context + SEARCH_INSTRUCTIONS + FLAT_RESULT + SCOPE_CONTEXT + build_decompose_why_prompt(
         request.claim, request.parent_level, request.parent_seq, show_reasoning=False,
     ) + (
         COUNTERARGUMENT + "If the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), "
