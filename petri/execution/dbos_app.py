@@ -64,7 +64,7 @@ class DBOSApp:
         from dbos import DBOS
 
         # Importing registers the fixed workflow and step definitions before launch.
-        from petri.execution import dbos_backend  # noqa: F401
+        from petri.execution import dbos_backend, scheduler  # noqa: F401
 
         self.petri_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -79,6 +79,7 @@ class DBOSApp:
         _ACTIVE = self
         try:
             self._prepare_admission()
+            scheduler.prepare_rounds(self.db_path)
             DBOS(
                 config={
                     "name": "petri",

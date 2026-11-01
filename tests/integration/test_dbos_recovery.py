@@ -50,4 +50,56 @@ def test_sigkill_resumes_checkpointed_cell_and_excludes_another_owner(tmp_path):
     assert calls == {"socratic": 1, "research": 2}
     events = database.read_events(tmp_path / "petri.sqlite")
     assert len(events) == 2
-    assert {event["id"] for event in events} == {"socratic", "research"}
+    assert {event["id"] for event in events} == {
+        "dish-colony-002-001:socratic",
+        "dish-colony-002-001:research",
+    }
+
+
+@pytest.mark.integration
+def test_sigkill_resumes_colony_without_reexecuting_validated_leaves(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    worker = root / "tests/helpers/dbos_recovery_worker.py"
+    environment = {**os.environ, "PYTHONPATH": str(root)}
+    command = [sys.executable, str(worker), str(tmp_path)]
+    with (tmp_path / "worker.log").open("w") as log:
+        process = subprocess.Popen(
+            command + ["colony-start"], env=environment, stdout=log, stderr=log
+        )
+        try:
+            deadline = time.monotonic() + 20
+            while not (tmp_path / "in-research").exists():
+                assert process.poll() is None, (tmp_path / "worker.log").read_text()
+                assert time.monotonic() < deadline, (tmp_path / "worker.log").read_text()
+                time.sleep(0.02)
+            leaves = [
+                row for row in database.list_cells(tmp_path / "petri.sqlite") if row["level"] == 2
+            ]
+            assert len(leaves) == 2
+            assert all(row["status"] == "VALIDATED" for row in leaves)
+            process.kill()
+            assert process.wait(timeout=5) == -signal.SIGKILL
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+    (tmp_path / "release").write_text("resume")
+    resumed = subprocess.run(
+        command + ["colony-resume"], env=environment, capture_output=True, text=True, timeout=30
+    )
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert len(result["completed"]) == 5
+    assert result["not_eligible"] == []
+    with sqlite3.connect(tmp_path / "audit.sqlite") as conn:
+        for leaf in leaves:
+            calls = dict(
+                conn.execute(
+                    "SELECT phase,COUNT(*) FROM calls WHERE cell_id=? GROUP BY phase", (leaf["id"],)
+                )
+            )
+            assert calls == {"socratic": 1, "research": 1}
+    assert all(
+        row["status"] == "VALIDATED" for row in database.list_cells(tmp_path / "petri.sqlite")
+    )
+    assert len(database.read_events(tmp_path / "petri.sqlite")) == 10

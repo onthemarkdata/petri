@@ -4,12 +4,15 @@ import asyncio
 import json
 import sqlite3
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from dbos import DBOS
 
 from petri.execution.dbos_backend import CellRunSpec, DBOSExecutionBackend
+from petri.execution.scheduler import ColonyRunSpec
+from petri.storage.colonies import save_colony
+from tests.conftest import _build_canonical_colony
 from petri.models import Event
 from petri.storage import database
 from tests.pipeline_stubs import StubPhases
@@ -20,20 +23,24 @@ def main():
     mode = sys.argv[2]
     domain = directory / "petri.sqlite"
     phases = StubPhases()
+    colony_mode = mode.startswith("colony")
+    colony = _build_canonical_colony() if colony_mode else None
+    if colony_mode and not domain.exists():
+        save_colony(domain, colony["graph"], colony["colony_model"])
     directory.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(directory / "audit.sqlite") as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS calls(phase TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS calls(phase TEXT, cell_id TEXT)")
 
-    def record(phase):
+    def record(phase, value):
         with sqlite3.connect(directory / "audit.sqlite") as conn:
-            conn.execute("INSERT INTO calls VALUES (?)", (phase,))
+            conn.execute("INSERT INTO calls VALUES (?,?)", (phase, value.cell_id))
 
-    def event(phase):
+    def event(phase, value):
         database.append_event(
             domain,
             Event(
-                id=phase,
-                cell_id="dish-colony-002-001",
+                id=f"{value.cell_id}:{phase}",
+                cell_id=value.cell_id,
                 timestamp="2026-11-01T00:00:00Z",
                 type="verdict_issued",
                 agent="investigator",
@@ -43,32 +50,49 @@ def main():
         )
 
     async def socratic(value):
-        record("socratic")
-        event("socratic")
+        record("socratic", value)
+        event("socratic", value)
         return await phases.socratic(value)
 
     async def research(value):
-        record("research")
-        event("research")
-        (directory / "in-research").write_text("ready")
-        while not (directory / "release").exists():
-            await asyncio.sleep(0.02)
+        record("research", value)
+        event("research", value)
+        if not colony_mode or value.cell_id == colony["premise1"].id:
+            (directory / "in-research").write_text("ready")
+            while not (directory / "release").exists():
+                await asyncio.sleep(0.02)
         return await phases.research(value)
 
-    deps = replace(phases.dependencies(), socratic=socratic, research=research)
+    async def finish(value, result):
+        if colony_mode:
+            with database._write(domain) as conn:
+                conn.execute(
+                    "UPDATE cells SET status = ? WHERE id = ?",
+                    (result.status.upper(), value.cell_id),
+                )
+
+    deps = replace(phases.dependencies(), socratic=socratic, research=research, finish=finish)
     backend = DBOSExecutionBackend(config={"execution": {"backend": "dbos"}})
     backend.start(directory, db_path=domain, dependencies=lambda spec: deps)
     if mode == "probe":
         raise AssertionError("A second process acquired the dish execution lock")
 
     async def run():
-        spec = CellRunSpec("dish-colony-002-001", 1, "2026-11-01")
-        if mode == "resume":
+        spec = (
+            ColonyRunSpec(colony["colony_id"], 1, "2026-11-01")
+            if colony_mode
+            else CellRunSpec("dish-colony-002-001", 1, "2026-11-01")
+        )
+        if mode.endswith("resume"):
             handle = await DBOS.retrieve_workflow_async(spec.workflow_id)
+        elif colony_mode:
+            handle = await backend.enqueue_colony(spec)
         else:
             handle = await backend.enqueue_cell(spec, level=2)
         result = await handle.get_result()
-        (directory / "result.json").write_text(json.dumps(result.model_dump()))
+        (directory / "result.json").write_text(
+            json.dumps(asdict(result) if colony_mode else result.model_dump())
+        )
 
     asyncio.run(run())
     backend.close()

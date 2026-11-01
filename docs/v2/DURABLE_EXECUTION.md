@@ -56,3 +56,22 @@ The test uses fake phases. It kills a process during research, verifies that a
 second owner is rejected, restarts without resubmitting the workflow, and checks
 that the checkpointed Socratic phase ran once. The uncheckpointed research call
 runs twice, while its domain event remains a single row.
+
+## Colony scheduling and new rounds
+
+A `grow_colony` parent reads the stored graph, enqueues eligible cell rounds, and
+waits for their results before checking eligibility again. The unchanged graph
+gate requires every dependency to be `VALIDATED`. `DISPROVEN`, `DEFER_OPEN`, and
+parked cells therefore block their dependents. The parent reports remaining
+`NEW` cells as `not_eligible` and finishes without a second grow invocation.
+
+Parent identities include the colony, requested round, and any explicit cell
+scope. Dish-level dispatch applies `--colony` filtering before creating parents.
+Dry runs read the eligible list without launching DBOS or creating a workflow.
+
+Revalidation requires a stable request ID. A step uses a transaction to read the
+stored rounds, allocate the next number once for that request, and set the cell
+to `NEW`. It then appends an idempotent `cell_reopened` event before completing
+its checkpoint. Its child uses the distinct ID
+`{cell_id}:r{next_round}`. Repeating the request attaches to the same parent and
+child; dependents retain their existing status.
