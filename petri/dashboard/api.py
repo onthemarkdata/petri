@@ -11,6 +11,7 @@ import asyncio
 import base64
 import errno
 import json
+import logging
 import os
 import pty
 import signal
@@ -32,6 +33,8 @@ from petri.dashboard.frontend import build_frontend_html
 from petri.dashboard.migrate import incremental_sync
 from petri.storage.queue import list_queue, load_queue
 from petri import query
+
+logger = logging.getLogger(__name__)
 
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
@@ -613,56 +616,9 @@ def create_app(petri_dir: Path) -> FastAPI:
             'top_cells': [{'cell_id': key, 'event_count': value} for key, value in sorted(cells.items(), key=lambda item: (-item[1], item[0]))[:10]],
         }
 
-    # ── SSE stream ────────────────────────────────────────────────────
+    from petri.dashboard.stream_api import create_stream_router
 
-    @app.get("/api/stream")
-    async def event_stream():
-        async def generate():
-            conn = get_db(db_path)
-            try:
-                row = conn.execute("SELECT MAX(rowid) FROM events").fetchone()
-                last_rowid = row[0] or 0
-            except sqlite3.OperationalError:
-                last_rowid = 0
-            conn.close()
-
-            yield {
-                "event": "connected",
-                "data": json.dumps(
-                    {"status": "ok", "last_rowid": last_rowid}
-                ),
-            }
-
-            while True:
-                await asyncio.sleep(2)
-                try:
-                    conn = get_db(db_path)
-                    new_rows = conn.execute(
-                        "SELECT rowid, id, cell_id, type, agent, iteration "
-                        "FROM events WHERE rowid > ? "
-                        "ORDER BY rowid ASC LIMIT 50",
-                        [last_rowid],
-                    ).fetchall()
-                    conn.close()
-
-                    for evt in new_rows:
-                        last_rowid = evt["rowid"]
-                        yield {
-                            "event": "event_inserted",
-                            "data": json.dumps(
-                                {
-                                    "id": evt["id"],
-                                    "cell_id": evt["cell_id"],
-                                    "type": evt["type"],
-                                    "agent": evt["agent"],
-                                    "iteration": evt["iteration"],
-                                }
-                            ),
-                        }
-                except Exception:
-                    pass  # non-fatal, retries next cycle
-
-        return EventSourceResponse(generate())
+    app.include_router(create_stream_router(petri_dir))
 
     return app
 
@@ -682,4 +638,4 @@ async def _tail_loop(
         try:
             incremental_sync(petri_dir, db_path, file_offsets)
         except Exception:
-            pass  # non-fatal, retries next cycle
+            logger.exception('Legacy dashboard sync failed; retrying next cycle.')

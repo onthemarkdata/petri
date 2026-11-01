@@ -197,3 +197,18 @@ The trace API is read-only: `/api/traces`, `/api/traces/<trace_id>`, and `/api/c
 A missing or older dish with no telemetry returns an empty list or empty usage
 rollup. An unknown trace ID returns 404. Only v2 per-dish databases are enumerated;
 legacy flat JSONL dishes and backup/export directories are ignored.
+
+
+## Live progress and reconnects
+
+`/api/stream` tails committed domain events with an independent integer rowid
+watermark for each dish. Its SSE event ID encodes the watermark map as JSON.
+Reconnect with the last SSE ID in the `Last-Event-ID` header or `cursor` query
+parameter. Timestamp ties do not affect replay order.
+
+`agent_progress` is a transient, in-process channel. The stream adapter can fan
+out text deltas to connected clients, and a slow client retains the latest 100
+progress messages. Detached CLI processes remain visible through persisted domain
+events, but their live text does not cross process boundaries. Production agent
+stream-handler wiring and cross-process live text are separate work; no detached
+CLI text coverage is claimed by this adapter.
