@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -92,25 +93,63 @@ def restore_snapshot(petri_dir: Path, name: str, *, force: bool = False) -> Path
     with read_connection(source) as connection:
         if connection is None or connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("Snapshot database failed its integrity check")
-    if target.exists() and not force:
-        raise ValueError(f"Refusing to overwrite {target}; use --force to restore this snapshot")
     owner = FileLock(Path(petri_dir) / ".execution-owner.lock")
     try:
         owner.acquire(timeout=0)
     except Timeout as error:
         raise RuntimeError("Execution is active. Stop grow before restoring this dish.") from error
-    staging = target.with_name(f".restore-{uuid4().hex}.sqlite")
+    workspace: Path | None = None
+    preserved: list[tuple[Path, Path]] = []
+    installed: list[Path] = []
+    retain_workspace = False
     try:
+        if target.exists() and not force:
+            raise ValueError(f"Refusing to overwrite {target}; use --force to restore this snapshot")
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, staging)
-        # The owner lock prevents DBOS from reopening the old generation here.
-        for suffix in ("-wal", "-shm"):
-            Path(str(target) + suffix).unlink(missing_ok=True)
-        staging.replace(target)
+        workspace = Path(tempfile.mkdtemp(prefix=".restore-", dir=Path(petri_dir)))
+        staged_db = workspace / "petri.sqlite"
+        shutil.copy2(source, staged_db)
         defaults = snapshot / "defaults"
+        target_defaults = Path(petri_dir) / "defaults"
+        staged_defaults = workspace / "defaults"
         if defaults.is_dir():
-            shutil.copytree(defaults, Path(petri_dir) / "defaults", dirs_exist_ok=True)
+            shutil.copytree(defaults, staged_defaults)
+        # Stage all copies before moving either live resource. Keep the previous
+        # generation until both replacements succeed so publication can roll back.
+        try:
+            for original in (target, Path(str(target) + "-wal"), Path(str(target) + "-shm")):
+                if original.exists() or original.is_symlink():
+                    saved = workspace / ("previous-" + original.name)
+                    original.replace(saved)
+                    preserved.append((original, saved))
+            if defaults.is_dir() and (target_defaults.exists() or target_defaults.is_symlink()):
+                saved = workspace / "previous-defaults"
+                target_defaults.replace(saved)
+                preserved.append((target_defaults, saved))
+            staged_db.replace(target)
+            installed.append(target)
+            if defaults.is_dir():
+                staged_defaults.replace(target_defaults)
+                installed.append(target_defaults)
+        except BaseException:
+            try:
+                for path in reversed(installed):
+                    if path.is_dir() and not path.is_symlink():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink(missing_ok=True)
+                for original, saved in reversed(preserved):
+                    saved.replace(original)
+            except OSError as error:
+                retain_workspace = True
+                raise RuntimeError(
+                    f"Restore could not roll back completely. Previous files remain in {workspace}."
+                ) from error
+            raise
     finally:
-        staging.unlink(missing_ok=True)
-        owner.release()
+        try:
+            if workspace is not None and not retain_workspace:
+                shutil.rmtree(workspace)
+        finally:
+            owner.release()
     return target

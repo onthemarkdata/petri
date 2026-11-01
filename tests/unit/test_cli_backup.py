@@ -114,3 +114,85 @@ def test_restore_rejects_active_execution_and_path_escape(tmp_path):
             restore_snapshot(tmp_path, snapshot.name, force=True)
     with pytest.raises(ValueError, match="snapshot name"):
         restore_snapshot(tmp_path, "../elsewhere", force=True)
+
+
+def defaults_bytes(petri_dir):
+    return {str(path.relative_to(petri_dir/'defaults')):path.read_bytes()
+            for path in (petri_dir/'defaults').rglob('*') if path.is_file()}
+
+
+def test_restore_replaces_defaults_exactly_and_keeps_snapshot(tmp_path):
+    from petri.storage.backup import restore_snapshot
+
+    seed(tmp_path)
+    defaults = tmp_path/'defaults'
+    (defaults/'nested').mkdir()
+    (defaults/'nested/original.txt').write_text('Snapshot content')
+    expected = defaults_bytes(tmp_path)
+    snapshot = snapshot_before_destructive(tmp_path,'dish')
+    (defaults/'nested/original.txt').write_text('Changed after snapshot')
+    (defaults/'later.txt').write_text('Created after snapshot')
+    restore_snapshot(tmp_path,snapshot.name,force=True)
+    assert defaults_bytes(tmp_path)==expected
+    assert (snapshot/'defaults/nested/original.txt').read_text()=='Snapshot content'
+    assert not list(tmp_path.glob('.restore-*'))
+
+
+def test_restore_without_snapshotted_defaults_leaves_live_defaults(tmp_path):
+    import shutil
+    from petri.storage.backup import restore_snapshot
+
+    seed(tmp_path)
+    snapshot = snapshot_before_destructive(tmp_path,'dish')
+    shutil.rmtree(snapshot/'defaults')
+    (tmp_path/'defaults/later.txt').write_text('Keep live defaults')
+    expected = defaults_bytes(tmp_path)
+    restore_snapshot(tmp_path,snapshot.name,force=True)
+    assert defaults_bytes(tmp_path)==expected
+
+
+def test_defaults_staging_failure_preserves_live_database_and_defaults(tmp_path,monkeypatch):
+    import shutil
+    import pytest
+    from petri.storage.backup import restore_snapshot
+
+    path = seed(tmp_path)
+    snapshot = snapshot_before_destructive(tmp_path,'dish')
+    with closing(database.connect(path)) as connection:
+        connection.execute("UPDATE cells SET claim_text='Post-snapshot content'")
+    (tmp_path/'defaults/later.txt').write_text('Live content')
+    expected_rows,expected_defaults = rows(path),defaults_bytes(tmp_path)
+    def fail_copy(*args,**kwargs):
+        raise OSError('Fixture copy failure')
+    monkeypatch.setattr(shutil,'copytree',fail_copy)
+    with pytest.raises(OSError,match='copy failure'):
+        restore_snapshot(tmp_path,snapshot.name,force=True)
+    assert rows(path)==expected_rows and defaults_bytes(tmp_path)==expected_defaults
+    assert not list(tmp_path.glob('.restore-*'))
+
+
+def test_defaults_publish_failure_rolls_back_database_sidecars_and_defaults(tmp_path,monkeypatch):
+    from pathlib import Path
+    import pytest
+    from petri.storage.backup import restore_snapshot
+
+    path = seed(tmp_path)
+    snapshot = snapshot_before_destructive(tmp_path,'dish')
+    with closing(database.connect(path)) as connection:
+        connection.execute("UPDATE cells SET claim_text='Post-snapshot content'")
+    expected_db = path.read_bytes()
+    for suffix in ['-wal','-shm']:
+        Path(str(path)+suffix).write_bytes(b'Preserve old sidecar')
+    (tmp_path/'defaults/later.txt').write_text('Live content')
+    expected_defaults = defaults_bytes(tmp_path)
+    replace = Path.replace
+    def fail_publish(source,target):
+        if source.name=='defaults' and source.parent.name.startswith('.restore-'):
+            raise OSError('Fixture publish failure')
+        return replace(source,target)
+    monkeypatch.setattr(Path,'replace',fail_publish)
+    with pytest.raises(OSError,match='publish failure'):
+        restore_snapshot(tmp_path,snapshot.name,force=True)
+    assert path.read_bytes()==expected_db and defaults_bytes(tmp_path)==expected_defaults
+    assert all(Path(str(path)+suffix).read_bytes()==b'Preserve old sidecar' for suffix in ['-wal','-shm'])
+    assert not list(tmp_path.glob('.restore-*'))
