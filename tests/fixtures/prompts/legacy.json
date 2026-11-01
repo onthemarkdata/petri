@@ -1,0 +1,90 @@
+[
+  {
+    "method": "assess_claim_substance",
+    "args": [
+      "Solar panels generate electricity."
+    ],
+    "prompt": "Assess whether the following text is a SUBSTANTIVE research claim that warrants decomposition, or whether it is placeholder/test input (e.g. 'this is a test claim', 'asdf', 'hello world', empty).\n\nText: \"Solar panels generate electricity.\"\n\nReturn ONLY a JSON object:\n{\n  \"is_substantive\": true|false,\n  \"reason\": \"one-sentence explanation\",\n  \"suggested_rewrite\": \"tighter rephrasing, or empty string\"\n}\n"
+  },
+  {
+    "method": "generate_clarifying_questions",
+    "args": [
+      "Solar panels generate electricity.",
+      3
+    ],
+    "prompt": "Generate 3 CLAIM-SPECIFIC clarifying questions for this research claim. The questions must be tailored to the actual content of the claim — do not use generic questions like 'what is the domain?' or 'what is the time horizon?'. Each question should surface a specific assumption, scope boundary, or definitional ambiguity in THIS claim.\n\nClaim: \"Solar panels generate electricity.\"\n\nFor each question, optionally provide 2-5 multiple-choice options when the answer space is naturally bounded; otherwise leave options empty for free-text input.\n\nReturn ONLY a JSON array: [{\"question\": \"...\", \"options\": [\"...\", \"...\"]}, ...]"
+  },
+  {
+    "method": "decompose_claim",
+    "args": [
+      "Solar panels reduce costs.",
+      [],
+      "",
+      4
+    ],
+    "prompt": "Decompose this claim into first-principles premises.\n\nClaim: \"Solar panels reduce costs.\"\n\nWork through this in four explicit steps. Show your reasoning as you go — the user is watching this stream live.\n\nSTEP 1 — BRAINSTORM (overgenerate).\nList 10-15 candidate premises that, if false, would invalidate the claim. Cast a wide net. Cover different angles: definitions, mechanisms, scope boundaries, counterfactuals, hidden assumptions. Number them 1..N. Do NOT filter at this stage.\n\nSTEP 2 — PRIORITIZE.\nFor each candidate, score on three dimensions:\n  - LOAD-BEARING: would the claim collapse if this were false? (HIGH/MED/LOW)\n  - CONTESTABLE: is this actually in question, not trivially true? (HIGH/MED/LOW)\n  - DISTINCT: does it cover ground the other top candidates don't?\nBriefly justify each score.\n\nSTEP 3 — SELECT.\nPick the TOP 4 premises after ranking. Order them by importance (most important first). Drop duplicates and trivial restatements. Do not pick the first ones you wrote down — pick the ones that scored highest.\n\nSTEP 4 — EMIT JSON.\nReturn a JSON object on the final lines:\n{\"nodes\": [{\"level\": 1, \"seq\": 1, \"claim_text\": \"...\"}, ...], \"edges\": []}\n\nThe JSON must contain AT MOST 4 nodes (fewer is fine if fewer genuine first-principles premises exist). Return no commentary after the JSON."
+  },
+  {
+    "method": "decompose_claim",
+    "args": [
+      "Solar panels reduce costs.",
+      [
+        {
+          "question": "Where?",
+          "answer": "California"
+        }
+      ],
+      "  Include maintenance.  ",
+      3
+    ],
+    "prompt": "Decompose this claim into first-principles premises.\n\nClaim: \"Solar panels reduce costs.\"\nClarifications:\nQ: Where? A: California\nRefinement guidance from user (must shape this re-roll):\nInclude maintenance.\n\n\nWork through this in four explicit steps. Show your reasoning as you go — the user is watching this stream live.\n\nSTEP 1 — BRAINSTORM (overgenerate).\nList 10-15 candidate premises that, if false, would invalidate the claim. Cast a wide net. Cover different angles: definitions, mechanisms, scope boundaries, counterfactuals, hidden assumptions. Number them 1..N. Do NOT filter at this stage.\n\nSTEP 2 — PRIORITIZE.\nFor each candidate, score on three dimensions:\n  - LOAD-BEARING: would the claim collapse if this were false? (HIGH/MED/LOW)\n  - CONTESTABLE: is this actually in question, not trivially true? (HIGH/MED/LOW)\n  - DISTINCT: does it cover ground the other top candidates don't?\nBriefly justify each score.\n\nSTEP 3 — SELECT.\nPick the TOP 3 premises after ranking. Order them by importance (most important first). Drop duplicates and trivial restatements. Do not pick the first ones you wrote down — pick the ones that scored highest.\n\nSTEP 4 — EMIT JSON.\nReturn a JSON object on the final lines:\n{\"nodes\": [{\"level\": 1, \"seq\": 1, \"claim_text\": \"...\"}, ...], \"edges\": []}\n\nThe JSON must contain AT MOST 3 nodes (fewer is fine if fewer genuine first-principles premises exist). Return no commentary after the JSON."
+  },
+  {
+    "method": "decompose_why",
+    "args": [
+      "Solar panels generate electricity.",
+      1,
+      2,
+      3
+    ],
+    "prompt": "FIVE WHYS — drill one level deeper into a parent premise.\n\nPremise: \"Solar panels generate electricity.\"\n\nWork through this in four explicit steps. Show your reasoning as you go — the user is watching this stream live.\n\nSTEP 1 — BRAINSTORM (overgenerate).\nList 6-10 candidate sub-premises that must hold for the parent premise to be true. Number them 1..N. Don't filter yet.\n\nSTEP 2 — PRIORITIZE.\nFor each candidate, score on:\n  - FOUNDATIONALITY: closer to bedrock = higher (HIGH/MED/LOW)\n  - INDEPENDENCE: separately verifiable from the others (HIGH/MED/LOW)\n  - LOAD-BEARING: would the parent collapse if this sub-premise were false?\nBriefly justify each score.\n\nSTEP 3 — SELECT.\nPick the TOP 3 sub-premises. Drop redundant or surface-level ones. Do not pick the first ones you wrote down — pick the ones that scored highest.\n\nIf the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), skip steps 1-3 and return:\n{\"sub_premises\": [], \"is_atomic\": true, \"reason\": \"why it is atomic\"}\n\nSTEP 4 — EMIT JSON.\nReturn: {\"sub_premises\": [{\"claim_text\": \"...\", \"is_atomic\": false}, ...], \"is_atomic\": false}\n\nThe sub_premises list must contain AT MOST 3 items. Return no commentary after the JSON."
+  },
+  {
+    "method": "assess_cell",
+    "args": [
+      "my-dish-my-colony-001-002",
+      "Solar panels reduce costs.",
+      {
+        "iteration": 2,
+        "weakest_link": "cost",
+        "focused_directive": "Check maintenance",
+        "phase": "critique",
+        "source_validation": {
+          "valid": false
+        },
+        "prior_evidence": "Earlier evidence."
+      },
+      "skeptic"
+    ],
+    "prompt": "IMPORTANT — Today's date is 2026-11-01. Your training data is stale relative to this date. You MUST use the WebSearch tool to find current sources and WebFetch to verify that each URL you cite actually exists before including it. Do NOT cite URLs from memory — they will be treated as fabricated. Prefer sources published within the last 12 months unless the claim is explicitly about historical events.\n\nYou are the skeptic agent in a research validation pipeline.\n\nBuild the strongest case AGAINST. Use WebSearch to find current contradicting evidence — do not cite from memory. Number each adversarial argument (1-2 sentences each). For each, cite a contradicting source with URL. Include falsification conditions — what would prove this claim false. Summary: single strongest reason to doubt this claim.\n\n\nCell: my-dish-my-colony-001-002\nClaim: \"Solar panels reduce costs.\"\nContext: Iteration: 2\nFocus area: cost\nDirective: Check maintenance\nPhase: critique\nSource validation: {\"valid\": false}\n\n--- Prior Evidence ---\nEarlier evidence.\n--- End Prior Evidence ---\n\nBuild on the evidence above. Focus on new insights and gaps.\n\nValid verdicts: ARGUMENT_WITHSTANDS_CRITIQUE, CRITICAL_FLAW_FOUND, UNADDRESSED_COUNTERARGUMENT\n\nReturn ONLY a JSON object with:\n- \"verdict\": one of [ARGUMENT_WITHSTANDS_CRITIQUE, CRITICAL_FLAW_FOUND, UNADDRESSED_COUNTERARGUMENT]\n- \"sources_cited\": REQUIRED array. Each source must have:\n  - \"url\": full URL (https://...) to the source\n  - \"title\": \"Publication, Article Title (Year)\"\n  - \"hierarchy_level\": 1-6 (1=direct measurement, 2=authoritative docs, 3=derived calculation, 4=expert consensus, 5=single expert, 6=community report)\n  - \"finding\": 1-2 sentence finding from this source\n  - \"supports_or_contradicts\": \"supports\" or \"contradicts\"\n- \"summary\": 1-3 concise sentences. Enumerate dimensions, cite specific numbers.\n- \"confidence\": \"HIGH\", \"MEDIUM\", or \"LOW\"\n\nRULES:\n- Every claim MUST be backed by at least one source with a valid URL.\n- Keep summary TERSE — citations are the evidence.\n- Do NOT include \"arguments\" or \"evidence\" fields.\n\nReturn ONLY the JSON.",
+    "kwargs": {
+      "valid_verdicts": [
+        "ARGUMENT_WITHSTANDS_CRITIQUE",
+        "CRITICAL_FLAW_FOUND",
+        "UNADDRESSED_COUNTERARGUMENT"
+      ],
+      "role_instruction": "Build the strongest case AGAINST. Use WebSearch to find current contradicting evidence — do not cite from memory. Number each adversarial argument (1-2 sentences each). For each, cite a contradicting source with URL. Include falsification conditions — what would prove this claim false. Summary: single strongest reason to doubt this claim.\n",
+      "today_iso": "2026-11-01"
+    }
+  },
+  {
+    "method": "summarize_evidence",
+    "args": [
+      "my-dish-my-colony-001-002",
+      "Solar panels reduce costs.",
+      "Public evidence.",
+      2
+    ],
+    "prompt": "You are cell_lead, the orchestrator for this research cell. Your job right now is to read the accumulated evidence below and produce a concise markdown summary (no more than ~400 words) that a human can scan in 30 seconds.\n\n## Cell claim\nSolar panels reduce costs.\n\n## Iteration\n2\n\n## Accumulated evidence\nPublic evidence.\n\n## Output format\nReturn ONLY markdown with these sections, in this order:\n1. **Current state** — one sentence describing where the cell stands right now.\n2. **Key findings** — 3-6 bullet points, each anchored to a specific source or agent verdict. Be concrete, not generic.\n3. **Open questions** — 1-3 bullets of what is still unresolved, or 'None' if the cell has converged.\n4. **Confidence** — a short phrase (e.g. 'high, primary sources agree', 'low, contradicting sources', 'medium, pending red team').\n\nDo not repeat the phase-by-phase breakdown from evidence.md — that's the raw log. Synthesize across phases."
+  }
+]
