@@ -210,11 +210,10 @@ class TestPerLayerCap:
         """Override the per-layer cap for the duration of one test."""
         import petri.config
 
-        monkeypatch.setattr(
-            petri.config,
-            "get_max_nodes_per_layer",
-            lambda config=None: value,
-        )
+        values = petri.config.load_config()
+        monkeypatch.setattr(petri.config, "load_config", lambda *args: values.model_copy(
+            update={"max_nodes_per_layer": value}
+        ))
 
     def test_level_one_truncated_to_cap(self, monkeypatch):
         """If the model returns 10 level-1 cells, only the first 5 survive."""

@@ -13,7 +13,7 @@ from petri.cli_ui import (
     print_error_and_exit,
     short_cell_id,
 )
-from petri.config import MAX_CONCURRENT
+from petri.config import load_config
 from petri.execution import resolve_backend
 from petri.execution.models import GrowOutcome, NoProviderError, ProgressEvent
 
@@ -35,8 +35,8 @@ def register(app: typer.Typer) -> None:
         colony_name: str | None = typer.Option(
             None, "--colony", help="Grow all cells in a specific colony"
         ),
-        max_concurrent: int = typer.Option(
-            MAX_CONCURRENT, "--max-concurrent", help="Max parallel cells"
+        max_concurrent: int | None = typer.Option(
+            None, "--max-concurrent", help="Max parallel cells"
         ),
         redecompose_on: str = typer.Option("", "--redecompose-on", help="Propose sub-claims for inconclusive, flaw, caveats, or stalled verdicts"),
         approve_all: bool = typer.Option(False, "--approve-all", help="Approve matching re-decomposition proposals"),
@@ -55,16 +55,19 @@ def register(app: typer.Typer) -> None:
         except ValueError as error:
             print_error_and_exit(str(error))
 
-        # The processor's process_queue API still takes three orthogonal
-        # knobs — cell_ids, colony_filter, all_cells — and we keep using
-        # them unchanged. We just no longer expose --all on the CLI
-        # surface because it's the default: all_cells is true exactly
-        # when the user didn't scope to a specific cell or colony.
+        concurrency: int = (
+            max_concurrent if max_concurrent is not None
+            else load_config().execution.worker_concurrency
+        )
+        settings = getattr(backend, "settings", None)
+        if max_concurrent is None and settings is not None:
+            concurrency = int(settings.worker_concurrency)
+
+        # An omitted scope grows all eligible colonies.
         selected_cells: list[str] | None = cell or None
         all_cells: bool = not selected_cells and not colony_name
 
         from petri.lifecycle.gate import ApprovalGate, parse_triggers
-        from petri.lifecycle.config import LifecycleConfig
         from petri.config import load_dish_config
         from petri.execution.dbos_backend import DBOSExecutionBackend
 
@@ -78,7 +81,7 @@ def register(app: typer.Typer) -> None:
                 if not isinstance(backend, DBOSExecutionBackend):
                     raise ValueError("Re-decomposition requires the DBOS execution backend.")
                 backend.after_pass = ApprovalGate(
-                    enabled=enabled, config=LifecycleConfig.model_validate(load_dish_config(petri_dir).get("lifecycle", {})),
+                    enabled=enabled, config=load_dish_config(petri_dir).lifecycle,
                     approve_all=approve_all, reject_all=reject_all,
                     selected_cells=selected_cells, colony=colony_name,
                 )
@@ -108,7 +111,7 @@ def register(app: typer.Typer) -> None:
                 dry_result = backend.process_queue(
                     petri_dir=petri_dir,
                     provider=provider,
-                    max_concurrent=max_concurrent,
+                    max_concurrent=concurrency,
                     cell_ids=selected_cells,
                     colony_filter=colony_name,
                     all_cells=all_cells,
@@ -149,16 +152,16 @@ def register(app: typer.Typer) -> None:
         status_thread: threading.Thread | None = None
 
         try:
-            with MultiSpinner("growing", slot_count=max_concurrent) as multi:
+            with MultiSpinner("growing", slot_count=concurrency) as multi:
                 # Render every row up-front with an "idle" label so all
                 # N slots are visible from t=0 — before any worker has
                 # actually picked up a cell.
-                for slot_index in range(max_concurrent):
+                for slot_index in range(concurrency):
                     multi.update_slot(slot_index, "idle")
 
                 def _on_event(event: ProgressEvent) -> None:
                     """Render backend progress in the matching spinner row."""
-                    if event.slot_idx < 0 or event.slot_idx >= max_concurrent:
+                    if event.slot_idx < 0 or event.slot_idx >= concurrency:
                         return
                     cell_label = short_cell_id(event.cell_id)
                     if event.kind == "started":
@@ -198,7 +201,7 @@ def register(app: typer.Typer) -> None:
                     return backend.process_queue(
                         petri_dir=petri_dir,
                         provider=provider,
-                        max_concurrent=max_concurrent,
+                        max_concurrent=concurrency,
                         cell_ids=selected_cells,
                         colony_filter=colony_name,
                         all_cells=all_cells,
@@ -249,7 +252,7 @@ def register(app: typer.Typer) -> None:
         assert outcome is not None  # set unless an exception bubbled up
 
         from petri.config import load_dish_config
-        if export or load_dish_config(petri_dir).get("auto_export", False):
+        if export or load_dish_config(petri_dir).auto_export:
             from petri.cli._bootstrap import get_dish_id
             from petri.storage.export import export_incremental
 

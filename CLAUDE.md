@@ -52,47 +52,26 @@ petri backup --with-export  # Snapshot domain data and its derived text
 
 ```
 petri/
-├── models.py              # Pydantic models: Cell, Colony, Event, QueueEntry, AgentRole
-├── config.py              # Centralized config loader (petri.yaml)
-├── cli.py                 # Typer CLI (8 commands)
-│
-├── engine/                # Core pipeline orchestration
-│   ├── processor.py       # Pipeline processor (queue-driven, concurrent)
-│   ├── propagation.py     # Evidence re-entry, dependency propagation
-│   ├── load_balancer.py   # Adaptive concurrency control
-│   └── preflight.py       # Prerequisite checks (Python, Claude Code)
-│
-├── storage/               # Per-dish SQLite domain storage and legacy queue
-│   ├── database.py        # WAL schema and append-only event writes
-│   ├── event_log.py       # Domain event seam with legacy JSONL support
-│   └── queue.py           # 13-state machine with fcntl file locking
-│
-├── analysis/              # Validation, convergence, scanning
-│   ├── convergence.py     # Verdict matrix, blocking check, circuit breaker
-│   ├── validators.py      # Source hierarchy enforcement
-│   └── scanner.py         # Contradiction scanner (10 categories, 6-level authority)
-│
-├── reasoning/             # LLM-driven logic
-│   ├── decomposer.py      # Claim → colony decomposition
-│   ├── debate.py          # 4 structured debate pairings
-│   ├── ingest.py          # Content ingestion (URL, file, text)
-│   └── claude_code_provider.py  # InferenceProvider via Claude Code CLI
-│
-├── graph/                 # DAG structure
-│   └── colony.py          # DAG operations, cycle detection, level computation
-│
-├── telemetry/            # Local SQLite span/usage sink and optional OTLP traces
-├── defaults/              # Opinionated config (13 agents, 4 debates, constitution)
-├── templates/             # Plain-text templates for adapter config generation
-├── query/                 # Short-lived read-only SQLite queries
-├── dashboard/             # FastAPI REST+SSE over per-dish queries
-└── adapters/              # Harness adapters (Claude Code adapter)
+├── models.py        # Cells, colonies, events, and typed results
+├── config.py        # Uncached validated settings
+├── cli/             # Lifecycle and inspection commands
+├── execution/       # DBOS SQLite runtime and typed pipeline
+├── harness/         # First-party inference models and transports
+├── storage/         # Per-dish SQLite data, backups, and derived exports
+├── lifecycle/       # Revalidation, dependent flags, and proposals
+├── analysis/        # Convergence, source validation, and scanning
+├── reasoning/       # Typed seed decomposition and evidence ingestion
+├── graph/           # Dependency graphs and integrity checks
+├── telemetry/       # Local spans and usage, with optional OTLP
+├── query/           # Read-only SQLite queries
+└── dashboard/       # Local REST and SSE interface
 ```
 
 ## Active Technologies
 
 - Python 3.11+ / Core: stdlib + Pydantic / CLI: Typer / Dashboard: FastAPI + SSE
-- Storage: JSONL (event logs, append-only), JSON (queue, file-locked), SQLite (per-dish domain data, spans, and usage)
+- Storage: per-dish SQLite for domain data, events, spans, and usage; separate DBOS SQLite checkpoints.
+- Execution: DBOS is the only backend. Existing v1 dishes remain untouched; use v0.3.7 to run them.
 - Testing: pytest
 - Config generation: stdlib string.Template (no Jinja2)
 

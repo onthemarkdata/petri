@@ -1,7 +1,5 @@
 """Backend selection uses only the supplied mapping and launches no processes."""
 
-import builtins
-
 import pytest
 from pydantic import ValidationError
 
@@ -76,18 +74,3 @@ def test_invalid_harness_names_key(harness, key):
 def test_incompatible_settings_fail_explicitly(config, key):
     with pytest.raises(ValueError, match=key):
         resolve_model(config)
-
-
-def test_legacy_provider_does_not_import_harness(monkeypatch, tmp_path):
-    from petri.cli import _bootstrap
-    from petri.reasoning.claude_code_provider import ClaudeCodeProvider
-
-    monkeypatch.setattr(_bootstrap, "load_dish_config", lambda _: {"model": {"name": "sonnet"}})
-    original = builtins.__import__
-
-    def guarded(name, *args, **kwargs):
-        assert not name.startswith("petri.harness")
-        return original(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", guarded)
-    assert isinstance(_bootstrap.resolve_provider(tmp_path), ClaudeCodeProvider)

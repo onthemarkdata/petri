@@ -150,7 +150,6 @@ def test_assessment_corrects_invalid_verdict():
 
 @pytest.mark.parametrize("sqlite", [False, True])
 def test_exhaustion_is_a_structured_domain_event(tmp_path, sqlite):
-    from petri.engine.processor import _verdict_data
     from petri.storage.event_log import append_event, query_events
 
     with HarnessInferenceProvider(make_scripted_output_model([
@@ -161,7 +160,7 @@ def test_exhaustion_is_a_structured_domain_event(tmp_path, sqlite):
     from petri.storage.database import SQLiteEventLog
 
     path = SQLiteEventLog(tmp_path / "events.sqlite") if sqlite else tmp_path / "events.jsonl"
-    append_event(path, "dish-colony-001-001", "verdict_issued", "skeptic", 1, _verdict_data(result))
+    append_event(path, "dish-colony-001-001", "verdict_issued", "skeptic", 1, result.model_dump(mode="json", exclude_none=True))
     event = query_events(path)[0]
     assert event["data"]["verdict"] == "EXECUTION_ERROR"
     assert "output retries" in event["data"]["failure_detail"]["partial_output"]

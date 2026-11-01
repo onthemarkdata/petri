@@ -15,7 +15,6 @@ import logging
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
-from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 
 
 # ── Enums ────────────────────────────────────────────────────────────────
@@ -32,23 +31,6 @@ class CellStatus(str, Enum):
     DEFER_OPEN = "DEFER_OPEN"
     DEFER_CLOSED = "DEFER_CLOSED"
     STALLED = "STALLED"
-
-
-class QueueState(str, Enum):
-    queued = "queued"
-    socratic_active = "socratic_active"
-    research_active = "research_active"
-    critique_active = "critique_active"
-    mediating = "mediating"
-    converged = "converged"
-    stalled = "stalled"
-    needs_human = "needs_human"
-    red_team_active = "red_team_active"
-    evaluating = "evaluating"
-    done = "done"
-    deferred_open = "deferred_open"
-    deferred_closed = "deferred_closed"
-    sync_conflict = "sync_conflict"
 
 
 class EventType(str, Enum):
@@ -389,20 +371,6 @@ class PetriDish(BaseModel):
     created_at: str = ""
 
 
-class QueueEntry(BaseModel):
-    """A cell's position in the validation workflow."""
-
-    cell_id: str  # composite cell key
-    queue_state: QueueState = QueueState.queued
-    iteration: int = Field(default=0, ge=0)
-    max_iterations: int = Field(default=MAX_ITERATIONS, ge=1)
-    cycle_start_iteration: int = Field(default=0, ge=0)
-    weakest_link: Optional[str] = None
-    focused_directive: Optional[str] = None
-    entered_at: str = ""
-    last_activity: str = ""
-
-
 class AgentRole(BaseModel):
     """An agent's role definition from petri.yaml or defaults."""
 
@@ -432,8 +400,8 @@ class PetriConfig(BaseModel):
     name: str = ""
     model: dict = Field(default_factory=dict)  # {name, provider}
     harness: str = "claude-code"
-    max_iterations: int = MAX_ITERATIONS
-    max_concurrent: int = MAX_CONCURRENT
+    max_iterations: int = 5
+    max_concurrent: int = 4
     agents: dict[str, AgentRole] = Field(default_factory=dict)
     debates: list[Debate] = Field(default_factory=list)
     source_hierarchy: dict = Field(default_factory=dict)

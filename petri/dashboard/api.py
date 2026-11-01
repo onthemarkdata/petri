@@ -352,12 +352,14 @@ def create_app(
         user customizations.
         """
         from petri.cli.init import create_petri_dish
-        from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+        from petri.config import load_config
+
+        defaults = load_config()
 
         dish_name = body.get("name", petri_dir.parent.name)
-        model_name = body.get("model", LLM_INFERENCE_MODEL)
-        max_concurrent = int(body.get("max_concurrent", MAX_CONCURRENT))
-        max_iterations = int(body.get("max_iterations", MAX_ITERATIONS))
+        model_name = body.get("model", defaults.model)
+        max_concurrent = int(body.get("max_concurrent", defaults.execution.worker_concurrency))
+        max_iterations = int(body.get("max_iterations", defaults.max_iterations))
 
         config_exists = (petri_dir / "defaults" / "petri.yaml").exists()
         if config_exists:

@@ -13,7 +13,16 @@ class QueueLimiter(BaseModel):
 
 class ExecutionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    backend: Literal["v1", "dbos"] = "v1"
+    backend: Literal["dbos"] = "dbos"
+
+    @field_validator("backend", mode="before")
+    @classmethod
+    def reject_retired_backend(cls, value):
+        if value == "v1":
+            raise ValueError("execution.backend v1 was retired; use Petri v0.3.7 for v1 dishes. Create a fresh v2 dish to use DBOS.")
+        if value != "dbos":
+            raise ValueError(f"Unknown execution.backend {value!r}; supported value: dbos")
+        return value
     worker_concurrency: Annotated[int, Field(strict=True, gt=0)] = 4
     limiter: QueueLimiter | None = None
     polling_interval_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 0.05

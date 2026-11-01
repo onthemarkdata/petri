@@ -1,7 +1,7 @@
 # Durable cell execution
 
-Set the following fields in the dish's `defaults/petri.yaml` to select DBOS.
-The default remains `v1` during the migration.
+DBOS is the only execution backend. Configure its limits in the dish's
+`defaults/petri.yaml`. Selecting `v1` fails with a pointer to v0.3.7.
 
 ```yaml
 execution:

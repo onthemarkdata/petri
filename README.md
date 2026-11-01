@@ -231,7 +231,8 @@ Each cell in the colony goes through:
 
 **Citation-first evidence model:** Every agent must back claims with URL-linked sources ranked by a 6-level hierarchy (direct measurement → community report). Summaries are kept terse to prevent context rot across iterations.
 
-Every action is logged as an immutable event in the cell's JSONL file, identified by a composite key (`{dish}-{colony}-{level}-{seq}-{8hex}`).
+Domain actions are recorded as immutable events in the dish's SQLite database.
+Markdown and JSONL exports remain available for text search.
 
 ## Observability
 
@@ -241,12 +242,12 @@ No external service is required. See the [configuration and optional OTLP recipe
 ## Architecture
 
 - **Multi-agent pipeline**: lead orchestrators + specialists (blocking and advisory)
-- **Event sourcing**: append-only JSONL per cell, rolled up to SQLite for the dashboard
-- **Queue state machine**: enforced transitions, file-locked for concurrency
-- **Claude Code native**: Petri runs on top of the Claude Code CLI as its agent harness — Claude Code is a hard dependency, not a pluggable option. The `adapters/` layer exists for internal separation of concerns, not to enable other harnesses.
+- **Event sourcing**: append-only SQLite events, with derived text exports
+- **Durable execution**: typed pipeline transitions and DBOS SQLite checkpoints
+- **Typed inference**: first-party pi and Claude Code models, plus configured Pydantic AI providers
 - **Live dashboard**: single-file SPA with PTY-backed terminal, interactive colony DAG, and per-cell detail pages
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, state machine diagram, and agent details.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design, pipeline, and agent details.
 
 ## Development
 
@@ -299,8 +300,9 @@ judgments.
 
 ## Contributing
 
-Petri is mid-flight on its **v2 migration** — re-platforming onto Pydantic AI, pydantic-graph,
-and DBOS while staying zero-infrastructure. The roadmap lives in
+Petri runs on Pydantic AI, pydantic-graph, and DBOS with local SQLite storage.
+DBOS is the only execution backend. Fresh dishes need no queue file or external
+database server. Existing v1 dishes remain unchanged; use v0.3.7 to run them. The roadmap lives in
 [docs/v2/MIGRATION_PLAN.md](docs/v2/MIGRATION_PLAN.md), broken into milestone epics with scoped,
 claimable issues — including
 [good first issues](https://github.com/onthemarkdata/petri/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)

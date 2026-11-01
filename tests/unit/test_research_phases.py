@@ -239,10 +239,9 @@ async def test_diamond_graph_runs_real_phases_and_replays_idempotently(
 
 
 @pytest.mark.asyncio
-async def test_evidence_regenerates_from_events_and_matches_v1_formatting(
+async def test_evidence_regenerates_from_committed_events(
     phase_services, canonical_colony
 ):
-    from petri.engine.processor import _format_phase1_evidence, _format_phase2_evidence
 
     services, _ = phase_services
     cell_id = canonical_colony["cell1"].id
@@ -263,8 +262,6 @@ async def test_evidence_regenerates_from_events_and_matches_v1_formatting(
     debates = [
         debate_summary(event["data"]) for event in events if event["type"] == "debate_mediated"
     ]
-    assert format_research(research, 0) == _format_phase1_evidence(research, 0)
-    assert format_critique(critique, debates, 0) == _format_phase2_evidence(critique, debates, 0)
     evidence = render_evidence(events)
     assert evidence.count("### Socratic Analysis") == 1
     assert format_research(research, 0) in evidence

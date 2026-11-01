@@ -13,7 +13,7 @@ def resolve_dish_id(petri_dir: Path) -> str:
     when that file is absent; it never overrides the canonical file.
     Packaged defaults never supply the identity of a user's dish.
     """
-    name = load_dish_config(petri_dir).get("name")
+    name = load_dish_config(petri_dir).name
     if name is None or name == "":
         return petri_dir.parent.name
     if not isinstance(name, str):

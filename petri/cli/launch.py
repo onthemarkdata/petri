@@ -160,8 +160,8 @@ def register(app: typer.Typer) -> None:
                 repaired.append("defaults/constitution.md")
             if creation.created_dishes_dir:
                 repaired.append("petri-dishes/")
-            if creation.created_queue:
-                repaired.append("queue.json")
+            if creation.created_database:
+                repaired.append("petri.sqlite")
             typer.echo(
                 "Repaired petri dish — added missing: " + ", ".join(repaired)
             )

@@ -37,7 +37,6 @@ from petri.execution.pipeline import (
     declared_transitions,
     run_pipeline,
 )
-from petri.storage.queue import VALID_TRANSITIONS
 from tests.pipeline_stubs import StubPhases
 
 # Frozen before v1 retirement, so this suite remains a lifecycle specification.
@@ -81,10 +80,6 @@ ILLEGAL = [
     for source, target in product(LEGACY_TRANSITIONS, repeat=2)
     if target not in LEGACY_TRANSITIONS[source]
 ]
-
-
-def test_frozen_contract_matches_v1_until_retirement():
-    assert LEGACY_TRANSITIONS == VALID_TRANSITIONS
 
 
 @pytest.mark.parametrize("state", list(LEGACY_TRANSITIONS))

@@ -9,7 +9,6 @@ from dbos import DBOS, SetEnqueueOptions, SetWorkflowID
 
 from petri.analysis.edge_intelligence import EdgeIntelligenceReport, analyze_edges
 from petri.config import load_dish_config
-from petri.execution.config import SchedulingConfig
 from petri.models import Event, parse_key
 from petri.storage import database
 from petri.storage.edge_registry import DishGraph
@@ -29,7 +28,7 @@ def priority_plan(report: EdgeIntelligenceReport) -> dict[str, int]:
 
 def prepare_priority_pass(app: DBOSApp, colony_id: str) -> None:
     """Compute one report for this grow pass; eligibility is decided separately."""
-    settings = SchedulingConfig.model_validate(load_dish_config(app.petri_dir).get('scheduling',{}))
+    settings = load_dish_config(app.petri_dir).scheduling
     if settings.prioritize_targets:
         app.target_priority_plans[colony_id] = priority_plan(analyze_edges(DishGraph.read(app.db_path)))
     else:

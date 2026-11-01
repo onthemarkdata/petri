@@ -18,8 +18,7 @@ def prepare_dish(tmp_path, harness):
     create_petri_dish(dish, dish_name="bridge-test")
     path = dish / "defaults" / "petri.yaml"
     config = yaml.safe_load(path.read_text())
-    # Exercise the transition config: legacy model mapping plus explicit harness.
-    assert isinstance(config["model"], dict)
+    assert isinstance(config["model"], str)
     config["harness"] = harness
     config["max_decomposition_depth"] = 1
     config["max_nodes_per_layer"] = 2

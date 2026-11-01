@@ -18,10 +18,15 @@ def traced_command(command: CommandName) -> Callable[[Callable[P, R]], Callable[
             from petri.cli._bootstrap import bootstrap_telemetry, get_dish_id
 
             petri_dir = Path.cwd() / ".petri"
-            bootstrap_telemetry(petri_dir)
+            try:
+                bootstrap_telemetry(petri_dir)
+                dish_id = get_dish_id(petri_dir)
+            except ValueError as error:
+                from petri.cli_ui import print_error_and_exit
+                print_error_and_exit(str(error))
             from click.exceptions import Exit
 
-            with root_command_span(command, get_dish_id(petri_dir)):
+            with root_command_span(command, dish_id):
                 try:
                     return function(*args, **kwargs)
                 except Exit as error:

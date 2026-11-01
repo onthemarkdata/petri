@@ -11,9 +11,9 @@ from dbos import DBOS
 
 from petri.execution.dbos_app import active_app
 from petri.execution.dbos_backend import CellRunSpec, _bounded
+from petri.execution.models import ReopenRequest
 from petri.execution.pipeline import SyncConflict
 from petri.execution.priorities import enqueue_with_priority, prepare_priority_pass
-from petri.execution.models import ReopenRequest
 from petri.models import CellStatus, parse_key
 from petri.storage import database
 from petri.storage.colonies import load_colony

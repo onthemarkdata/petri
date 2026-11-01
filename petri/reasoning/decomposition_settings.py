@@ -24,22 +24,19 @@ class DecompositionSettings(BaseModel):
     @classmethod
     def defaults(cls) -> "DecompositionSettings":
         """Resolve packaged defaults at call time for callers without a dish."""
+        return cls.from_config(config.load_config())
+
+    @classmethod
+    def from_config(cls, values):
         return cls(
-            depth=config.get_max_decomposition_depth(),
-            per_layer=config.get_max_nodes_per_layer(),
-            per_parent_cap=config.load_config().get("per_parent_cap", 4),
-            level_one_cap=config.load_config().get("level_one_cap", 10),
-            model=config.get_model_name(),
+            depth=values.max_decomposition_depth,
+            per_layer=values.max_nodes_per_layer,
+            per_parent_cap=values.per_parent_cap,
+            level_one_cap=values.level_one_cap,
+            model=values.model,
         )
 
     @classmethod
     def from_dish(cls, petri_dir: Path) -> "DecompositionSettings":
         """Read this dish afresh; omitted settings inherit packaged values."""
-        values = {**config.load_config(), **config.load_dish_config(petri_dir)}
-        return cls(
-            depth=values["max_decomposition_depth"],
-            per_layer=values["max_nodes_per_layer"],
-            per_parent_cap=values.get("per_parent_cap", 4),
-            level_one_cap=values.get("level_one_cap", 10),
-            model=config.get_model_name(values),
-        )
+        return cls.from_config(config.load_dish_config(petri_dir))

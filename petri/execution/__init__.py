@@ -11,13 +11,8 @@ if TYPE_CHECKING:
 
 def resolve_backend(petri_dir: Path) -> ExecutionBackend:
     """Validate the dish's backend choice before constructing its adapter."""
-    from petri.config import get_execution_backend, load_dish_config
+    from petri.config import load_dish_config
+    from petri.execution.dbos_backend import DBOSExecutionBackend
 
     config = load_dish_config(petri_dir)
-    if get_execution_backend(config) == "dbos":
-        from petri.execution.dbos_backend import DBOSExecutionBackend
-
-        return DBOSExecutionBackend(config=config)
-    from petri.execution.v1_engine import V1ExecutionBackend
-
-    return V1ExecutionBackend(config=config)
+    return DBOSExecutionBackend(config=config.model_dump(mode="json"))

@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from petri.storage.queue import VALID_TRANSITIONS
+from tests.unit.test_pipeline_conformance import LEGACY_TRANSITIONS
 from tests.generate_pipeline_diagram import diagram_block, diagram_text, update_docs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,7 +18,7 @@ def test_mapping_covers_every_v1_state_once():
     page = (ROOT / "docs/pipeline-graph.md").read_text()
     rows = re.findall(r"^\| `([^`]+)` \|", page, flags=re.MULTILINE)
     assert len(rows) == len(set(rows)) == 14
-    assert set(rows) == set(VALID_TRANSITIONS)
+    assert set(rows) == set(LEGACY_TRANSITIONS)
 
 
 def test_regenerator_preserves_surrounding_prose(tmp_path):

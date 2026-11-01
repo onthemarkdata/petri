@@ -108,8 +108,8 @@ def test_init_selects_pi_and_checks_created_dish(monkeypatch, tmp_path, versions
     assert result.exit_code == 0, result.output
     assert "requires Node.js 22.19.0+" in result.output
     config = load_dish_config(tmp_path / ".petri")
-    assert config["harness"]["backend"] == "pi"
-    assert isinstance(resolve_model(config), PiModel)
+    assert config.harness.backend == "pi"
+    assert isinstance(resolve_model(config.model_dump(mode="json")), PiModel)
 
 
 def test_repair_preserves_existing_harness(tmp_path):
@@ -122,7 +122,7 @@ def test_repair_preserves_existing_harness(tmp_path):
     (defaults / "petri.yaml").write_text(original)
     create_petri_dish(tmp_path, dish_name="replacement")
     assert (defaults / "petri.yaml").read_text() == original
-    assert load_dish_config(tmp_path)["harness"]["backend"] == "provider"
+    assert load_dish_config(tmp_path).harness.backend == "provider"
 
 def test_version_may_use_stderr(monkeypatch, versions):
     def run(command, **kwargs):

@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from petri.cli import app
 from petri.dashboard.api import create_app
 from petri.storage.seed_guard import ColonyExistsError, require_empty_colony
-from tests.conftest import FakeProvider
+from tests.conftest import TypedFakeProvider as FakeProvider
 
 
 def snapshot(path):

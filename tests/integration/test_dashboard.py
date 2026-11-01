@@ -6,7 +6,6 @@ from __future__ import annotations
 import pytest
 
 from petri.storage.event_log import append_event
-from petri.storage.queue import add_to_queue
 
 
 @pytest.fixture
@@ -58,7 +57,6 @@ def dashboard_env(petri_env_with_colony):
             database.append_event(dish_db_path(env["petri_dir"]), Event.model_validate(event))
 
     # Add a queue entry
-    add_to_queue(env["petri_dir"] / "queue.json", env["cell1"].id)
 
     return {
         **env,
@@ -155,7 +153,7 @@ class TestQueueEndpoint:
         entries = resp.json()
         assert isinstance(entries, list)
         assert len(entries) >= 1
-        assert entries[0]["cell_id"] == env["cell1"].id
+        assert any(row["cell_id"] == env["cell1"].id for row in entries)
 
 
 class TestCellsEndpoint:
