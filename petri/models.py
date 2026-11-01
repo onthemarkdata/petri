@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Any, Callable, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Literal, Optional, Protocol, runtime_checkable
 
 import logging
 
@@ -64,6 +64,7 @@ class EventType(str, Enum):
     propagation_triggered = "propagation_triggered"
     decomposition_created = "decomposition_created"
     decomposition_audit = "decomposition_audit"
+    decomposition_warning = "decomposition_warning"
     # Agent lifecycle events fired incrementally during `petri seed`
     seed_started = "seed_started"
     clarifying_questions_requested = "clarifying_questions_requested"
@@ -180,6 +181,12 @@ class DecompositionAuditData(BaseModel):
     should_restructure: bool = False
 
 
+class DecompositionWarningData(BaseModel):
+    reason: str
+    claim_text: str
+    threshold: float
+
+
 class AgentStepData(BaseModel):
     """Permissive payload for agent lifecycle events emitted during seed.
 
@@ -210,6 +217,7 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "propagation_triggered": PropagationTriggeredData,
     "decomposition_created": DecompositionCreatedData,
     "decomposition_audit": DecompositionAuditData,
+    "decomposition_warning": DecompositionWarningData,
     # Agent lifecycle events fired incrementally by `petri seed` so the
     # on-disk event log reflects what each agent has done at the moment
     # the work happens (instead of being batched at the end).
@@ -269,7 +277,7 @@ class Cell(BaseModel):
     claim_text: str
     level: int = Field(ge=0)
     status: CellStatus = CellStatus.NEW
-    relation: str = "supports"
+    relation: Literal["supports", "limits", "rebuts"] = "supports"
     is_atomic: bool = False
     bedrock_reason: str | None = None
     dependencies: list[str] = Field(default_factory=list)  # composite cell keys
