@@ -160,9 +160,13 @@ async def test_history_and_validation_feedback_reach_pi(fake_pi):
 
 
 @pytest.mark.asyncio
-async def test_host_function_tool_executes_and_result_returns_to_pi(fake_pi):
+@pytest.mark.parametrize("fenced", [False, True])
+async def test_host_function_tool_executes_and_result_returns_to_pi(fake_pi, fenced):
+    envelope = '{"tool_calls": [{"name": "lookup", "arguments": {"query": "solar"}}]}'
+    if fenced:
+        envelope = f"```json\n{envelope}\n```"
     fake_pi.scenario(
-        {"text": '{"tool_calls": [{"name": "lookup", "arguments": {"query": "solar"}}]}'},
+        {"text": envelope},
         {"text": "Existing premise found"},
     )
     calls = []

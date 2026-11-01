@@ -59,7 +59,7 @@ FLAT_RESULT = (
 OUTPUT_TEMPLATE = (
     "Return one JSON value containing the requested result data. "
     "The following JSON schema defines its shape. Do not copy schema keywords "
-    "such as properties, $defs, type, or required into the result.\n{schema}"
+    "such as properties, $defs, $ref, type, or required into the result.\n{schema}"
 )
 
 

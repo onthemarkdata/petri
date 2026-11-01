@@ -5,6 +5,7 @@ results. The CLI only returns text; its built-in tool allowlist is independent.
 """
 
 import json
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_ai.messages import TextPart, ToolCallPart
@@ -22,7 +23,7 @@ class _Calls(BaseModel):
     tool_calls: list[_Call] = Field(min_length=1)
 
 
-def tool_instructions(parameters: ModelRequestParameters, *, required: bool = False) -> str:
+def tool_instructions(parameters: ModelRequestParameters, *, required: bool = False, completed: bool = False) -> str:
     tools = parameters.declared_function_tools
     if not tools:
         return ""
@@ -32,6 +33,14 @@ def tool_instructions(parameters: ModelRequestParameters, *, required: bool = Fa
         "The next response must be a host function-call envelope; a final result is not allowed yet.\n"
         if required else ""
     )
+    completion = ""
+    if completed and not required:
+        completion = (
+            "\nThe required search has returned. Use the existing cell IDs in its tool results and "
+            "complete the original task. Do not repeat an identical search. Search again only for "
+            "a different specific premise. Return the final result in the required format:\n"
+            + (parameters.prompted_output_instructions or "Return the final answer.")
+        )
     return required_note + (
         "\nPetri host function tools are available, independently of CLI built-in tools. "
         'To call them, return exactly {"tool_calls": [{"name": "tool_name", "arguments": {}}]}. '
@@ -39,14 +48,18 @@ def tool_instructions(parameters: ModelRequestParameters, *, required: bool = Fa
         "The host will execute the calls and supply tool results before you continue. "
         "When finished, return the requested final result instead of a tool-call envelope.\n"
         + json.dumps(definitions, ensure_ascii=False)
-    )
+    ) + completion
 
 
 def response_parts(text: str, parameters: ModelRequestParameters) -> list[TextPart | ToolCallPart]:
     """Interpret only complete, schema-valid tool envelopes; preserve other text."""
     if parameters.declared_function_tools:
         try:
-            envelope = _Calls.model_validate_json(text)
+            candidate = text.strip()
+            fenced = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", candidate, flags=re.DOTALL)
+            if fenced:
+                candidate = fenced[1]
+            envelope = _Calls.model_validate_json(candidate)
         except ValidationError:
             pass
         else:
