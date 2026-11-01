@@ -1,6 +1,6 @@
 """Validated decomposition results, distinct from persisted cell identities."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -10,7 +10,7 @@ ClaimText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1
 class PremiseCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     claim_text: ClaimText
-    relation: str = "supports"
+    relation: Literal["supports", "limits", "rebuts"] = "supports"
 
 
 class InitialDecomposition(BaseModel):

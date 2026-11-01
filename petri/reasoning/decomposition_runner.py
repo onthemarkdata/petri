@@ -10,7 +10,7 @@ from petri.models import Cell, ClarifyingQuestion, DecompositionResult, Edge, bu
 from petri.reasoning.decomposition_agents import DecompositionInput
 from petri.reasoning.decomposition_schemas import InitialDecomposition, PremiseCandidate, WhyExpansion
 from petri.reasoning.decomposition_settings import DecompositionSettings
-from petri.storage import database
+from petri.storage import database, event_log
 
 Progress = Callable[[str], None] | None
 OnCellCreated = Callable[[Cell, list[Edge]], None] | None
@@ -82,9 +82,20 @@ def decompose_typed(
         next_level = parent.level + 1
         if parent.level >= settings.depth or counts.get(next_level, 0) >= settings.per_layer:
             continue
+        def warn(reason: str, claim_text: str, threshold: float) -> None:
+            if on_progress:
+                on_progress(reason + "\n")
+            if db_path is not None:
+                event_log.append_event(database.SQLiteEventLog(db_path), parent.id,
+                    "decomposition_warning", "five_whys", 0,
+                    {"reason": reason, "claim_text": claim_text, "threshold": threshold},
+                    node="parent-restatement", sequence=warning_count[0])
+                warning_count[0] += 1
+
+        warning_count = [0]
         expansion = runner.expand_why(DecompositionInput(
             claim=parent.claim_text, parent_level=parent.level, parent_seq=parse_key(parent.id)["seq"],
-            max_premises=settings.per_layer - counts.get(next_level, 0),
+            max_premises=settings.per_layer - counts.get(next_level, 0), on_warning=warn,
         ), on_progress)
         parent.is_atomic = expansion.is_atomic
         parent.bedrock_reason = expansion.bedrock_reason

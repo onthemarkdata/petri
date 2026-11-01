@@ -3,8 +3,10 @@
 from collections.abc import AsyncIterable, Callable
 from dataclasses import dataclass, field
 from typing import Any
+import logging
+import re
 
-from pydantic_ai import Agent, PromptedOutput, RunContext
+from pydantic_ai import Agent, ModelRetry, PromptedOutput, RunContext
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.messages import AgentStreamEvent, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta
 from pydantic_ai.models import Model
@@ -14,6 +16,24 @@ from petri.reasoning.decomposition_schemas import InitialDecomposition, WhyExpan
 from petri.reasoning.prompts import build_decompose_claim_prompt, build_decompose_why_prompt
 
 Progress = Callable[[str], None] | None
+DUPLICATE_THRESHOLD = 0.8
+QUALITY_BAR = """QUALITY BAR
+BAD CLAIM (obvious fact): "Water exists." It adds no testable assumption.
+BAD CLAIM (logical prerequisite): "For demand to increase, demand must exist." It merely restates a prerequisite.
+BAD CLAIM (too vague): "The technology will be good." It has no measurable outcome or scope.
+Prefer claims with quantified thresholds where the claim supports them, explicit scope and exclusions, and a clear falsification test. Do not invent measurements or precision.
+
+"""
+BEDROCK_TEST = """FIRST — BEDROCK TEST.
+Before generating children, ask whether the parent is a definition, an axiom, or a directly verifiable measurement. If so, return is_atomic=true, an empty sub_premises list, and a specific bedrock_reason. Do not turn its wording into more premises. A contested causal or predictive claim is not bedrock merely because it sounds plausible.
+
+"""
+COUNTERARGUMENT = (
+    "For a non-atomic expansion, include the strongest counterargument as a sub-claim "
+    "with relation limits or rebuts; other premises may support the parent. "
+    "A single indispensable sub-premise is exempt from this requirement.\n\n"
+)
+
 OUTPUT_TEMPLATE = (
     "Return one JSON value containing the requested result data. "
     "The following JSON schema defines its shape. Do not copy schema keywords "
@@ -37,19 +57,20 @@ class DecompositionInput:
     parent_level: int = 0
     parent_seq: int = 0
     max_premises: int = 5
+    on_warning: Callable[[str, str, float], None] | None = None
 
 
 def initial_instructions(request: DecompositionInput) -> str:
-    return build_decompose_claim_prompt(
+    return QUALITY_BAR + build_decompose_claim_prompt(
         request.claim, request.clarifications, request.guidance, request.max_premises,
     ) + "STEP 4 — EMIT JSON.\nReturn the selected premises using the supplied output schema."
 
 
 def why_instructions(request: DecompositionInput) -> str:
-    return build_decompose_why_prompt(
+    return BEDROCK_TEST + build_decompose_why_prompt(
         request.claim, request.parent_level, request.parent_seq, request.max_premises,
     ) + (
-        "If the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), "
+        COUNTERARGUMENT + "If the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), "
         "return is_atomic=true, no sub-premises, and a bedrock_reason.\n\n"
         "STEP 4 — EMIT JSON.\nReturn the selected sub-premises using the supplied output schema."
     )
@@ -63,7 +84,7 @@ initial_decomposer = Agent(
 five_whys = Agent(
     name="five_whys", deps_type=DecompositionInput,
     output_type=PromptedOutput(WhyExpansion, template=OUTPUT_TEMPLATE),
-    retries={"output": 2}, defer_model_check=True,
+    retries={"output": 1}, defer_model_check=True,
 )
 
 
@@ -106,3 +127,43 @@ async def run_decomposition_agent(
     if on_progress:
         on_progress(f"{agent.name}: completed\n")
     return result.output
+
+
+def parent_overlap(parent: str, child: str) -> float:
+    """Jaccard similarity of Unicode word-token sets, ignoring case and punctuation."""
+    parent_tokens = set(re.findall(r"\w+", parent.casefold()))
+    child_tokens = set(re.findall(r"\w+", child.casefold()))
+    union = parent_tokens | child_tokens
+    return len(parent_tokens & child_tokens) / len(union) if union else 0.0
+
+
+@five_whys.output_validator
+def validate_expansion(context: RunContext[DecompositionInput], output: WhyExpansion) -> WhyExpansion:
+    if output.is_atomic:
+        return output
+    duplicates = [child for child in output.sub_premises
+                  if parent_overlap(context.deps.claim, child.claim_text) >= DUPLICATE_THRESHOLD]
+    missing_counterargument = len(output.sub_premises) >= 2 and all(
+        child.relation == "supports" for child in output.sub_premises
+    )
+    if context.retry == 0 and (duplicates or missing_counterargument):
+        problems = []
+        if duplicates:
+            problems.append("Replace children that restate the parent with distinct, testable premises.")
+        if missing_counterargument:
+            problems.append("Include the strongest counterargument with relation limits or rebuts.")
+        raise ModelRetry(" ".join(problems))
+    if duplicates:
+        for child in duplicates:
+            reason = "Dropped a child that still restates its parent after a validation retry."
+            logging.getLogger(__name__).warning("%s %s", reason, child.claim_text)
+            if context.deps.on_warning:
+                context.deps.on_warning(reason, child.claim_text, DUPLICATE_THRESHOLD)
+        output = output.model_copy(update={"sub_premises": [
+            child for child in output.sub_premises if child not in duplicates
+        ]})
+    if len(output.sub_premises) >= 2 and all(
+        child.relation == "supports" for child in output.sub_premises
+    ):
+        raise DecompositionError("five_whys failed: the retry still lacks a counterargument.")
+    return output

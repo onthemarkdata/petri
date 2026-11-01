@@ -103,3 +103,16 @@ Streaming is explicit in `run_decomposition_agent(stream=True)`: capable models
 deliver text chunks through the progress callback. Pi currently returns a
 completed response, so its bridge uses start/completion progress instead.
 Callbacks on the bridge's typed methods run on its owned worker thread.
+
+The Five Whys instructions test for bedrock before generating children. Each
+multi-child expansion must include a `limits` or `rebuts` premise; a single
+indispensable premise is exempt. The validator gives one retry for missing
+counterarguments or parent restatements. A repeated counterargument failure
+raises `DecompositionError`.
+
+Parent restatements use Jaccard similarity of case-folded Unicode word-token
+sets, ignoring punctuation. Similarity at or above `0.8` triggers the retry.
+Children that still meet that threshold are dropped before persistence, with a
+`decomposition_warning` event on the parent when a database path is supplied.
+The remaining children must still satisfy the counterargument rule. This guard
+compares a child with its parent only; it does not detect cross-colony duplicates.
