@@ -24,6 +24,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 
 from petri.agents.config import AgentConfig
 from petri.agents.contract import AGENT_SPECS, AgentName, Phase
+from petri.agents.factory import typed_role_instruction
 from petri.agents.debates import DebateStatus, log_debate, run_debate
 from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment
 from petri.execution.evidence import RecordedAssessment, format_socratic, render_agent_context
@@ -285,9 +286,10 @@ async def _assessment_impl(
             },
             "socratic_questioner" if agent_name.startswith("socratic_") else agent_name,
             valid_verdicts=content.verdicts_pass + content.verdicts_block,
-            role_instruction=content.instruction,
+            role_instruction=typed_role_instruction(content.instruction),
             today_iso=services.today_iso,
-            require_source_retrieval=phase != "socratic",
+            require_source_retrieval=phase != "socratic" and services.config.research.public_web,
+            source_tool_names=("web_search", "web_fetch"),
         )
         with capture_run_messages() as messages:
             try:

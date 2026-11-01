@@ -144,6 +144,7 @@ def build_assess_cell_prompt(
     role_instruction: str,
     today_iso: str,
     require_source_retrieval: bool = True,
+    source_tool_names: tuple[str, str] = ("WebSearch", "WebFetch"),
 ) -> str:
     """Build the cell assessment prompt body."""
     role_instruction = role_instruction or "Assess this claim thoroughly."
@@ -173,14 +174,14 @@ def build_assess_cell_prompt(
         "IMPORTANT — Today's date is "
         f"{today_iso}"
         ". Your training data is stale relative to this date. You MUST use the "
-        "WebSearch tool to find current sources and WebFetch to verify that each URL "
+        f"{source_tool_names[0]} tool to find current sources and {source_tool_names[1]} to verify that each URL "
         "you cite actually exists before including it. Do NOT cite URLs from memory "
         "— they will be treated as fabricated. Prefer sources published within the "
         "last 12 months unless the claim is explicitly about historical events.\n\n"
     )
     if not require_source_retrieval:
-        freshness_directive = ("This exploratory phase plans research before source retrieval. "
-                               "Use supplied context; do not claim to have browsed. "
+        freshness_directive = ("No source retrieval tools are available in this phase. "
+                               "Assess supplied context and identify missing research; do not claim to have browsed. "
                                "When no verified source is supplied, return sources_cited as an empty array.\n\n")
     return (
         f"{freshness_directive}"
