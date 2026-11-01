@@ -55,7 +55,8 @@ class NativeFunctionPromptedOutput(AbstractCapability[Any]):
     ) -> ModelRequestContext:
         parameters = request.model_request_parameters
         if parameters.output_mode == "prompted" and parameters.declared_function_tools:
-            prepared = replace(parameters, prompted_output_template=(
+            prepared = request.model.customize_request_parameters(parameters)
+            prepared = replace(prepared, prompted_output_template=(
                 parameters.prompted_output_template or request.model.profile.get("prompted_output_template")))
             final_instructions = prepared.prompted_output_instructions
             if not final_instructions:

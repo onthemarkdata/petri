@@ -68,5 +68,6 @@ async def test_native_role_searches_then_fetches_before_strict_final_output(name
     instructions = "\n".join(message["content"] for message in requests[2]["messages"]
                              if isinstance(message.get("content"), str))
     assert re.search(r'"required"\s*:\s*\[\s*"verdict"\s*\]', instructions)
+    assert '"title": "SourceCitation"' not in instructions
     assert result.output.verdict == config.agents[name].verdicts_pass[0]
     assert result.output.sources_cited[0].url == url
