@@ -12,7 +12,7 @@ from pydantic_ai.usage import UsageLimits
 from petri.agents.config import AgentConfig
 from petri.agents.contract import AgentName
 from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment, output_model
-from petri.agents.source_policy import check_terminal_sources
+from petri.agents.source_policy import check_terminal_sources, source_hierarchy_instructions
 from petri.research.tools import ResearchClient, register_research_tools
 from petri.research.staging import (
     NativeFunctionPromptedOutput, RequiredInvestigationOutput, has_retrieval_attempt, investigation_settings,
@@ -73,7 +73,7 @@ def build_agents(
             f"{constitution.strip()}\n\n{typed_role_instruction(content.instruction)}\n\n"
             f"Act as {name.value}. Return one of these exact verdicts: "
             f"{', '.join(content.verdicts_pass + content.verdicts_block)}.\n\n"
-            f"{ASSESSMENT_FORMAT}"
+            f"{ASSESSMENT_FORMAT}\n\n{source_hierarchy_instructions(validated.source_hierarchy)}"
         )
         if web is not None and name not in {AgentName.DECOMPOSITION_LEAD, AgentName.CELL_LEAD}:
             instructions += (

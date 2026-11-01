@@ -81,6 +81,25 @@ def test_per_agent_model_override(config):
     assert len(calls) == 13
 
 
+def test_assessment_instructions_use_custom_source_hierarchy(config):
+    from petri.execution.phases import build_socratic_agent
+
+    config.source_hierarchy.levels[2].name = "Maintainer specification"
+    config.source_hierarchy.levels[2].description = "The primary maintainer documents the behavior."
+    config.source_hierarchy.minimum_terminal_level = 3
+    for level, content in config.source_hierarchy.levels.items():
+        content.terminal_eligible = level <= 3
+    agents = build_agents(config, constitution="Preserve evidence.", model=TestModel())
+    questioner = build_socratic_agent(config, constitution="Preserve evidence.", model=TestModel())
+    for agent in [*agents.values(), questioner]:
+        instructions = "\n".join(item.instruction for item in agent._instructions)
+        assert "Level 2 — Maintainer specification: The primary maintainer documents the behavior." in instructions
+        assert "level 1–3" in instructions
+        assert "A grade does not establish that a source was retrieved" in instructions
+        for level in range(1, 7):
+            assert f"Level {level} — {config.source_hierarchy.levels[level].name}" in instructions
+
+
 @pytest.mark.asyncio
 async def test_valid_tool_output(config):
     def respond(messages, info):
