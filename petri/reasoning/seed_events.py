@@ -6,11 +6,19 @@ from typing import Literal
 from petri.storage import database
 from petri.reasoning.seed_graph import SeedState
 from petri.storage.event_log import append_event
+from petri.query.events import query_events
 
 
 def current_attempt(db_path: Path, center_id: str) -> int:
     """Regeneration starts a new event namespace; resume retains the last one."""
-    return len(database.read_events(db_path, cell_id=center_id, event_type="decomposition_started"))
+    events = query_events(
+        db_path, cell_id=center_id, event_type="decomposition_started", limit=None
+    )
+    explicit = [
+        event["data"]["attempt"] for event in events
+        if type(event["data"].get("attempt")) is int and event["data"]["attempt"] >= 0
+    ]
+    return max([len(events), *explicit])
 
 
 def record_completion(db_path: Path, center_id: str, *, attempt: int, cell_count: int) -> None:
