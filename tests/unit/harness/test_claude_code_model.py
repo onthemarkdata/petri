@@ -154,3 +154,24 @@ async def test_runner_timeout_reaps_and_keeps_diagnostics(monkeypatch):
         await run_cli(["claude"], 0.01)
     assert process.returncode == -9
     assert raised.value.detail.stdout_tail == "partial"
+
+
+@pytest.mark.asyncio
+async def test_host_function_call_and_result_are_replayed():
+    runner = AsyncMock(side_effect=[
+        result('{"tool_calls": [{"name": "lookup", "arguments": {"query": "solar"}}]}'),
+        result("Existing premise found"),
+    ])
+    agent = Agent(ClaudeCodeModel(runner=runner))
+    queries = []
+
+    @agent.tool_plain
+    def lookup(query: str) -> str:
+        queries.append(query)
+        return "dish-foundation-001-001"
+
+    response = await agent.run("Find the solar premise")
+    assert queries == ["solar"]
+    assert response.output == "Existing premise found"
+    assert runner.await_count == 2
+    assert "dish-foundation-001-001" in runner.call_args.args[0][-1]

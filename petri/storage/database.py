@@ -283,13 +283,11 @@ def add_edge(
     created_at: str,
     reason: str = "",
 ) -> bool:
-    """Insert a directed dependency; return False for an existing edge."""
-    with _write(db_path) as conn:
-        cursor = conn.execute(
-            "INSERT INTO edges VALUES (?,?,?,?,?) ON CONFLICT(from_cell,to_cell,edge_type) DO NOTHING",
-            (from_cell, to_cell, edge_type, reason, created_at),
-        )
-        return cursor.rowcount == 1
+    """Compatibility entry point; the edge registry owns all edge inserts."""
+    from petri.storage.edge_registry import EdgeRecord, append
+
+    return append(db_path, EdgeRecord(from_cell=from_cell, to_cell=to_cell,
+                  edge_type=edge_type, reason=reason, created_at=created_at))
 
 
 def read_edges(db_path: Path) -> list[dict]:

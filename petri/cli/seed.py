@@ -243,7 +243,7 @@ def register(app: typer.Typer) -> None:
             False, "--no-questions", help="Skip clarifying questions and auto-accept"
         ),
     ) -> None:
-        """Seed a new colony from a claim, URL, or file using the configured backend."""
+        """Seed a colony from a claim, URL, or file. Seed foundations first so later colonies can reference their premises."""
         petri_dir = find_petri_dir()
         dish_id = get_dish_id(petri_dir)
         if resume:

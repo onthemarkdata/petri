@@ -77,6 +77,7 @@ def decompose_claim(
     agent_runner: DecompositionRunner | None = None,
     db_path: Path | None = None,
     resume: bool = False,
+    search_db_path: Path | None = None,
 ) -> DecompositionResult:
     """Decompose a claim into a colony of cells and edges.
 
@@ -109,7 +110,7 @@ def decompose_claim(
             claim, clarifications, dish_id, colony_name, agent_runner,
             settings=settings or DecompositionSettings.defaults(), guidance=guidance,
             db_path=db_path, center=center, on_progress=on_progress, on_cell_created=on_cell_created,
-            resume=resume,
+            resume=resume, search_db_path=search_db_path,
         )
 
     if provider is None:

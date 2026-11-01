@@ -1,9 +1,10 @@
 """Pydantic AI model using pi text output and prompted JSON validation.
 
 The model reuses one pi process, serializes requests, and resets conversation state
-before replaying Pydantic AI's complete history. Streaming, native JSON schemas,
-and Pydantic function tools are unsupported. Explicit pi tool allowlists apply to
-pi's own tools. Missing usage stays zero and is marked as unreported.
+before replaying Pydantic AI's complete history. Streaming and native JSON schemas
+are unsupported. Host function tools use strict prompted JSON envelopes. Explicit
+pi tool allowlists apply to pi's own tools. Missing usage stays zero and is marked
+as unreported.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from pydantic_ai.usage import RequestUsage
 
 from petri.harness.errors import FailureDetail, PermanentHarnessError
 from petri.harness.messages import render_history
+from petri.harness.function_tools import response_parts, tool_instructions
 from petri.harness.pi.transport import PiRpcTransport
 from petri.harness.retry import RetryPolicy, retry
 
@@ -33,7 +35,7 @@ class PiModel(Model):
         retry_policy: RetryPolicy | None = None,
     ):
         super().__init__(profile=ModelProfile(
-            supports_tools=False, supports_json_schema_output=False,
+            supports_tools=True, supports_json_schema_output=False,
             supports_json_object_output=False, default_structured_output_mode="prompted",
             supports_image_input=False, supports_document_input=False,
             supports_audio_file_input=False, supports_video_input=False,
@@ -70,9 +72,9 @@ class PiModel(Model):
         settings, parameters = self.prepare_request(model_settings, model_request_parameters)
         if settings:
             raise UserError("PiModel does not support per-request model settings; configure the pi provider.")
-        if parameters.output_tools or parameters.declared_function_tools:
-            raise UserError("PiModel supports prompted output and pi tool allowlists, not Pydantic function tools.")
-        prompt = render_history(messages, parameters)
+        if parameters.output_tools:
+            raise UserError("PiModel supports prompted output and pi tool allowlists, not output tools.")
+        prompt = render_history(messages, parameters) + tool_instructions(parameters)
         async with self._lock:
             async def invoke():
                 # Pydantic AI owns history; resetting avoids duplicating it in pi.
@@ -81,7 +83,11 @@ class PiModel(Model):
                 return await self.transport.request({"type": "prompt", "message": prompt})
 
             result = await retry(invoke, self.retry_policy)
-        return self._response(result)
+        response = self._response(result)
+        response.parts = response_parts("".join(part.content for part in response.parts if isinstance(part, TextPart)), parameters)
+        if any(part.part_kind == "tool-call" for part in response.parts):
+            response.finish_reason = "tool_call"
+        return response
 
     def _response(self, result: dict) -> ModelResponse:
         messages = [m for m in result["messages"] if m.get("role") == "assistant"]

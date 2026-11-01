@@ -16,7 +16,7 @@ from datetime import datetime
 from subprocess import CompletedProcess
 
 from pydantic_ai.exceptions import UserError
-from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.settings import ModelSettings
@@ -27,6 +27,7 @@ from petri.harness.errors import (
     TransientHarnessError,
 )
 from petri.harness.messages import render_history
+from petri.harness.function_tools import response_parts, tool_instructions
 from petri.harness.retry import RetryPolicy, retry
 
 Runner = Callable[[Sequence[str], float], Awaitable[CompletedProcess[str]]]
@@ -107,7 +108,7 @@ class ClaudeCodeModel(Model):
         clock: Callable[[], datetime] | None = None,
     ):
         super().__init__(profile=ModelProfile(
-            supports_tools=False, supports_json_schema_output=False,
+            supports_tools=True, supports_json_schema_output=False,
             supports_json_object_output=False, default_structured_output_mode="prompted",
             supports_image_input=False, supports_document_input=False,
             supports_audio_file_input=False, supports_video_input=False,
@@ -194,9 +195,9 @@ class ClaudeCodeModel(Model):
         settings, parameters = self.prepare_request(model_settings, model_request_parameters)
         if settings:
             raise UserError("ClaudeCodeModel does not support per-request model settings.")
-        if parameters.output_tools or parameters.declared_function_tools:
+        if parameters.output_tools:
             raise UserError("ClaudeCodeModel supports prompted output and CLI tool allowlists.")
-        prompt = render_history(messages, parameters)
+        prompt = render_history(messages, parameters) + tool_instructions(parameters)
 
         async def invoke():
             result = await self.runner(self.command(prompt), self.timeout)
@@ -216,7 +217,7 @@ class ClaudeCodeModel(Model):
                 counts[key] = value
         reported = isinstance(usage, dict) and "input_tokens" in usage and "output_tokens" in usage
         return ModelResponse(
-            parts=[TextPart(text)], model_name=self.model_name, provider_name=self.system,
+            parts=response_parts(text, parameters), model_name=self.model_name, provider_name=self.system,
             usage=RequestUsage(
                 input_tokens=counts.get("input_tokens", 0) + counts.get("cache_read_input_tokens", 0) + counts.get("cache_creation_input_tokens", 0),
                 output_tokens=counts.get("output_tokens", 0),

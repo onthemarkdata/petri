@@ -7,9 +7,9 @@ from typing import Protocol
 
 from petri.models import Cell, ClarifyingQuestion, DecompositionResult, Edge, build_cell_key, parse_key
 from petri.reasoning.decomposition_agents import DecompositionInput
-from petri.reasoning.decomposition_schemas import InitialDecomposition, PremiseCandidate, WhyExpansion
+from petri.reasoning.decomposition_schemas import InitialDecomposition, Premise, PremiseCandidate, ReferencePremise, WhyExpansion
 from petri.reasoning.decomposition_settings import DecompositionSettings
-from petri.storage import database, event_log
+from petri.storage import database, edge_registry, event_log
 from petri.reasoning.seed_checkpoint import SeedCheckpointStore, current_attempt
 from petri.reasoning.seed_graph import ExpansionNode, InitialNode, SeedState
 
@@ -25,12 +25,13 @@ class DecompositionRunner(Protocol):
 def decompose_typed(
     claim: str, clarifications: list[ClarifyingQuestion], dish_id: str, colony_name: str,
     runner: DecompositionRunner, *, settings: DecompositionSettings, guidance: str = "",
-    db_path: Path | None = None, center: Cell | None = None,
+    db_path: Path | None = None, search_db_path: Path | None = None, center: Cell | None = None,
     on_progress: Progress = None, on_cell_created: OnCellCreated = None,
     resume: bool = False, checkpoint_store: SeedCheckpointStore | None = None,
 ) -> DecompositionResult:
     """Persist valid cells incrementally; failed calls never become atomic stops."""
     colony_id = f"{dish_id}-{colony_name}"
+    search_path = search_db_path or db_path
     created_at = datetime.now(UTC).isoformat()
     center = center or Cell(id=build_cell_key(dish_id, colony_name, 0, 0), colony_id=colony_id,
                             claim_text=claim, level=0, created_at=created_at)
@@ -93,10 +94,20 @@ def decompose_typed(
                 "bedrock_reason": cell.bedrock_reason, "created_at": cell.created_at,
             })
 
-    def add_children(parent: Cell, candidates: list[PremiseCandidate]) -> list[Cell]:
+    def add_children(parent: Cell, candidates: list[Premise]) -> list[Cell]:
         level = parent.level + 1
         children = []
         for candidate in candidates:
+            if isinstance(candidate, ReferencePremise):
+                edge = Edge(from_cell=parent.id, to_cell=candidate.existing_cell_id, edge_type="cross_colony", reason=candidate.reason)
+                if candidate.existing_cell_id not in parent.dependencies:
+                    parent.dependencies.append(candidate.existing_cell_id)
+                    edges.append(edge)
+                    if db_path is not None:
+                        edge_registry.append(db_path, edge_registry.EdgeRecord(
+                            **edge.model_dump(),
+                            created_at=datetime.now(UTC).isoformat()))
+                continue
             if counts.get(level, 0) >= settings.per_layer:
                 break
             seq = counts.get(level, 0) + 1
@@ -125,7 +136,7 @@ def decompose_typed(
             initial = (InitialDecomposition.model_validate(outputs[cells[0].id])
                        if cells[0].id in outputs else runner.initial_decomposition(DecompositionInput(
                            claim=claim, clarifications=[question.model_dump() for question in clarifications],
-                           guidance=guidance,
+                           guidance=guidance, db_path=search_path, colony_id=colony_id,
                        ), on_progress))
             journal(cells[0], initial)
             children = add_children(cells[0], initial.nodes[:settings.level_one_cap])
@@ -153,6 +164,7 @@ def decompose_typed(
                      else runner.expand_why(DecompositionInput(
                          claim=parent.claim_text, parent_level=parent.level,
                          parent_seq=parse_key(parent.id)["seq"], on_warning=warn,
+                         db_path=search_path, colony_id=colony_id,
                      ), on_progress))
         # Save validated model output before materialization so a crash during
         # cell writes can replay the output without requesting it again.
@@ -164,9 +176,9 @@ def decompose_typed(
         if not expansion.is_atomic:
             limit = min(settings.per_parent_cap, settings.per_layer - counts.get(next_level, 0))
             candidates = expansion.sub_premises[:limit]
-            if len(candidates) >= 2 and all(child.relation == "supports" for child in candidates):
+            if len(candidates) >= 2 and all(not isinstance(child, PremiseCandidate) or child.relation == "supports" for child in candidates):
                 counterargument = next((child for child in expansion.sub_premises[limit:]
-                                        if child.relation != "supports"), None)
+                                        if isinstance(child, PremiseCandidate) and child.relation != "supports"), None)
                 if counterargument is not None:
                     candidates[-1] = counterargument
             children = add_children(parent, candidates)
