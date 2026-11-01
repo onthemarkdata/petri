@@ -16,7 +16,6 @@ from petri.storage.event_log import (
     get_verdicts,
     load_events,
     query_events,
-    rollup_to_combined,
 )
 
 from tests.conftest import CANONICAL_CELL_IDS, make_event
@@ -424,99 +423,6 @@ class TestGetSearches:
         queries = [search["data"]["query"] for search in searches]
         assert "python best practices" in queries
         assert "advanced testing" in queries
-
-
-# ── rollup_to_combined Tests ─────────────────────────────────────────────
-
-
-class TestRollupToCombined:
-    """Tests for rollup_to_combined."""
-
-    def test_combines_multiple_colonies(self, tmp_path: Path):
-        dishes = tmp_path / "petri-dishes"
-
-        # Colony alpha, cell 1
-        alpha_cell1 = dishes / "alpha" / "level-001"
-        alpha_cell1.mkdir(parents=True)
-        _write_event_line(
-            alpha_cell1 / "events.jsonl",
-            make_event(event_id="a1", cell_id="alpha-001"),
-        )
-        _write_event_line(
-            alpha_cell1 / "events.jsonl",
-            make_event(event_id="a2", cell_id="alpha-001"),
-        )
-
-        # Colony alpha, cell 2
-        alpha_cell2 = dishes / "alpha" / "level-002"
-        alpha_cell2.mkdir(parents=True)
-        _write_event_line(
-            alpha_cell2 / "events.jsonl",
-            make_event(event_id="a3", cell_id="alpha-002"),
-        )
-
-        # Colony beta, cell 1
-        beta_cell1 = dishes / "beta" / "level-001"
-        beta_cell1.mkdir(parents=True)
-        _write_event_line(
-            beta_cell1 / "events.jsonl",
-            make_event(event_id="b1", cell_id="beta-001"),
-        )
-
-        combined_path = rollup_to_combined(tmp_path)
-        assert combined_path == tmp_path / "combined.jsonl"
-        assert combined_path.exists()
-
-        lines = [line for line in combined_path.read_text().splitlines() if line.strip()]
-        assert len(lines) == 4
-
-        ids = [json.loads(line)["id"] for line in lines]
-        assert ids == ["a1", "a2", "a3", "b1"]
-
-    def test_combined_contains_all_events(self, tmp_path: Path):
-        """Verify the combined file faithfully reproduces all source events."""
-        dishes = tmp_path / "petri-dishes"
-        colony_dir = dishes / "only" / "cell-001"
-        colony_dir.mkdir(parents=True)
-
-        source_events = [
-            make_event(event_id=f"evt-{i}", cell_id="only-001", iteration=i)
-            for i in range(10)
-        ]
-        for event in source_events:
-            _write_event_line(colony_dir / "events.jsonl", event)
-
-        rollup_to_combined(tmp_path)
-        combined = tmp_path / "combined.jsonl"
-        lines = [line for line in combined.read_text().splitlines() if line.strip()]
-        assert len(lines) == 10
-
-    def test_empty_cells_skipped(self, tmp_path: Path):
-        dishes = tmp_path / "petri-dishes"
-
-        # Cell with events
-        cell_with = dishes / "col" / "cell-with"
-        cell_with.mkdir(parents=True)
-        _write_event_line(
-            cell_with / "events.jsonl",
-            make_event(event_id="x1"),
-        )
-
-        # Cell with empty JSONL
-        cell_empty = dishes / "col" / "cell-empty"
-        cell_empty.mkdir(parents=True)
-        (cell_empty / "events.jsonl").write_text("")
-
-        combined_path = rollup_to_combined(tmp_path)
-        lines = [line for line in combined_path.read_text().splitlines() if line.strip()]
-        assert len(lines) == 1
-        assert json.loads(lines[0])["id"] == "x1"
-
-    def test_returns_combined_path(self, tmp_path: Path):
-        # Even with no petri-dishes dir, should return the path
-        combined_path = rollup_to_combined(tmp_path)
-        assert combined_path == tmp_path / "combined.jsonl"
-        assert combined_path.exists()
 
 
 # ── serialize_colony incremental write contract ─────────────────────────

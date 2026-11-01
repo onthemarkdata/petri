@@ -1,7 +1,7 @@
 """FastAPI REST + SSE application for the Petri dashboard.
 
 SQLite is a disposable read index -- agents never write to it.  The
-background tail task watches ``combined.jsonl`` and syncs new events
+background tail task watches legacy event files and syncs new events
 into SQLite automatically via ``incremental_sync``.
 """
 
@@ -30,7 +30,6 @@ from sse_starlette.sse import EventSourceResponse
 from petri.storage.dish import resolve_dish_id as _get_dish_id
 from petri.dashboard.frontend import build_frontend_html
 from petri.dashboard.migrate import incremental_sync
-from petri.storage.event_log import rollup_to_combined
 from petri.storage.queue import list_queue, load_queue
 
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
@@ -158,14 +157,9 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
     """
     file_offsets: dict[str, int] = {}
 
-    # Record the initial combined.jsonl size so incremental_sync starts
-    # from the right place (rebuild_sqlite has already ingested everything).
-    combined_path = petri_dir / "combined.jsonl"
-    if combined_path.exists():
-        try:
-            file_offsets[str(combined_path)] = combined_path.stat().st_size
-        except OSError:
-            pass
+    # Transitional index offsets; v2 query readers use per-dish databases directly.
+    for events_file in (petri_dir / "petri-dishes").rglob("events.jsonl"):
+        file_offsets[str(events_file)] = events_file.stat().st_size
 
     # ── Lifespan ──────────────────────────────────────────────────────
 
@@ -771,12 +765,10 @@ async def _tail_loop(
     db_path: Path,
     file_offsets: dict[str, int],
 ) -> None:
-    """Background task: re-roll-up and sync new events every 5 seconds."""
+    """Sync legacy per-cell event files until the SSE reader moves to v2 cursors."""
     while True:
         await asyncio.sleep(5)
         try:
-            # Re-rollup so combined.jsonl picks up any new per-node events
-            rollup_to_combined(petri_dir)
             incremental_sync(petri_dir, db_path, file_offsets)
         except Exception:
             pass  # non-fatal, retries next cycle
