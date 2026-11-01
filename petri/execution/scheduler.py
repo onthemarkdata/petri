@@ -7,11 +7,12 @@ import hashlib
 from dataclasses import dataclass
 from contextlib import closing
 
-from dbos import DBOS, SetEnqueueOptions, SetWorkflowID
+from dbos import DBOS
 
-from petri.execution.dbos_app import QUEUE_NAME, active_app
-from petri.execution.dbos_backend import CellRunSpec, _bounded, validate_cell
+from petri.execution.dbos_app import active_app
+from petri.execution.dbos_backend import CellRunSpec, _bounded
 from petri.execution.pipeline import SyncConflict
+from petri.execution.priorities import enqueue_with_priority, prepare_priority_pass
 from petri.models import CellStatus, parse_key
 from petri.storage import database
 from petri.storage.colonies import load_colony
@@ -94,6 +95,7 @@ def current_round(conn, cell_id):
 def eligible_cells(spec: ColonyRunSpec) -> list[tuple[CellRunSpec, int]]:
     path = active_app().db_path
     graph, _ = load_colony(path, spec.colony_id)
+    prepare_priority_pass(active_app(),spec.colony_id)
     statuses = {cell.id: cell.status for cell in graph.get_all_cells()}
     with closing(database.connect(path)) as conn:
         return _bounded(
@@ -121,8 +123,7 @@ def blocked_cells(spec: ColonyRunSpec) -> tuple[str, ...]:
 
 
 async def enqueue_validation(spec: CellRunSpec, level: int):
-    with SetWorkflowID(spec.workflow_id), SetEnqueueOptions(priority=level + 1):
-        return await DBOS.enqueue_workflow_async(QUEUE_NAME, validate_cell, spec)
+    return await enqueue_with_priority(active_app(),spec,level)
 
 
 @DBOS.workflow(name="petri.grow_colony")

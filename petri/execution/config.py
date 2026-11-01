@@ -28,3 +28,8 @@ class ExecutionConfig(BaseModel):
         if value is not None and not croniter.is_valid(value, second_at_beginning=True):
             raise ValueError("execution.scan_cron must be a valid cron expression")
         return value
+
+
+class SchedulingConfig(BaseModel):
+    model_config = ConfigDict(extra='forbid', frozen=True, strict=True)
+    prioritize_targets: bool = False

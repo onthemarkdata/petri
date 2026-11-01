@@ -66,6 +66,7 @@ class DBOSApp:
         self._slots = threading.BoundedSemaphore(settings.worker_concurrency)
         self.started = False
         self.conflicts: dict[str, dict] = {}
+        self.target_priority_plans: dict[str, dict[str, int]] = {}
 
     def dependencies(self, spec: CellRunSpec) -> PipelineDeps:
         with self._deps_lock:

@@ -88,3 +88,23 @@ stable report identity, so replay cannot append a second report for that firing.
 `petri check` and the dashboard show its active flags, severities, affected cells,
 and agents. `/api/ping` is the dashboard liveness endpoint used by `petri launch`.
 The flags describe recorded research activity and do not perform remediation.
+
+## Opt-in grow priorities
+
+Grow keeps its level-derived queue priorities by default: a level N cell receives
+priority N+1. To replace that ordering with graph targets, add:
+
+```yaml
+scheduling:
+  prioritize_targets: true
+```
+
+Each grow pass computes one report. Convergence points come first in report order;
+remaining cells rank by importance, then level and cell ID. Lower numeric priority
+runs first. This affects cells waiting in the queue; it does not interrupt an
+already running cell. Dependency eligibility still requires validated premises.
+
+The `cell_queued` domain event records the durable enqueue request and assigned
+priority. A repeated enqueue uses that request's original priority, and the
+`petri.enqueue_cell` span records it as `petri.queue.priority`. Workflow bodies,
+identities, and queue declarations remain unchanged.
