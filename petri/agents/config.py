@@ -10,6 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode, DebateProtocol
+from petri.telemetry.config import TelemetryConfig
 
 Nonempty = Annotated[str, Field(min_length=1)]
 PositiveInt = Annotated[int, Field(strict=True, gt=0)]
@@ -149,6 +150,7 @@ class AgentConfig(StrictContent):
     agent_tools: list[Nonempty]
     max_iterations: PositiveInt
     limits: LimitsConfig
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
     @field_validator("agents", mode="before")
     @classmethod

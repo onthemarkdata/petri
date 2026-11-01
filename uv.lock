@@ -1550,6 +1550,8 @@ name = "petri-grow"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
     { name = "pydantic" },
     { name = "pydantic-ai" },
     { name = "pyyaml" },
@@ -1588,6 +1590,8 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.100" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.24" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = "==1.45.2" },
+    { name = "opentelemetry-sdk", specifier = "==1.45.2" },
     { name = "petri-grow", extras = ["dev", "pdf", "test"], marker = "extra == 'all'" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "pydantic", specifier = ">=2.0" },

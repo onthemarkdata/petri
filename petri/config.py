@@ -56,6 +56,32 @@ def get_execution_backend(config: dict | None = None) -> str:
     return backend
 
 
+def get_telemetry_config(petri_dir: Path | None = None):
+    """Read current dish settings and explicit OTLP environment overrides."""
+    import os
+    from urllib.parse import unquote
+
+    from petri.telemetry.config import TelemetryConfig
+
+    dish = load_dish_config(petri_dir if petri_dir is not None else Path.cwd() / ".petri")
+    cfg = TelemetryConfig.model_validate(dish.get("telemetry", {}))
+    raw = cfg.model_dump()
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if endpoint:
+        raw["otlp"]["traces_endpoint"] = endpoint.rstrip("/") + "/v1/traces"
+        raw["otlp"]["logs_endpoint"] = endpoint.rstrip("/") + "/v1/logs"
+    headers = os.environ.get("OTEL_EXPORTER_OTLP_HEADERS")
+    if headers is not None:
+        parsed = {}
+        for item in filter(None, headers.split(",")):
+            key, separator, value = item.partition("=")
+            if not separator or not key.strip():
+                raise ValueError("OTEL_EXPORTER_OTLP_HEADERS must contain key=value pairs.")
+            parsed[unquote(key.strip())] = unquote(value.strip())
+        raw["otlp"]["headers"] = parsed
+    return TelemetryConfig.model_validate(raw)
+
+
 def get_model_name(config: dict | None = None) -> str:
     cfg = config or load_config()
     model = cfg.get("model")
