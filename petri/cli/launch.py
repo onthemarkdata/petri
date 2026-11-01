@@ -63,8 +63,8 @@ def _free_port_or_exit(port: int) -> None:
     """Ensure ``port`` is free before we bind, killing a prior petri dashboard
     instance if that's what's holding it. Fails loudly on anything else.
 
-    The sqlite index is disposable (rebuilt from JSONL on every launch), so
-    SIGKILLing a stale dashboard is safe — no in-memory state to preserve.
+    Committed dish data remains in SQLite. Replacing a stale dashboard can lose
+    buffered telemetry and interrupt terminal sessions; it does not rebuild data.
     """
     if not _port_is_listening(port):
         return
@@ -131,15 +131,13 @@ def register(app: typer.Typer) -> None:
 
         from petri.cli.init import create_petri_dish
         from petri.dashboard.api import create_app
-        from petri.dashboard.migrate import rebuild_sqlite
 
         # Free the port first so a stale dashboard from a prior session
-        # doesn't block us. The sqlite index is disposable — killing is safe.
+        # doesn't block us. Committed dish data stays in SQLite.
         _free_port_or_exit(port)
 
         project_dir = Path.cwd()
         petri_dir = project_dir / ".petri"
-        db_path = petri_dir / "petri.sqlite"
 
         # Auto-heal the dish: if `.petri/` is missing OR partially
         # initialized (e.g. user deleted defaults/petri.yaml but left
@@ -174,10 +172,6 @@ def register(app: typer.Typer) -> None:
         telemetry = get_telemetry_config(petri_dir)
         if telemetry.enabled and telemetry.local.enabled:
             prune(petri_dir, telemetry.local.retention_days)
-
-        typer.echo("Building event index...")
-        count = rebuild_sqlite(petri_dir, db_path)
-        typer.echo(f"Indexed {count} events.")
 
         dashboard_app = create_app(petri_dir)
 

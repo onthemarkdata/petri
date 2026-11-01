@@ -1,23 +1,10 @@
-"""Integration tests for the Petri dashboard (migrate + API + SSE).
-
-Tests cover:
-- SQLite rebuild from JSONL (migrate)
-- REST endpoint responses (GET /api/events, /api/queue, /api/cells, /api/cell/{id}, /api/health, /api/stats)
-- SSE stream delivers new events after incremental sync
-"""
+"""Dashboard REST and SSE integration over per-dish SQLite."""
 
 from __future__ import annotations
 
-import json
-import sqlite3
 
 import pytest
 
-from petri.dashboard.migrate import (
-    incremental_sync,
-    init_db,
-    rebuild_sqlite,
-)
 from petri.storage.event_log import append_event
 from petri.storage.queue import add_to_queue
 
@@ -79,143 +66,6 @@ def dashboard_env(petri_env_with_colony):
     }
 
 
-# ── migrate: rebuild_sqlite ─────────────────────────────────────────────
-
-
-class TestRebuildSqlite:
-    def test_rebuilds_from_jsonl(self, dashboard_env):
-        env = dashboard_env
-        count = rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        assert count == 5  # 3 search + 1 verdict + 1 decomposition
-        assert env["db_path"].exists()
-
-    def test_schema_has_expected_tables(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        conn = sqlite3.connect(str(env["db_path"]))
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
-        conn.close()
-
-        table_names = {t[0] for t in tables}
-        assert "events" in table_names
-
-    def test_events_queryable_by_cell_id(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        conn = sqlite3.connect(str(env["db_path"]))
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE cell_id = ?",
-            [env["cell1"].id],
-        ).fetchone()
-        conn.close()
-
-        assert rows[0] == 4  # 3 search + 1 verdict
-
-    def test_events_queryable_by_type(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        conn = sqlite3.connect(str(env["db_path"]))
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE type = 'verdict_issued'"
-        ).fetchone()
-        conn.close()
-
-        assert rows[0] == 1
-
-    def test_idempotent_rebuild(self, dashboard_env):
-        """INSERT OR IGNORE means rebuilding twice doesn't duplicate."""
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        # Second rebuild may insert 0 (OR IGNORE) or same count
-        # but total in DB should still be 5
-        conn = sqlite3.connect(str(env["db_path"]))
-        total = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        conn.close()
-
-        assert total == 5
-
-    def test_wal_journal_mode(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        conn = sqlite3.connect(str(env["db_path"]))
-        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-        conn.close()
-
-        assert mode == "wal"
-
-
-# ── migrate: incremental_sync ───────────────────────────────────────────
-
-
-class TestIncrementalSync:
-    def test_syncs_new_events_after_offset(self, dashboard_env):
-        env = dashboard_env
-        # First, do a full rebuild
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        file_offsets = {
-            str(path): path.stat().st_size
-            for path in (env["petri_dir"] / "petri-dishes").rglob("events.jsonl")
-        }
-
-        # Append a new event — resolve path from colony.json
-        colony_data = json.loads((env["colony_path"] / "colony.json").read_text())
-        cell1_rel = colony_data["cell_paths"][env["cell1"].id]
-        cell1_events_path = env["colony_path"] / cell1_rel / "events.jsonl"
-        append_event(
-            cell1_events_path,
-            cell_id=env["cell1"].id,
-            event_type="verdict_issued",
-            agent="skeptic",
-            iteration=2,
-            data={"verdict": "ARGUMENT_WITHSTANDS_CRITIQUE", "summary": "Solid"},
-        )
-
-        # Incremental sync should pick up only the new event
-        inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
-        assert inserted >= 1
-
-        # Verify in SQLite
-        conn = sqlite3.connect(str(env["db_path"]))
-        total = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        conn.close()
-
-        assert total == 6  # 5 original + 1 new
-
-    def test_no_new_events_returns_zero(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        file_offsets = {
-            str(path): path.stat().st_size
-            for path in (env["petri_dir"] / "petri-dishes").rglob("events.jsonl")
-        }
-
-        inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
-        assert inserted == 0
-
-    def test_empty_index_syncs_existing_cell_files(self, dashboard_env):
-        env = dashboard_env
-        init_db(env["db_path"])
-
-        file_offsets: dict[str, int] = {}
-        inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
-        assert inserted == 5
-        assert not (env["petri_dir"] / "combined.jsonl").exists()
-
-
-# ── FastAPI REST endpoints ──────────────────────────────────────────────
-
-
 @pytest.fixture
 def api_client(dashboard_env):
     """Create a TestClient for the dashboard API."""
@@ -225,7 +75,6 @@ def api_client(dashboard_env):
         pytest.skip("fastapi not installed")
 
     env = dashboard_env
-    rebuild_sqlite(env["petri_dir"], env["db_path"])
 
     from petri.dashboard.api import create_app
 
@@ -416,7 +265,6 @@ class TestDishesEndpoint:
             pytest.skip("fastapi not installed")
 
         env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
 
         # Remove all colony directories
         dishes_dir = env["petri_dir"] / "petri-dishes"

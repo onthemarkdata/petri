@@ -1,9 +1,4 @@
-"""FastAPI REST + SSE application for the Petri dashboard.
-
-SQLite is a disposable read index -- agents never write to it.  The
-background tail task watches legacy event files and syncs new events
-into SQLite automatically via ``incremental_sync``.
-"""
+"""Dashboard REST and SSE reads over per-dish SQLite query functions."""
 
 from __future__ import annotations
 
@@ -11,11 +6,9 @@ import asyncio
 import base64
 import errno
 import json
-import logging
 import os
 import pty
 import signal
-import sqlite3
 import sys
 import uuid
 from dataclasses import dataclass
@@ -30,11 +23,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from petri.storage.dish import resolve_dish_id as _get_dish_id
 from petri.dashboard.frontend import build_frontend_html
-from petri.dashboard.migrate import incremental_sync
 from petri.storage.queue import list_queue, load_queue
 from petri import query
-
-logger = logging.getLogger(__name__)
 
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
@@ -134,18 +124,6 @@ async def _await_exit(session: _ProcSession) -> None:
         session.master_fd = -1
 
 
-# ── SQLite connection ─────────────────────────────────────────────────────
-
-
-def get_db(db_path: Path) -> sqlite3.Connection:
-    """Open a WAL-mode SQLite connection with row factory."""
-    conn = sqlite3.connect(str(db_path), timeout=10)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 # ── Factory ───────────────────────────────────────────────────────────────
 
 
@@ -157,25 +135,7 @@ def create_app(petri_dir: Path) -> FastAPI:
     petri_dir:
         Path to the ``.petri`` directory.
     """
-    db_path = petri_dir / "petri.sqlite"
-    file_offsets: dict[str, int] = {}
-
-    # Transitional index offsets; v2 query readers use per-dish databases directly.
-    for events_file in (petri_dir / "petri-dishes").rglob("events.jsonl"):
-        file_offsets[str(events_file)] = events_file.stat().st_size
-
-    # ── Lifespan ──────────────────────────────────────────────────────
-
-    from contextlib import asynccontextmanager
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        """Start the background tail loop; cancel on shutdown."""
-        task = asyncio.create_task(_tail_loop(petri_dir, db_path, file_offsets))
-        yield
-        task.cancel()
-
-    app = FastAPI(title="Petri Dashboard API", lifespan=lifespan)
+    app = FastAPI(title="Petri Dashboard API")
     from petri.dashboard.traces_api import create_traces_router
 
     app.include_router(create_traces_router(petri_dir))
@@ -621,21 +581,3 @@ def create_app(petri_dir: Path) -> FastAPI:
     app.include_router(create_stream_router(petri_dir))
 
     return app
-
-
-# ── Internal helpers ──────────────────────────────────────────────────────
-
-
-
-async def _tail_loop(
-    petri_dir: Path,
-    db_path: Path,
-    file_offsets: dict[str, int],
-) -> None:
-    """Sync legacy per-cell event files until the SSE reader moves to v2 cursors."""
-    while True:
-        await asyncio.sleep(5)
-        try:
-            incremental_sync(petri_dir, db_path, file_offsets)
-        except Exception:
-            logger.exception('Legacy dashboard sync failed; retrying next cycle.')

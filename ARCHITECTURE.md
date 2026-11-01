@@ -167,7 +167,7 @@ Convergence is a mechanical check (no LLM involvement):
 
 ## Event Sourcing
 
-Every action is recorded as an immutable event in per-cell JSONL files (`.petri/petri-dishes/{colony}/{cell}/events.jsonl`).
+V2 dishes record immutable domain events in `.petri/petri-dishes/{dish_id}/petri.sqlite`. SQLite triggers reject event updates and deletes. Legacy JSONL readers remain available during the migration.
 
 **11 event types:** search_executed, source_reviewed, freshness_checked, verdict_issued, evidence_appended, debate_mediated, convergence_checked, cell_reopened, propagation_triggered, decomposition_created, decomposition_audit
 
@@ -205,13 +205,11 @@ Terminal verdicts (VALIDATED, DISPROVEN) require at least one source at Level 4 
 
 ## Storage
 
-Petri uses a two-store separation:
-
-- **Event logs** (JSONL, append-only) -- immutable audit trail per cell
-- **Queue** (JSON, file-locked with `fcntl`) -- mutable state machine, atomic transitions
-- **SQLite** (disposable) -- dashboard index, rebuilt from event logs on demand
-
-No data is duplicated between event logs and queue. The event log is authoritative; the queue tracks processing state only.
+V2 dishes use one WAL-mode SQLite database for colonies, cells, edges, append-only
+domain events, seed checkpoints, and local spans and usage. Telemetry retention
+prunes only spans and usage. The legacy queue still uses file-locked JSON until
+its execution backend moves to durable scheduling. DBOS system state is separate
+from the per-dish domain database.
 
 ## Dashboard / Frontend
 
@@ -221,11 +219,12 @@ No data is duplicated between event logs and queue. The event log is authoritati
 
 | File | Role |
 |------|------|
-| `api.py` | FastAPI app with ~15 routes: health, init, seed, dishes, cells, cell detail, events, stats, queue, plus the `/api/proc/*` PTY subprocess bridge and the `/api/stream` SSE event bus |
+| `api.py` | FastAPI app with routes: health, init, seed, dishes, cells, cell detail, events, stats, queue, plus the `/api/proc/*` PTY subprocess bridge and the `/api/stream` SSE event bus |
 | `frontend.py` | Loads `templates/frontend.html` and substitutes status colors, event colors, pass-verdict list, and version via `string.Template.safe_substitute` (same pattern as agent generators) |
-| `migrate.py` | Builds the disposable SQLite read index from the JSONL event logs at startup |
+| `traces_api.py` | Read-only trace summaries, span details, and usage totals |
+| `stream_api.py` | Per-dish event rowid cursors and live progress SSE |
 
-The SQLite index is rebuilt from JSONL on every `petri launch`, so killing the dashboard never loses data — the event log is still the source of truth.
+REST reads use `petri.query` over each dish database. Launch does not rebuild a dashboard index. Committed domain events survive dashboard restarts; buffered telemetry and terminal sessions can be lost on forced termination.
 
 ### Six screens (single-file SPA)
 
@@ -254,9 +253,15 @@ xterm itself runs with `disableStdin: true` — it's a write-only display. All k
 
 ### Live event bus
 
-`/api/stream` is a long-lived SSE channel that the dashboard subscribes to once on page load. The processor publishes events (cell status changes, verdicts issued, evidence appended, convergence checked, etc.) through an in-process broker; the SSE generator forwards them to all connected clients. Each screen opportunistically refreshes itself when a relevant event arrives — e.g. the Lab queue re-renders on a status change, the Cell page re-renders when a verdict for its cell is issued.
+`/api/stream` tails committed domain events every 200 ms through short-lived,
+read-only connections. Each dish has an integer rowid watermark; the SSE event ID
+carries the watermark map for reconnects. The frontend refreshes relevant views
+when it receives an `event_inserted` message.
 
-This is what makes the dashboard "live" without polling: the JSONL event log is also the source of truth for the UI, and the in-memory broker is just a fan-out tap on top of it.
+A bounded in-process broker carries transient `agent_progress` messages from the
+Pydantic AI stream adapter. Slow subscribers retain their latest 100 messages.
+Production agent wiring is separate; detached CLI processes contribute persisted
+domain events, but their live text does not cross process boundaries.
 
 ### Security posture
 
