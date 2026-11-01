@@ -473,6 +473,9 @@ class DBOSExecutionBackend:
         _bounded(spec)
         if spec.cell_id in self.app.conflicts:
             return ParkedCellHandle(spec.workflow_id, self.app.conflicts[spec.cell_id]["reason"])
+        status = await DBOS.get_workflow_status_async(spec.workflow_id)
+        if status is not None and status.status == "CANCELLED":
+            return await DBOS.resume_workflow_async(spec.workflow_id, queue_name=QUEUE_NAME)
         from petri.execution.priorities import enqueue_with_priority
 
         return await enqueue_with_priority(self.app, spec, level)
