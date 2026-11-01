@@ -74,6 +74,9 @@ def register(app: typer.Typer) -> None:
                 f"Error: {check.message}\nRun 'petri inspect' to check all prerequisites.",
             )
 
+        if check.name == "dbos":
+            typer.echo(check.message)
+
         # Resolve the inference provider from petri.yaml config
         provider = resolve_provider(petri_dir)
 

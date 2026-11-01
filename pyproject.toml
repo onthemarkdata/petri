@@ -21,6 +21,8 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.0",
+    "dbos==3.4.0",
+    "filelock>=3.16",
     "pydantic-ai>=2.64,<3",
 
 

@@ -9,6 +9,8 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from petri.execution.config import ExecutionConfig
+
 from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode, DebateProtocol
 from petri.telemetry.config import ModelPrice, TelemetryConfig
 
@@ -140,6 +142,7 @@ class PrePipelineContent(StrictContent):
 
 class AgentConfig(StrictContent):
     schema_version: Literal[2]
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     name: Nonempty = "petri"
     model: Nonempty
     harness: HarnessContent
