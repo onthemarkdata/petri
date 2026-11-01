@@ -214,7 +214,7 @@ def test_retiring_interim_seed_state_preserves_domain_tables(tmp_path):
     path = tmp_path / "petri.sqlite"
     source = files("petri.storage.migrations")
     scripts = tuple(
-        source.joinpath(name).read_text() for name in database.MIGRATIONS if int(name[:3]) <= 4
+        source.joinpath(name).read_text() for name in database.MIGRATIONS[:database.MIGRATIONS.index("009_retire_seed_state.sql")]
     )
     with closing(sqlite3.connect(path)) as conn:
         database.migrate(conn, scripts)
