@@ -381,3 +381,51 @@ async def test_shared_debate_budget_parks_and_preserves_partial_turns(
     )
     assert replay.usage.requests == 0
     assert database.read_events(services.db_path, cell_id=state.cell_id) == events
+
+
+@pytest.mark.asyncio
+async def test_actual_phase_spans_attribute_usage_once_per_call(phase_services):
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from pydantic_ai.usage import RequestUsage
+    from petri.telemetry import init_telemetry, shutdown_telemetry
+    from petri.telemetry.config import ModelPrice
+    from petri.telemetry.span_store import SQLiteSpanExporter
+    from petri.execution.decisions import run_convergence
+
+    services, _ = phase_services
+    cell_id = database.list_cells(services.db_path)[0]["id"]
+    provider = init_telemetry({}, dish_id=services.dish_id)
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    provider.add_span_processor(SimpleSpanProcessor(SQLiteSpanExporter(services.db_path)))
+    services.config = services.config.model_copy(update={"prices": {
+        services.config.model: ModelPrice(input_per_million=2, output_per_million=5)}})
+    def measured(messages, info):
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+            {"verdict": "VERIFIED", "summary": "A precise claim", "sources_cited": [SOURCE]})],
+            usage=RequestUsage(input_tokens=10, output_tokens=4))
+    value = inputs(cell_id)
+    try:
+        with services.socratic_agent.override(model=FunctionModel(measured)):
+            await run_socratic(value, services)
+            await run_socratic(value, services)
+        await run_convergence(value, services)
+        provider.force_flush()
+        phases = [s for s in exporter.get_finished_spans() if s.name == "petri.phase.socratic"]
+        measured_spans = [s for s in phases if "petri.tokens_input" in s.attributes]
+        assert len(phases) == 8 and len(measured_spans) == 4
+        assert all(s.attributes["petri.cell_id"] == cell_id for s in phases)
+        assert all(s.attributes["petri.agent_role"].startswith("socratic_") for s in phases)
+        assert all(s.attributes["petri.verdict"] == "VERIFIED" for s in phases)
+        assert all(s.attributes["petri.tokens_input"] == 10 for s in measured_spans)
+        assert sum(s.attributes["petri.tokens_output"] for s in measured_spans) == 16
+        assert sum(s.attributes["petri.cost_usd"] for s in measured_spans) == pytest.approx(0.00016)
+        convergence = next(s for s in exporter.get_finished_spans() if s.name == "petri.phase.convergence")
+        assert convergence.attributes["petri.iteration"] == value.iteration
+        assert convergence.attributes["petri.outcome"]
+        with closing(database.connect(services.db_path)) as conn:
+            rows = conn.execute("SELECT cell_id,SUM(tokens_input),SUM(tokens_output) FROM usage GROUP BY cell_id").fetchall()
+        assert [tuple(row) for row in rows] == [(cell_id, 40, 16)]
+    finally:
+        shutdown_telemetry()

@@ -252,3 +252,10 @@ examples with a v2 dish directory.
 Typed read-only wrappers live in `petri.query.analytics`. These are historical
 signals; a past convergence check does not prove that a reopened cell is currently
 validated.
+
+Actual research adapters emit domain phase spans around each agent assessment,
+debate, and mechanical convergence check. Assessment usage is the difference
+between the measured run counters before and after that call; replayed cached
+verdicts add no usage. This keeps cell totals from counting earlier calls again.
+Failed calls retain measured usage and an error outcome. Debate usage comes from
+its own run counter, and convergence records its iteration and mechanical outcome.

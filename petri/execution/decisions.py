@@ -22,6 +22,7 @@ from petri.execution.phases import (
     _prior_evidence,
     _record_assessment,
     build_research_dependencies,
+    span_context,
 )
 from petri.execution.pipeline import (
     ConvergenceDecision,
@@ -36,6 +37,7 @@ from petri.execution.pipeline import (
 from petri.models import CellStatus
 from petri.storage import database
 from petri.storage.event_log import append_event
+from petri.telemetry.attributes import phase_span
 
 
 class TerminalStatusResult(BaseModel):
@@ -67,6 +69,16 @@ def decide_convergence(
 
 
 async def run_convergence(value: PipelineInput, services: PhaseServices) -> ConvergenceDecision:
+    with phase_span("convergence", span_context(services, value), iteration=value.iteration,
+                    agent=AgentName.CELL_LEAD, weakest_link=value.weakest_link) as span:
+        result = await _run_convergence(value, services)
+        span.set_attribute("petri.outcome", result.outcome.value)
+        if result.weakest_link:
+            span.set_attribute("petri.weakest_link", result.weakest_link)
+        return result
+
+
+async def _run_convergence(value: PipelineInput, services: PhaseServices) -> ConvergenceDecision:
     """Read the current iteration's verdicts and record a mechanical decision."""
     _emit(services, value, "convergence", "phase_start")
     records = [

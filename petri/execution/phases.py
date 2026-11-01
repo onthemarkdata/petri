@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal
@@ -42,6 +42,8 @@ from petri.reasoning.prompts import build_assess_cell_prompt
 from petri.research.tools import ResearchContext
 from petri.storage import database
 from petri.storage.event_log import append_event, derive_event_id
+from petri.models import parse_key
+from petri.telemetry.attributes import CellSpanContext, phase_span, set_verdict_attributes
 
 
 class SocraticAssessment(RecordedAssessment):
@@ -194,7 +196,49 @@ def _record_assessment(
     return recorded
 
 
+def span_context(services: PhaseServices, value: PipelineInput) -> CellSpanContext:
+    identity = parse_key(value.cell_id, services.dish_id, strict=True)
+    return CellSpanContext(services.dish_id, str(identity["colony_prefix"]),
+        int(identity["level"]), int(identity["seq"]))
+
+
+def _measured_delta(before: RunUsage, after: RunUsage) -> RunUsage | None:
+    if after.requests == before.requests:
+        return None
+    return RunUsage(requests=after.requests - before.requests,
+        input_tokens=after.input_tokens - before.input_tokens,
+        output_tokens=after.output_tokens - before.output_tokens,
+        unmeasured_requests=after.unmeasured_requests - before.unmeasured_requests)
+
+
 async def _assessment(
+    services: PhaseServices, value: PipelineInput, *, node: str, phase: str,
+    agent_name: str, agent: Agent[Any, Any], claim: str,
+    prior_evidence: str = "", directive: str | None = None,
+) -> RecordedAssessment:
+    before = replace(services.usage)
+    role = AgentName(agent_name) if agent_name in AgentName._value2member_map_ else None
+    with phase_span(phase, span_context(services, value), iteration=value.iteration,
+                    agent=role, weakest_link=value.weakest_link) as span:
+        if role is None:
+            span.set_attribute("petri.agent_role", agent_name)
+            span.set_attribute("petri.agent_blocking", False)
+        try:
+            result = await _assessment_impl(services, value, node=node, phase=phase,
+                agent_name=agent_name, agent=agent, claim=claim,
+                prior_evidence=prior_evidence, directive=directive)
+        except Exception:
+            set_verdict_attributes(span, "EXECUTION_ERROR",
+                usage=_measured_delta(before, services.usage), model=services.config.model,
+                prices=services.config.prices, outcome="error")
+            raise
+        set_verdict_attributes(span, result.verdict,
+            usage=_measured_delta(before, services.usage), model=services.config.model,
+            prices=services.config.prices, outcome="completed")
+        return result
+
+
+async def _assessment_impl(
     services: PhaseServices,
     value: PipelineInput,
     *,
@@ -351,9 +395,13 @@ async def run_critique(value: PipelineInput, services: PhaseServices) -> PhaseRu
         if cached is None:
             for name in debate.pair:
                 _emit(services, value, "critique", "agent_start", agent=name.value)
-            result = await run_debate(
-                debate.protocol, services.agents, claim, services.config.limits.debate
-            )
+            with phase_span("debate", span_context(services, value), iteration=value.iteration,
+                            agent=AgentName.CELL_LEAD, weakest_link=value.weakest_link) as span:
+                result = await run_debate(
+                    debate.protocol, services.agents, claim, services.config.limits.debate
+                )
+                set_verdict_attributes(span, result.status.value, usage=result.usage,
+                    model=services.config.model, prices=services.config.prices, outcome=result.status.value)
             log_debate(
                 database.SQLiteEventLog(services.db_path, value.cell_id),
                 value.cell_id,
