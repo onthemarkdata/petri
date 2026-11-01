@@ -24,50 +24,50 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 
 | Issue | Work | Status / evidence |
 |---|---|---|
-| [#9](https://github.com/onthemarkdata/petri/issues/9) | [EPIC] M1-harness — Harness & inference layer | Pending |
-| [#10](https://github.com/onthemarkdata/petri/issues/10) | [EPIC] M2-agents — Agents on Pydantic AI | Pending |
-| [#11](https://github.com/onthemarkdata/petri/issues/11) | [EPIC] M3-decomposer — Agentic decomposer + evals | Pending |
-| [#12](https://github.com/onthemarkdata/petri/issues/12) | [EPIC] M4-dbos — Durable execution | Pending |
-| [#13](https://github.com/onthemarkdata/petri/issues/13) | [EPIC] M5-otel — OpenTelemetry | Pending |
-| [#14](https://github.com/onthemarkdata/petri/issues/14) | [EPIC] M6-storage — Storage & dashboard reads | Pending |
+| [#9](https://github.com/onthemarkdata/petri/issues/9) | [EPIC] M1-harness — Harness & inference layer | In progress; see child PRs and validation notes |
+| [#10](https://github.com/onthemarkdata/petri/issues/10) | [EPIC] M2-agents — Agents on Pydantic AI | In progress; see child PRs and validation notes |
+| [#11](https://github.com/onthemarkdata/petri/issues/11) | [EPIC] M3-decomposer — Agentic decomposer + evals | In progress; see child PRs and validation notes |
+| [#12](https://github.com/onthemarkdata/petri/issues/12) | [EPIC] M4-dbos — Durable execution | In progress; see child PRs and validation notes |
+| [#13](https://github.com/onthemarkdata/petri/issues/13) | [EPIC] M5-otel — OpenTelemetry | In progress; see child PRs and validation notes |
+| [#14](https://github.com/onthemarkdata/petri/issues/14) | [EPIC] M6-storage — Storage & dashboard reads | In progress; see child PRs and validation notes |
 | [#15](https://github.com/onthemarkdata/petri/issues/15) | [EPIC] M7-lifecycle — Iterative lifecycle | Pending |
-| [#18](https://github.com/onthemarkdata/petri/issues/18) | Create petri/harness error taxonomy and retry core | Pending |
-| [#19](https://github.com/onthemarkdata/petri/issues/19) | Add TestModel and FunctionModel offline fixtures | Pending |
-| [#20](https://github.com/onthemarkdata/petri/issues/20) | Add fake_pi stub and the tests/README testing tiers | Pending |
-| [#21](https://github.com/onthemarkdata/petri/issues/21) | Implement the pi RPC transport | Pending |
-| [#22](https://github.com/onthemarkdata/petri/issues/22) | Implement PiModel over the pi RPC transport | Pending |
-| [#23](https://github.com/onthemarkdata/petri/issues/23) | Port the Claude Code CLI to a ClaudeCodeModel | Pending |
-| [#24](https://github.com/onthemarkdata/petri/issues/24) | Extract prompt builders into reasoning/prompts.py | Pending |
-| [#25](https://github.com/onthemarkdata/petri/issues/25) | Resolve harness backends from petri.yaml | Pending |
-| [#26](https://github.com/onthemarkdata/petri/issues/26) | Bridge decomposition calls to pydantic-ai agents | Pending |
-| [#27](https://github.com/onthemarkdata/petri/issues/27) | Wire the bridge into the CLI with verdict discipline | Pending |
-| [#28](https://github.com/onthemarkdata/petri/issues/28) | Define the typed agent contract and frozen roster | Pending |
-| [#29](https://github.com/onthemarkdata/petri/issues/29) | Add conformance tests pinning verdict enums to YAML | Pending |
-| [#30](https://github.com/onthemarkdata/petri/issues/30) | Ship the v2 petri.yaml agent-content schema | Pending |
-| [#31](https://github.com/onthemarkdata/petri/issues/31) | Build the 13-agent roster via a pydantic-ai factory | Pending |
-| [#32](https://github.com/onthemarkdata/petri/issues/32) | Implement debates as real agent hand-off with cost caps | Pending |
-| [#33](https://github.com/onthemarkdata/petri/issues/33) | Move source-hierarchy policy to an output validator | Pending |
-| [#34](https://github.com/onthemarkdata/petri/issues/34) | Port mechanical convergence to the typed contract | Pending |
-| [#35](https://github.com/onthemarkdata/petri/issues/35) | Add petri agents list and check commands | Pending |
-| [#36](https://github.com/onthemarkdata/petri/issues/36) | Add petri agents run with usage and cost caps | Pending |
-| [#37](https://github.com/onthemarkdata/petri/issues/37) | Thread dish config through the decomposition path | Pending |
-| [#38](https://github.com/onthemarkdata/petri/issues/38) | Consolidate dish-id resolution and cell-ID parsing | Pending |
-| [#39](https://github.com/onthemarkdata/petri/issues/39) | Define the petri.sqlite schema and migrations | Pending |
+| [#18](https://github.com/onthemarkdata/petri/issues/18) | Create petri/harness error taxonomy and retry core | Integrated in [PR #127](https://github.com/onthemarkdata/petri/pull/127); final v2 acceptance pending |
+| [#19](https://github.com/onthemarkdata/petri/issues/19) | Add TestModel and FunctionModel offline fixtures | Integrated in [PR #128](https://github.com/onthemarkdata/petri/pull/128); final v2 acceptance pending |
+| [#20](https://github.com/onthemarkdata/petri/issues/20) | Add fake_pi stub and the tests/README testing tiers | Integrated in [PR #129](https://github.com/onthemarkdata/petri/pull/129); final v2 acceptance pending |
+| [#21](https://github.com/onthemarkdata/petri/issues/21) | Implement the pi RPC transport | Integrated in [PR #135](https://github.com/onthemarkdata/petri/pull/135); final v2 acceptance pending |
+| [#22](https://github.com/onthemarkdata/petri/issues/22) | Implement PiModel over the pi RPC transport | Integrated in [PR #136](https://github.com/onthemarkdata/petri/pull/136); final v2 acceptance pending |
+| [#23](https://github.com/onthemarkdata/petri/issues/23) | Port the Claude Code CLI to a ClaudeCodeModel | Integrated in [PR #146](https://github.com/onthemarkdata/petri/pull/146); final v2 acceptance pending |
+| [#24](https://github.com/onthemarkdata/petri/issues/24) | Extract prompt builders into reasoning/prompts.py | Integrated in [PR #134](https://github.com/onthemarkdata/petri/pull/134); final v2 acceptance pending |
+| [#25](https://github.com/onthemarkdata/petri/issues/25) | Resolve harness backends from petri.yaml | Integrated in [PR #147](https://github.com/onthemarkdata/petri/pull/147); final v2 acceptance pending |
+| [#26](https://github.com/onthemarkdata/petri/issues/26) | Bridge decomposition calls to pydantic-ai agents | Integrated in [PR #148](https://github.com/onthemarkdata/petri/pull/148); final v2 acceptance pending |
+| [#27](https://github.com/onthemarkdata/petri/issues/27) | Wire the bridge into the CLI with verdict discipline | Integrated in [PR #157](https://github.com/onthemarkdata/petri/pull/157); final v2 acceptance pending |
+| [#28](https://github.com/onthemarkdata/petri/issues/28) | Define the typed agent contract and frozen roster | Integrated in [PR #132](https://github.com/onthemarkdata/petri/pull/132); final v2 acceptance pending |
+| [#29](https://github.com/onthemarkdata/petri/issues/29) | Add conformance tests pinning verdict enums to YAML | Integrated in [PR #141](https://github.com/onthemarkdata/petri/pull/141); final v2 acceptance pending |
+| [#30](https://github.com/onthemarkdata/petri/issues/30) | Ship the v2 petri.yaml agent-content schema | Integrated in [PR #133](https://github.com/onthemarkdata/petri/pull/133); final v2 acceptance pending |
+| [#31](https://github.com/onthemarkdata/petri/issues/31) | Build the 13-agent roster via a pydantic-ai factory | Integrated in [PR #142](https://github.com/onthemarkdata/petri/pull/142); final v2 acceptance pending |
+| [#32](https://github.com/onthemarkdata/petri/issues/32) | Implement debates as real agent hand-off with cost caps | Integrated in [PR #145](https://github.com/onthemarkdata/petri/pull/145); final v2 acceptance pending |
+| [#33](https://github.com/onthemarkdata/petri/issues/33) | Move source-hierarchy policy to an output validator | Integrated in [PR #143](https://github.com/onthemarkdata/petri/pull/143); final v2 acceptance pending |
+| [#34](https://github.com/onthemarkdata/petri/issues/34) | Port mechanical convergence to the typed contract | Integrated in [PR #144](https://github.com/onthemarkdata/petri/pull/144); final v2 acceptance pending |
+| [#35](https://github.com/onthemarkdata/petri/issues/35) | Add petri agents list and check commands | Integrated in [PR #149](https://github.com/onthemarkdata/petri/pull/149); final v2 acceptance pending |
+| [#36](https://github.com/onthemarkdata/petri/issues/36) | Add petri agents run with usage and cost caps | Integrated in [PR #150](https://github.com/onthemarkdata/petri/pull/150); final v2 acceptance pending |
+| [#37](https://github.com/onthemarkdata/petri/issues/37) | Thread dish config through the decomposition path | Integrated in [PR #137](https://github.com/onthemarkdata/petri/pull/137); final v2 acceptance pending |
+| [#38](https://github.com/onthemarkdata/petri/issues/38) | Consolidate dish-id resolution and cell-ID parsing | Integrated in [PR #130](https://github.com/onthemarkdata/petri/pull/130); final v2 acceptance pending |
+| [#39](https://github.com/onthemarkdata/petri/issues/39) | Define the petri.sqlite schema and migrations | Integrated in [PR #139](https://github.com/onthemarkdata/petri/pull/139); final v2 acceptance pending |
 | [#40](https://github.com/onthemarkdata/petri/issues/40) | Adopt dish-scoped layout with petri.sqlite store | Pending |
 | [#41](https://github.com/onthemarkdata/petri/issues/41) | Rebuild the decomposer on pydantic-ai agents | Pending |
 | [#42](https://github.com/onthemarkdata/petri/issues/42) | Add bedrock stops and counterargument sub-claims | Pending |
 | [#43](https://github.com/onthemarkdata/petri/issues/43) | Enforce per-parent caps in decomposer code | Pending |
 | [#44](https://github.com/onthemarkdata/petri/issues/44) | Add search_cells tool for cross-colony edges | Pending |
-| [#45](https://github.com/onthemarkdata/petri/issues/45) | Refuse to overwrite an existing colony in seed | Pending |
+| [#45](https://github.com/onthemarkdata/petri/issues/45) | Refuse to overwrite an existing colony in seed | Integrated in [PR #126](https://github.com/onthemarkdata/petri/pull/126); final v2 acceptance pending |
 | [#46](https://github.com/onthemarkdata/petri/issues/46) | Checkpoint seed state and add petri seed --resume | Pending |
 | [#47](https://github.com/onthemarkdata/petri/issues/47) | Add an edit option to seed approval | Pending |
 | [#48](https://github.com/onthemarkdata/petri/issues/48) | Add pydantic_evals suite for decomposition quality | Pending |
-| [#49](https://github.com/onthemarkdata/petri/issues/49) | Spike: validate DBOS-on-SQLite for durable execution | Pending |
-| [#50](https://github.com/onthemarkdata/petri/issues/50) | Add an ExecutionBackend seam in front of the v1 engine | Pending |
-| [#51](https://github.com/onthemarkdata/petri/issues/51) | Make append_event idempotent with deterministic IDs | Pending |
-| [#52](https://github.com/onthemarkdata/petri/issues/52) | Model the per-cell pipeline as a typed pydantic-graph | Pending |
-| [#53](https://github.com/onthemarkdata/petri/issues/53) | Document the queue-state to pipeline-node mapping | Pending |
-| [#54](https://github.com/onthemarkdata/petri/issues/54) | Port queue transition tests to graph conformance suite | Pending |
+| [#49](https://github.com/onthemarkdata/petri/issues/49) | Spike: validate DBOS-on-SQLite for durable execution | Integrated in [PR #138](https://github.com/onthemarkdata/petri/pull/138); final v2 acceptance pending |
+| [#50](https://github.com/onthemarkdata/petri/issues/50) | Add an ExecutionBackend seam in front of the v1 engine | Integrated in [PR #151](https://github.com/onthemarkdata/petri/pull/151); final v2 acceptance pending |
+| [#51](https://github.com/onthemarkdata/petri/issues/51) | Make append_event idempotent with deterministic IDs | Integrated in [PR #140](https://github.com/onthemarkdata/petri/pull/140); final v2 acceptance pending |
+| [#52](https://github.com/onthemarkdata/petri/issues/52) | Model the per-cell pipeline as a typed pydantic-graph | Integrated in [PR #152](https://github.com/onthemarkdata/petri/pull/152); final v2 acceptance pending |
+| [#53](https://github.com/onthemarkdata/petri/issues/53) | Document the queue-state to pipeline-node mapping | Integrated in [PR #153](https://github.com/onthemarkdata/petri/pull/153); final v2 acceptance pending |
+| [#54](https://github.com/onthemarkdata/petri/issues/54) | Port queue transition tests to graph conformance suite | Integrated in [PR #154](https://github.com/onthemarkdata/petri/pull/154); final v2 acceptance pending |
 | [#55](https://github.com/onthemarkdata/petri/issues/55) | Port research-side phases into pipeline nodes | Pending |
 | [#56](https://github.com/onthemarkdata/petri/issues/56) | Port decision-side phases and iterate loop into nodes | Pending |
 | [#57](https://github.com/onthemarkdata/petri/issues/57) | Implement DBOSExecutionBackend with durable cell workflows | Pending |
@@ -110,7 +110,22 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#94](https://github.com/onthemarkdata/petri/issues/94) | Add a read-only Analyst for research-health flags | Pending |
 | [#95](https://github.com/onthemarkdata/petri/issues/95) | Write the GitHub feedback re-entry RFC | Pending |
 | [#96](https://github.com/onthemarkdata/petri/issues/96) | Archive merged worktrees and record corpus provenance | Pending |
-| [#100](https://github.com/onthemarkdata/petri/issues/100) | Petri v2 migration — master tracker | Pending |
-| [#117](https://github.com/onthemarkdata/petri/issues/117) | Wire `petri --version` into the CLI | Pending |
-| [#120](https://github.com/onthemarkdata/petri/issues/120) | Wire up the pi harness end-to-end | Pending |
+| [#100](https://github.com/onthemarkdata/petri/issues/100) | Petri v2 migration — master tracker | In progress; see child PRs and validation notes |
+| [#117](https://github.com/onthemarkdata/petri/issues/117) | Wire `petri --version` into the CLI | Already shipped in PR #118; version CLI regression tests pass |
+| [#120](https://github.com/onthemarkdata/petri/issues/120) | Wire up the pi harness end-to-end | In progress; see child PRs and validation notes |
 
+
+## Current validation and remaining integration work
+
+- The combined stack through PR #155 passed 1,150 offline tests, mypy across
+  80 modules, Ruff 0.15.21, and whitespace checks. The preceding coverage run
+  measured 80.31%, above the 68% requirement.
+- PR #156 fixes concurrent SQLite WAL startup. A 3,200-opener stress run had no
+  lock failures after a failure was reproduced before the fix.
+- PR #157 passed local seed and grow dry-run through both pi and the direct
+  Docker Model Runner Chat Completions API with the exact Gemma Q4_0 model.
+  Full grow, feed, dashboard, export, backup/restore, and crash recovery remain
+  required before the final integration PR can be approved.
+- The proposed CI branch filter change remains local on `codex/petri-v2-ci`:
+  GitHub rejected its push because the active OAuth credential lacks `workflow`
+  scope. Local checks continue; no credential settings were changed.
