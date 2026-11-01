@@ -269,7 +269,7 @@ and first child were committed. Restart restored the saved browser run and
 completed the three-cell graph without repeating the model call. A generated
 premise omitted scope from the parent, so decomposition quality remains unresolved.
 
-The [Jaeger UI check](../OBSERVABILITY.md#optional-external-backend-jaeger)
+The [Jaeger UI check](../observability.md#optional-external-backend-jaeger)
 verified an actual `petri grow --dry-run` command export. The dry run contained no model
 or workflow child spans.
 
