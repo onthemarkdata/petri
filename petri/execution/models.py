@@ -21,7 +21,7 @@ class CellPipelineState(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     cell_id: str
-    iteration: int = Field(default=0, ge=0)
+    iteration: int = Field(default=0, ge=0, frozen=True)
     weakest_link: str | None = None
     focused_directive: str | None = None
     cycle_start_iteration: int = Field(default=0, ge=0)
