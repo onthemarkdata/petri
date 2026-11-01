@@ -6,7 +6,9 @@ import asyncio
 import json
 import math
 import os
+import re
 import shutil
+import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
 
@@ -43,6 +45,7 @@ class PiRpcTransport:
         self.extra_args = tuple(extra_args)
         self.classifier = classifier or FailureClassifier()
         self.process: asyncio.subprocess.Process | None = None
+        self._session_dir: tempfile.TemporaryDirectory | None = None
         self._stderr_task: asyncio.Task | None = None
         self._stderr = ""
         self._stdout = ""
@@ -55,6 +58,8 @@ class PiRpcTransport:
         if not binary:
             raise PermanentHarnessError("pi is unavailable. Install pi or set PETRI_PI_BIN.")
         command = [binary, "--mode", "rpc", "--no-session"]
+        if self._session_dir is not None:
+            command += ["--session-dir", self._session_dir.name]
         if self.provider:
             command += ["--provider", self.provider]
         if self.model:
@@ -74,6 +79,13 @@ class PiRpcTransport:
             stderr_tail=self._stderr, stdout_tail=self._stdout, last_stream_event=self._last_event,
         )
 
+    def _failure(self, stdout: str):
+        status = re.search(r"(?<!\d)(401|403|404|429|500|502|503|504)(?!\d)", f"{self._stderr}\n{stdout}")
+        return self.classifier.classify(
+            self.process.returncode if self.process else None,
+            self._stderr, stdout, code=int(status[1]) if status else None, detail=self._detail(),
+        )
+
     async def _drain_stderr(self, stream: asyncio.StreamReader) -> None:
         while chunk := await stream.read(4096):
             self._stderr = (self._stderr + chunk.decode("utf-8", errors="replace"))[-4096:]
@@ -83,6 +95,7 @@ class PiRpcTransport:
             return
         await self._stop()
         self._stderr = ""
+        self._session_dir = tempfile.TemporaryDirectory(prefix="petri-pi-session-")
         try:
             self.process = await asyncio.create_subprocess_exec(
                 *self.command(), stdin=asyncio.subprocess.PIPE,
@@ -91,6 +104,7 @@ class PiRpcTransport:
             )
         except OSError as exc:
             raise PermanentHarnessError(f"Cannot start pi: {exc}") from exc
+        assert self.process.stderr is not None
         self._stderr_task = asyncio.create_task(self._drain_stderr(self.process.stderr))
         await self._exchange({"type": "set_auto_retry", "enabled": False})
 
@@ -117,12 +131,16 @@ class PiRpcTransport:
         if self._stderr_task is not None:
             await self._stderr_task
             self._stderr_task = None
+        if self._session_dir is not None:
+            self._session_dir.cleanup()
+            self._session_dir = None
 
     async def aclose(self) -> None:
         async with self._lock:
             await self._stop()
 
     async def _read_frame(self) -> dict:
+        assert self.process is not None and self.process.stdout is not None
         try:
             raw = await self.process.stdout.readline()
         except ValueError as exc:
@@ -131,9 +149,7 @@ class PiRpcTransport:
             await self.process.wait()
             if self._stderr_task:
                 await self._stderr_task
-            raise self.classifier.classify(
-                self.process.returncode, self._stderr, self._stdout, detail=self._detail(),
-            )
+            raise self._failure(self._stdout)
         self._stdout = (self._stdout + raw.decode("utf-8", errors="replace"))[-4096:]
         try:
             if not raw.endswith(b"\n"):
@@ -147,6 +163,7 @@ class PiRpcTransport:
         return frame
 
     async def _exchange(self, payload: dict) -> dict:
+        assert self.process is not None and self.process.stdin is not None
         request_id = payload.get("id") or str(uuid.uuid4())
         wire = json.dumps({**payload, "id": request_id}, ensure_ascii=False, allow_nan=False)
         self.process.stdin.write(wire.encode("utf-8") + b"\n")
@@ -161,9 +178,7 @@ class PiRpcTransport:
                 if type(frame.get("success")) is not bool:
                     raise PermanentHarnessError("pi response lacks a boolean success field.", detail=self._detail())
                 if not frame["success"]:
-                    raise self.classifier.classify(
-                        self.process.returncode, self._stderr, json.dumps(frame), detail=self._detail(),
-                    )
+                    raise self._failure(json.dumps(frame))
                 if payload["type"] != "prompt":
                     return frame
                 accepted = True
@@ -173,10 +188,8 @@ class PiRpcTransport:
                     raise PermanentHarnessError("pi completed without valid messages.", detail=self._detail())
                 for message in messages:
                     if message.get("role") == "assistant" and message.get("stopReason") in ("error", "aborted"):
-                        raise self.classifier.classify(
-                            self.process.returncode, self._stderr,
-                            message.get("errorMessage") or "pi inference aborted", detail=self._detail(),
-                        )
+                        error = message.get("errorMessage") or "pi inference aborted"
+                        raise self._failure(error if isinstance(error, str) else json.dumps(error))
                 completed = frame
             if accepted and completed is not None:
                 return completed

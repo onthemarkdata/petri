@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -17,15 +18,18 @@ async def test_roundtrip_and_session_reuse(fake_pi):
     async with PiRpcTransport(binary=str(fake_pi.path)) as transport:
         result = await transport.request({"type": "prompt", "message": "a\nb\r\nc"})
         process = transport.process
+        session_dir = Path(transport._session_dir.name)
         assert result["messages"][0]["content"][0]["text"] == "first\nsecond\r\nlast"
         await transport.request({"type": "prompt", "message": "again"})
         assert transport.process is process
     assert process.returncode is not None
+    assert not session_dir.exists()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario,error", [
     ({"kind": "error", "error": "network timeout"}, TransientHarnessError),
+    ({"kind": "error", "error": "429 quota exhausted"}, RateLimitedError),
     ({"kind": "error", "error": "model not found"}, PermanentHarnessError),
     ({"kind": "rate_limit", "reset_hint": "try again in 2 minutes"}, RateLimitedError),
 ])
@@ -35,7 +39,7 @@ async def test_failures(fake_pi, scenario, error):
     with pytest.raises(error) as raised:
         await transport.request({"type": "prompt", "message": "hello"})
     assert transport.process.returncode is not None
-    if isinstance(raised.value, RateLimitedError):
+    if scenario.get("reset_hint"):
         assert raised.value.retry_after_seconds == 120
 
 
