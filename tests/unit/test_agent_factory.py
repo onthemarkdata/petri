@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from pydantic_ai import capture_run_messages
-from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import (
     ModelResponse,
     RetryPromptPart,
@@ -18,7 +17,7 @@ from pydantic_ai.models.test import TestModel
 
 from petri.agents.config import load_agent_config
 from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode, Phase
-from petri.agents.factory import build_agents, run_agent
+from petri.agents.factory import AgentRunError, build_agents, run_agent
 from petri.agents.outputs import SourceCitation
 
 DEFAULTS = Path(__file__).parents[2] / "petri/defaults"
@@ -120,7 +119,7 @@ async def test_invalid_verdict_retries_then_raises(config):
         output_mode="tool",
         retries=1,
     )
-    with capture_run_messages() as messages, pytest.raises(UnexpectedModelBehavior):
+    with capture_run_messages() as messages, pytest.raises(AgentRunError):
         await run_agent(agents, AgentName.INVESTIGATOR, "Assess.", config)
     assert any(
         (

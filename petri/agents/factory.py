@@ -3,13 +3,15 @@
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
-from pydantic_ai import Agent, AgentRunResult, PromptedOutput, ToolOutput
+from pydantic_ai import Agent, AgentRunResult, ModelRetry, PromptedOutput, ToolOutput
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
 from petri.agents.config import AgentConfig
 from petri.agents.contract import AgentName
 from petri.agents.outputs import AgentAssessment, output_model
+from petri.agents.source_policy import check_terminal_sources
 
 ModelResolver = Callable[[dict], Model | str]
 OutputMode = Literal["tool", "prompted"]
@@ -67,7 +69,30 @@ def build_agents(
             retries={"output": retries},
             defer_model_check=True,
         )
+    evaluator = roster[AgentName.EVIDENCE_EVALUATOR]
+
+    @evaluator.output_validator
+    def enforce_terminal_sources(output: AgentAssessment) -> AgentAssessment:
+        if output.verdict in {"EVIDENCE_CONFIRMS", "EVIDENCE_REFUTES"}:
+            policy = check_terminal_sources(
+                output.sources_cited,
+                validated.source_hierarchy.minimum_terminal_level,
+            )
+            if not policy.passes:
+                raise ModelRetry(policy.detail)
+        return output
+
     return roster
+
+
+class AgentRunError(RuntimeError):
+    """Output retries were exhausted; callers must record an execution failure."""
+
+    def __init__(self, agent: AgentName, detail: str):
+        self.agent = agent
+        self.verdict = "EXECUTION_ERROR"
+        self.detail = detail
+        super().__init__(f"{agent}: {detail}")
 
 
 async def run_agent(
@@ -80,12 +105,15 @@ async def run_agent(
     """Run one roster member with the configured cell-run usage caps."""
     if "usage_limits" in kwargs:
         raise ValueError("Usage limits come from the validated configuration.")
-    return await agents[name].run(
-        prompt,
-        usage_limits=UsageLimits(
-            request_limit=config.limits.run.request_limit,
-            total_tokens_limit=config.limits.run.total_tokens_limit,
-            tool_calls_limit=config.limits.run.tool_calls_limit,
-        ),
-        **kwargs,
-    )
+    try:
+        return await agents[name].run(
+            prompt,
+            usage_limits=UsageLimits(
+                request_limit=config.limits.run.request_limit,
+                total_tokens_limit=config.limits.run.total_tokens_limit,
+                tool_calls_limit=config.limits.run.tool_calls_limit,
+            ),
+            **kwargs,
+        )
+    except UnexpectedModelBehavior as error:
+        raise AgentRunError(name, str(error)) from error
