@@ -1897,6 +1897,7 @@ function handleRoute() {
   var param = parts.slice(1).join('/');
   if (param) param = decodeURIComponent(param);
 
+  telemetryRefresh.cancel();
   State.currentView = view;
 
   document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
@@ -1930,13 +1931,14 @@ function handleRoute() {
       document.getElementById('screen-traces').classList.add('active');
       updateNavTabs('traces');
       State.traceCell = param || null;
-      loadTraces();
+      telemetryRefresh.request();
       break;
     case 'cell':
       document.getElementById('screen-cell').classList.add('active');
       updateNavTabs(null);
       State.currentCell = param;
       loadCellDetail(param);
+      telemetryRefresh.request();
       break;
     default:
       document.getElementById('screen-title').classList.add('active');
@@ -1997,10 +1999,13 @@ function connectSSE() {
     State.events.unshift(data);
     if (State.events.length > 500) State.events.length = 500;
     if (State.currentView === 'logs') appendLogRow(data);
-    if (State.currentView === 'traces') loadTraces();
+    if (State.currentView === 'traces') telemetryRefresh.request();
     if (State.currentView === 'lab') loadLabData();
     if (State.currentView === 'colony' && State.currentColony) loadColonyDAG(State.currentColony);
-    if (State.currentView === 'cell' && State.currentCell === data.cell_id) loadCellDetail(State.currentCell);
+    if (State.currentView === 'cell' && State.currentCell === data.cell_id) {
+      loadCellDetail(State.currentCell);
+      telemetryRefresh.request();
+    }
     // Show committed domain events alongside the active run's progress.
     if (State.currentView === 'computer' && (TerminalState.mode === 'idle' || TerminalState.mode === 'running') && XTERM) {
       var line = '[' + (data.type || '?') + '] ' + (data.cell_id || '') + ' · ' + (data.agent || '');
@@ -2684,6 +2689,39 @@ function loadCosts(container, cellId) {
   }).catch(function(error) { container.textContent = 'Could not load usage: ' + error.message; });
 }
 
+// Span batches can arrive after the domain event. Refresh for 15 seconds, then stop.
+function createTelemetryRefresh(refresh, isActive, schedule, cancel) {
+  var timers = [];
+  function stop() {
+    timers.forEach(cancel);
+    timers = [];
+  }
+  return {
+    request: function() {
+      stop();
+      if (!isActive()) return;
+      refresh();
+      [1500, 6000, 15000].forEach(function(delay) {
+        timers.push(schedule(function() {
+          if (isActive()) refresh();
+        }, delay));
+      });
+    },
+    cancel: stop,
+  };
+}
+
+var telemetryRefresh = createTelemetryRefresh(function() {
+  if (State.currentView === 'traces') {
+    loadTraces();
+  } else if (State.currentView === 'cell') {
+    var panel = document.getElementById('cell-costs-panel');
+    if (panel) loadCosts(panel, State.currentCell);
+  }
+}, function() {
+  return State.currentView === 'traces' || State.currentView === 'cell';
+}, window.setTimeout.bind(window), window.clearTimeout.bind(window));
+
 // Local traces share the dashboard's API and SSE connection.
 function loadTraces() {
   loadCosts(document.getElementById('costs-panel'), State.traceCell);
@@ -2717,7 +2755,9 @@ function showTrace(traceId) {
     });
   }).catch(function(error) { document.getElementById('trace-waterfall').textContent = 'Could not load trace: ' + error.message; });
 }
-document.getElementById('traces-refresh').addEventListener('click', loadTraces);
+document.getElementById('traces-refresh').addEventListener('click', function() {
+  telemetryRefresh.request();
+});
 
 // ── Cell Detail ─────────────────────────────────────────────────────────
 
