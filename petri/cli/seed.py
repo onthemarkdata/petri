@@ -20,6 +20,7 @@ from petri.storage.colonies import (
     clear_unapproved_colony, colony_exists, reserve_colony, save_colony,
 )
 from petri.storage.seed_guard import ColonyExistsError
+from petri.storage.backup import snapshot_before_destructive
 from petri.storage.database import SQLiteEventLog
 from petri.storage.paths import dish_db_path
 
@@ -473,6 +474,7 @@ def register(app: typer.Typer) -> None:
         result = None
         while True:
             # Only this run's cells are replaced during regeneration.
+            snapshot_before_destructive(petri_dir, dish_id)
             clear_unapproved_colony(colony_path, colony_id)
             graph = ColonyGraph(colony_id=colony_id)
             graph.add_cell(center_cell)
@@ -539,6 +541,7 @@ def register(app: typer.Typer) -> None:
 
             if action is None or action == "Abort":
                 # Only this run's cells are removed when this run is rejected.
+                snapshot_before_destructive(petri_dir, dish_id)
                 clear_unapproved_colony(colony_path, colony_id)
                 typer.echo("Decomposition rejected.")
                 raise typer.Exit(code=1)
@@ -552,6 +555,7 @@ def register(app: typer.Typer) -> None:
             ).ask()
             if guidance is None:
                 # Only this run's cells are removed when this run is rejected.
+                snapshot_before_destructive(petri_dir, dish_id)
                 clear_unapproved_colony(colony_path, colony_id)
                 typer.echo("Cancelled.")
                 raise typer.Exit(code=1)
