@@ -77,7 +77,7 @@ def test_per_agent_model_override(config):
 
     agents = build_agents(config, constitution="Evidence first.", model_resolver=resolver)
     assert agents[AgentName.TRIAGE].model.model_name == "test:triage-specialist"
-    assert agents[AgentName.INVESTIGATOR].model.model_name == "default"
+    assert agents[AgentName.INVESTIGATOR].model.model_name == config.harness.model
     assert len(calls) == 13
 
 
