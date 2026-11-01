@@ -23,7 +23,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from petri.storage.dish import resolve_dish_id as _get_dish_id
 from petri.dashboard.frontend import build_frontend_html
-from petri.storage.queue import list_queue, load_queue
+from petri.execution import resolve_backend
+from petri.execution.backend import ExecutionBackend
 from petri import query
 
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
@@ -127,7 +128,9 @@ async def _await_exit(session: _ProcSession) -> None:
 # ── Factory ───────────────────────────────────────────────────────────────
 
 
-def create_app(petri_dir: Path) -> FastAPI:
+def create_app(
+    petri_dir: Path, *, execution_backend: ExecutionBackend | None = None
+) -> FastAPI:
     """Build and return the FastAPI application.
 
     Parameters
@@ -135,6 +138,7 @@ def create_app(petri_dir: Path) -> FastAPI:
     petri_dir:
         Path to the ``.petri`` directory.
     """
+    backend = execution_backend or resolve_backend(petri_dir)
     app = FastAPI(title="Petri Dashboard API")
     from petri.dashboard.traces_api import create_traces_router
 
@@ -512,8 +516,7 @@ def create_app(petri_dir: Path) -> FastAPI:
 
     @app.get("/api/queue")
     def get_queue():
-        queue_path = petri_dir / "queue.json"
-        return list_queue(queue_path)
+        return backend.list_entries(petri_dir)
 
     # ── Cells ─────────────────────────────────────────────────────────
 
@@ -576,18 +579,8 @@ def create_app(petri_dir: Path) -> FastAPI:
             for row in summary['top_cells']:
                 cells[row['cell_id']] = cells.get(row['cell_id'], 0) + row['event_count']
 
-        # Queue stats
-        queue_path = petri_dir / "queue.json"
-        try:
-            queue = load_queue(queue_path)
-        except Exception:
-            queue = {"entries": {}}
-        entries = queue.get("entries", {})
-
-        cells_by_state: dict[str, int] = {}
-        for entry in entries.values():
-            state = entry.get("queue_state", "unknown")
-            cells_by_state[state] = cells_by_state.get(state, 0) + 1
+        entries = backend.list_entries(petri_dir)
+        cells_by_state = backend.state_summary(petri_dir)
 
         return {
             "total_events": sum(summary["total_events"] for summary in summaries),
