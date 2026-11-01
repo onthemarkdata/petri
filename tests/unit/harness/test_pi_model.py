@@ -161,8 +161,12 @@ async def test_history_and_validation_feedback_reach_pi(fake_pi):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fenced", [False, True])
-async def test_host_function_tool_executes_and_result_returns_to_pi(fake_pi, fenced):
-    envelope = '{"tool_calls": [{"name": "lookup", "arguments": {"query": "solar"}}]}'
+@pytest.mark.parametrize("envelope", [
+    '{"tool_calls": [{"name": "lookup", "arguments": {"query": "solar"}}]}',
+    '{"lookup": [{"query": "solar"}]}',
+    '{"lookup": {"query": "solar"}}',
+])
+async def test_host_function_tool_executes_and_result_returns_to_pi(fake_pi, fenced, envelope):
     if fenced:
         envelope = f"```json\n{envelope}\n```"
     fake_pi.scenario(
@@ -182,3 +186,46 @@ async def test_host_function_tool_executes_and_result_returns_to_pi(fake_pi, fen
     assert calls == ["solar"]
     assert result.output == "Existing premise found"
     assert model.round_trips == 2
+
+
+@pytest.mark.asyncio
+async def test_named_tool_arguments_still_receive_validation_retry(fake_pi):
+    fake_pi.scenario(
+        {"text": '{"lookup": [{}]}'},
+        {"text": '{"lookup": [{"query": "solar"}]}'},
+        {"text": "Existing premise found"},
+    )
+    calls = []
+    async with model_for(fake_pi) as model:
+        agent = Agent(model)
+
+        @agent.tool_plain
+        def lookup(query: str) -> str:
+            calls.append(query)
+            return "dish-foundation-001-001"
+
+        result = await agent.run("Find the solar premise")
+    assert calls == ["solar"]
+    assert result.output == "Existing premise found"
+    assert model.round_trips == 3
+
+
+@pytest.mark.parametrize("text", [
+    '{"unknown": [{"query": "solar"}]}',
+    '{"lookup": [{"query": "solar"}], "summary": "Done"}',
+    '{"lookup": []}',
+    '{"lookup": [null]}',
+    '{"lookup": "solar"}',
+    'Call this: {"lookup": [{"query": "solar"}]}',
+])
+def test_named_tools_do_not_infer_calls_from_unknown_or_partial_shapes(text):
+    from pydantic_ai.messages import TextPart
+    from pydantic_ai.tools import ToolDefinition
+    from petri.harness.function_tools import response_parts
+
+    parameters = ModelRequestParameters(function_tools=[
+        ToolDefinition(name="lookup", parameters_json_schema={"type": "object"})
+    ])
+    parts = response_parts(text, parameters)
+    assert len(parts) == 1 and isinstance(parts[0], TextPart)
+    assert parts[0].content == text

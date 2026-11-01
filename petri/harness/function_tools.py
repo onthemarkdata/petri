@@ -60,8 +60,19 @@ def response_parts(text: str, parameters: ModelRequestParameters) -> list[TextPa
             fenced = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", candidate, flags=re.DOTALL)
             if fenced:
                 candidate = fenced[1]
-            envelope = _Calls.model_validate_json(candidate)
-        except ValidationError:
+            value = json.loads(candidate)
+            declared = {tool.name for tool in parameters.declared_function_tools}
+            if isinstance(value, dict) and value and set(value) <= declared:
+                calls: list[dict[str, object]] = []
+                for name, arguments in value.items():
+                    items = arguments if isinstance(arguments, list) else [arguments]
+                    if not items or not all(isinstance(item, dict) for item in items):
+                        break
+                    calls.extend({"name": name, "arguments": item} for item in items)
+                else:
+                    value = {"tool_calls": calls}
+            envelope = _Calls.model_validate(value)
+        except (ValidationError, json.JSONDecodeError):
             pass
         else:
             return [ToolCallPart(call.name, call.arguments) for call in envelope.tool_calls]
