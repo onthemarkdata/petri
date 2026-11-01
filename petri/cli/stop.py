@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 import typer
 
-from petri.models import parse_key
-
 from petri.cli._bootstrap import find_petri_dir
+from petri.cli_ui import print_error_and_exit
+from petri.execution import resolve_backend
+from petri.models import parse_key
 from petri.storage.paths import (
     cell_dir as cell_dir_for,
+)
+from petri.storage.paths import (
     events_path as events_file_path,
+)
+from petri.storage.paths import (
     metadata_path as metadata_file_path,
 )
 
@@ -24,16 +28,15 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Gracefully stop all running tasks."""
         petri_dir = find_petri_dir()
+        try:
+            backend = resolve_backend(petri_dir)
+        except ValueError as error:
+            print_error_and_exit(str(error))
 
-        from petri.engine.processor import request_stop, request_stop_file
-        from petri.storage.queue import list_queue, update_state
         from petri.storage.event_log import append_event
 
-        queue_path = petri_dir / "queue.json"
-
         # Signal the processor to stop (in-process threads + cross-process sentinel)
-        request_stop()
-        request_stop_file(petri_dir)
+        backend.request_stop(petri_dir)
 
         # Find active cells and stall them
         active_states = {
@@ -44,7 +47,7 @@ def register(app: typer.Typer) -> None:
             "red_team_active",
             "evaluating",
         }
-        entries = list_queue(queue_path)
+        entries = backend.list_entries(petri_dir)
         stopped_cells: list[str] = []
 
         for entry in entries:
@@ -54,16 +57,16 @@ def register(app: typer.Typer) -> None:
                 try:
                     if force:
                         # Force stop: stall immediately
-                        update_state(queue_path, cell_id, "stalled")
+                        backend.update_state(petri_dir, cell_id, "stalled")
                     else:
                         # Graceful: stall
-                        update_state(queue_path, cell_id, "stalled")
+                        backend.update_state(petri_dir, cell_id, "stalled")
 
                     # Log stop event — walk each per-colony directory looking
                     # for a matching cell dir (using the zero-padded fallback
                     # layout, which is what the cell-ID alone can reconstruct).
-                    level_int: Optional[int]
-                    seq_int: Optional[int]
+                    level_int: int | None
+                    seq_int: int | None
                     try:
                         parsed = parse_key(cell_id, strict=True)
                         level_int, seq_int = parsed["level"], parsed["seq"]
@@ -76,9 +79,7 @@ def register(app: typer.Typer) -> None:
                             for colony_path in dishes_dir.iterdir():
                                 if not colony_path.is_dir():
                                     continue
-                                candidate_cell_dir = cell_dir_for(
-                                    colony_path, level_int, seq_int
-                                )
+                                candidate_cell_dir = cell_dir_for(colony_path, level_int, seq_int)
                                 candidate_metadata = metadata_file_path(candidate_cell_dir)
                                 if not candidate_metadata.exists():
                                     continue
@@ -113,9 +114,7 @@ def register(app: typer.Typer) -> None:
             typer.echo("No active cells to stop.")
 
         # Also check for queued cells
-        queued_cells = [
-            entry for entry in entries if entry.get("queue_state") == "queued"
-        ]
+        queued_cells = [entry for entry in entries if entry.get("queue_state") == "queued"]
         if queued_cells:
             typer.echo(f"\n{len(queued_cells)} cells remain queued (not started).")
 
