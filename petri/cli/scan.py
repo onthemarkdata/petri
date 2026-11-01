@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import closing
+from uuid import uuid4
 
 import typer
 
@@ -13,28 +13,20 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def scan() -> None:
         """Check stored cells, edges, and events without changing research data."""
-        from petri.config import load_dish_config
-        from petri.execution.config import ExecutionConfig
-        from petri.execution.dbos_app import DBOSApp
-        from petri.execution.scan_workflow import run_scan_now
-        from petri.storage.database import connect
+        from petri.analysis.scanner import ScanIssue
+        from petri.analysis.scan_run import run_domain_scan
         from petri.storage.paths import dish_db_path
 
         petri_dir = find_petri_dir()
         bootstrap_telemetry(petri_dir)
-        db_path = dish_db_path(petri_dir, get_dish_id(petri_dir))
-        with closing(connect(db_path)) as connection:
-            connection.commit()
-        settings = ExecutionConfig.model_validate(load_dish_config(petri_dir).get("execution", {}))
-
-        def no_inference(spec):
-            raise RuntimeError("Scanning does not run research agents")
-
-        runtime = DBOSApp(petri_dir, db_path, settings, no_inference).start()
-        try:
-            issues = run_scan_now()
-        finally:
-            runtime.close()
+        dish_id = get_dish_id(petri_dir)
+        db_path = dish_db_path(petri_dir, dish_id)
+        issues = [
+            ScanIssue.model_validate(item)
+            for item in run_domain_scan(
+                db_path, dish_id=dish_id, trigger="manual", run_id=str(uuid4())
+            )
+        ]
         if not issues:
             typer.echo("No inconsistencies found.")
         else:

@@ -6,7 +6,7 @@ findings exist. It records a `scan_completed` event containing the findings.
 Research cells, edges, and prior events remain unchanged. The `--fix` and
 `--loop` options and their implementation functions are retired.
 
-Optional scheduling uses the same workflow:
+Optional scheduling uses the same scan operation in a DBOS workflow:
 
 ```yaml
 execution:
@@ -17,8 +17,10 @@ execution:
 The schedule runs while the dish's DBOS owner is running. Five-field expressions
 use minute granularity; six-field expressions put seconds first. Removing the
 key pauses Petri's scan schedule. A runtime guard rejects a firing recovered
-from a removed or changed cron setting. Manual scans do not need model access.
-Stop the current owner before starting a separate `petri scan` process.
+from a removed or changed cron setting. Manual scans do not need model access and do not start DBOS. They inspect the
+domain database and append their result without opening or recovering execution
+checkpoints, so a pending research workflow remains pending. A manual scan can
+also run while the existing owner is active.
 
 Workflow definitions register before launch. DBOS 3.4 requires its system
 database to be initialized before `get_schedule` or `create_schedule`, so the
