@@ -123,3 +123,10 @@ def test_repair_preserves_existing_harness(tmp_path):
     create_petri_dish(tmp_path, dish_name="replacement")
     assert (defaults / "petri.yaml").read_text() == original
     assert load_dish_config(tmp_path)["harness"]["backend"] == "provider"
+
+def test_version_may_use_stderr(monkeypatch, versions):
+    def run(command, **kwargs):
+        version = "0.73.1" if command[0].endswith("pi") else "v22.19.0"
+        return subprocess.CompletedProcess(command, 0, "", version)
+    monkeypatch.setattr(preflight.subprocess, "run", run)
+    assert preflight.check_pi().passed

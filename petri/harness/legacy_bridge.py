@@ -7,16 +7,19 @@ close() reaps subprocesses and the worker thread, including after failed runs.
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 import threading
 import weakref
 from collections.abc import Callable, Coroutine, Mapping
 from typing import Any, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 from pydantic_ai import Agent, ModelRetry, PromptedOutput
 from pydantic_ai.models import Model, infer_model
+from pydantic_ai.exceptions import AgentRunError
 
-from petri.models import Cell, ClarifyingQuestion, DecompositionResult
+from petri.models import AssessmentResult, Cell, ClarifyingQuestion, DecompositionResult, EvidenceMatch
+from petri.harness.errors import FailureDetail, HarnessError
 from petri.reasoning import prompts
 
 T = TypeVar("T")
@@ -29,6 +32,7 @@ class _Worker:
     def __init__(self, model: Model):
         self.model = model
         self.entered = False
+        self.active_task: asyncio.Task | None = None
         self.lock = threading.RLock()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.thread: threading.Thread | None = None
@@ -60,7 +64,11 @@ class _Worker:
                 if not self.entered:
                     await self.model.__aenter__()
                     self.entered = True
-                return await operation()
+                self.active_task = asyncio.current_task()
+                try:
+                    return await operation()
+                finally:
+                    self.active_task = None
 
             future = asyncio.run_coroutine_threadsafe(invoke(), self.loop)
             try:
@@ -76,6 +84,9 @@ class _Worker:
             try:
                 if self.loop is not None:
                     async def cleanup():
+                        if self.active_task is not None:
+                            self.active_task.cancel()
+                            await asyncio.gather(self.active_task, return_exceptions=True)
                         if self.entered:
                             await self.model.__aexit__(None, None, None)
                     asyncio.run_coroutine_threadsafe(cleanup(), self.loop).result()
@@ -94,6 +105,10 @@ class SubstanceAssessment(BaseModel):
     is_substantive: bool = Field(strict=True)
     reason: str
     suggested_rewrite: str = ""
+
+
+class BridgeAssessment(AssessmentResult):
+    failure_detail: FailureDetail | None = None
 
 
 class _Premise(BaseModel):
@@ -147,9 +162,20 @@ class HarnessInferenceProvider:
     def _run(self, name: str, prompt: str, schema: Any, on_progress: Progress = None,
              validator: Callable | None = None) -> Any:
         output_type = schema
-        if isinstance(self.model, Model) and self.model.profile.get("default_structured_output_mode") == "prompted":
-            output_type = PromptedOutput(schema)
-        agent = Agent(self.model, output_type=output_type, retries={"output": self.retries})
+        if schema is not str:
+            output_type = PromptedOutput(schema, template=(
+                "Return one JSON value containing the requested result data. "
+                "The following JSON schema defines its shape. Do not copy schema keywords "
+                "such as properties, $defs, type, or required into the result.\n{schema}"
+            ))
+        agent = Agent(
+            self.model, output_type=output_type, retries={"output": self.retries},
+            instructions=(
+                "Return only the requested result. Perform brainstorming and ranking internally; "
+                "do not include the intermediate analysis in the response. "
+                "Write each claim as a concise sentence in plain text, without LaTeX notation."
+            ),
+        )
         if validator is not None:
             agent.output_validator(validator)
         if on_progress:
@@ -199,8 +225,10 @@ class HarnessInferenceProvider:
                 raise ModelRetry(f"Return at most {max_premises} premises.")
             return output
 
+        schema = create_model("ClaimDecomposition", __base__=_ClaimDecomposition,
+                              nodes=(list[_Premise], Field(min_length=1, max_length=max_premises)))
         result = self._run("decomposition", prompts.build_decompose_claim_prompt(
-            claim, clarifications, guidance, max_premises), _ClaimDecomposition, on_progress, validate)
+            claim, clarifications, guidance, max_premises), schema, on_progress, validate)
         # These placeholders carry no dish identity. The decomposer assigns real IDs.
         cells = [Cell(id=f"pending-premises-001-{index:03d}", colony_id="pending-premises",
                       claim_text=node.claim_text, level=1) for index, node in enumerate(result.nodes, 1)]
@@ -220,11 +248,51 @@ class HarnessInferenceProvider:
         result = self._run("five-whys", prompt, _WhyDecomposition, on_progress, validate)
         return [item.model_dump() for item in result.sub_premises]
 
-    def assess_cell(self, cell_id, claim_text, context, agent_role, on_progress=None):
-        raise NotImplementedError("Cell assessment is implemented in issue #27.")
+    def assess_cell(self, cell_id: str, claim_text: str, context: dict, agent_role: str,
+                    on_progress: Progress = None) -> AssessmentResult:
+        from petri.config import get_agent_instruction, get_agent_verdicts, load_config
 
-    def summarize_evidence(self, cell_id, claim_text, evidence_md, iteration):
-        raise NotImplementedError("Evidence summaries are implemented in issue #27.")
+        config = self.config if self.config is not None else load_config()
+        if not config.get("agents"):
+            raise ValueError("Agent content is required for cell assessment.")
+        verdicts = get_agent_verdicts(agent_role, config)
+        if not verdicts:
+            raise ValueError(f"No verdict vocabulary configured for agent {agent_role!r}.")
 
-    def match_evidence(self, content, cells):
-        raise NotImplementedError("Evidence matching is implemented in issue #27.")
+        def validate(output: AssessmentResult):
+            if output.agent != agent_role:
+                raise ModelRetry(f"Return agent={agent_role!r}.")
+            if output.verdict not in verdicts:
+                raise ModelRetry(f"Invalid verdict {output.verdict!r}; return one of {verdicts}.")
+            return output
+
+        prompt = prompts.build_assess_cell_prompt(
+            cell_id, claim_text, context, agent_role, valid_verdicts=verdicts,
+            role_instruction=get_agent_instruction(agent_role, config), today_iso=date.today().isoformat(),
+        )
+        try:
+            return self._run("assessment", prompt, AssessmentResult, on_progress, validate)
+        except (HarnessError, AgentRunError) as error:
+            detail = error.detail if isinstance(error, HarnessError) else FailureDetail(partial_output=str(error))
+            return BridgeAssessment(agent=agent_role, verdict="EXECUTION_ERROR",
+                                    summary=f"Assessment failed: {error}", failure_detail=detail)
+
+    def summarize_evidence(self, cell_id: str, claim_text: str, evidence_md: str, iteration: int) -> str:
+        return self._run("summary", prompts.build_summarize_evidence_prompt(
+            cell_id, claim_text, evidence_md, iteration), str)
+
+    def match_evidence(self, content: str, cells: list[Cell]) -> list[EvidenceMatch]:
+        valid_ids = {cell.id for cell in cells}
+
+        def validate(output: list[EvidenceMatch]):
+            if any(item.cell_id not in valid_ids for item in output):
+                raise ModelRetry("Return only cell IDs from the supplied candidates.")
+            if any(not 0 <= item.relevance <= 1 for item in output):
+                raise ModelRetry("Relevance must be between 0 and 1.")
+            if len({item.cell_id for item in output}) != len(output):
+                raise ModelRetry("Return each matching cell once.")
+            return output
+
+        candidates = [{"cell_id": cell.id, "claim_text": cell.claim_text} for cell in cells]
+        return self._run("evidence-matching", prompts.build_match_evidence_prompt(content, candidates),
+                         list[EvidenceMatch], validator=validate)

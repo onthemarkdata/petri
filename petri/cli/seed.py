@@ -211,7 +211,7 @@ def register(app: typer.Typer) -> None:
             False, "--no-questions", help="Skip clarifying questions and auto-accept"
         ),
     ) -> None:
-        """Seed a new colony from a claim, URL, or file. Requires Claude Code CLI."""
+        """Seed a new colony from a claim, URL, or file using the configured backend."""
         petri_dir = find_petri_dir()
         dish_id = get_dish_id(petri_dir)
         from petri.reasoning.decomposition_settings import DecompositionSettings
