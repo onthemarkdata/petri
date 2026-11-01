@@ -45,6 +45,11 @@ def get_proposal(db_path: Path, proposal_id: str) -> Proposal:
         return _proposal(row)
 
 
+def proposal_identity(trigger: RedecompositionTrigger) -> str:
+    parts = (trigger.cell_id, "redecompose", trigger.generation + 1)
+    return database.stable_event_id(*parts, trigger.source_event_id) if trigger.source_event_id else database.stable_event_id(*parts)
+
+
 def _event(conn: sqlite3.Connection, db_path: Path, proposal: Proposal, kind: str, data: dict) -> None:
     database.append_event(db_path, Event(
         id=database.stable_event_id(proposal.id, kind), cell_id=proposal.parent_cell_id,
@@ -64,7 +69,7 @@ def _halt(conn: sqlite3.Connection, db_path: Path, proposal: Proposal, reason: s
 def reserve_proposal(db_path: Path, trigger: RedecompositionTrigger, config: LifecycleConfig) -> Proposal:
     """Reserve the maximum new-cell count before inference; replay keeps the same reservation."""
     generation = trigger.generation + 1
-    proposal_id = database.stable_event_id(trigger.cell_id, "redecompose", generation)
+    proposal_id = proposal_identity(trigger)
     with database.write_connection(db_path) as conn:
         row = conn.execute("SELECT * FROM redecomposition_proposals WHERE id=?", (proposal_id,)).fetchone()
         if row is not None:

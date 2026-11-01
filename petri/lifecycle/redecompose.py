@@ -12,7 +12,7 @@ from petri.execution.dbos_app import active_app
 from petri.execution.dbos_backend import _bounded
 from petri.lifecycle.config import LifecycleConfig
 from petri.lifecycle.proposals import (
-    Proposal, get_proposal, journal_output, materialize_proposal, recorded_output, reserve_proposal,
+    Proposal, get_proposal, journal_output, materialize_proposal, recorded_output, reserve_proposal, proposal_identity,
 )
 from petri.lifecycle.triggers import RedecompositionTrigger
 from petri.models import parse_key
@@ -29,7 +29,8 @@ class RedecomposeSpec(BaseModel):
 
     @property
     def workflow_id(self) -> str:
-        return f"{self.trigger.cell_id}:redecompose:{self.trigger.generation + 1}"
+        suffix = f":{self.trigger.source_event_id}" if self.trigger.source_event_id else ""
+        return f"{self.trigger.cell_id}:redecompose:{self.trigger.generation + 1}{suffix}"
 
 
 class ExpansionProgress(BaseModel):
@@ -134,4 +135,4 @@ async def propose(spec: RedecomposeSpec) -> Proposal:
         handle = await DBOS.start_workflow_async(redecompose, spec)
     await handle.get_result()
     return get_proposal(active_app().db_path,
-        database.stable_event_id(spec.trigger.cell_id, "redecompose", spec.trigger.generation + 1))
+        proposal_identity(spec.trigger))

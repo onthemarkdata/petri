@@ -31,6 +31,38 @@ A crash between receiving a provider response and recording it can still repeat
 that call. Neither DBOS nor the domain journal promises exactly-once provider
 billing in that window.
 
-The approval gate and grow controls are a separate change in #87. The runtime
-proposal API is available through `petri.lifecycle.redecompose.propose` while the
+The runtime proposal API is available through `petri.lifecycle.redecompose.propose` while the
 dish's durable execution owner is running.
+
+## Approve proposed sub-claims
+
+Re-decomposition stays off unless `grow` receives `--redecompose-on`. Choose
+`inconclusive`, `flaw`, `caveats`, or `stalled`, separated by commas. Full verdict
+names are also accepted. The gate runs after the selected colonies settle and
+shows each matching proposal's sub-claims, trigger, and guard result.
+
+```sh
+petri grow --redecompose-on=inconclusive,flaw
+petri grow --redecompose-on=inconclusive --approve-all
+petri grow --redecompose-on=inconclusive --reject-all
+```
+
+An interactive terminal prompts for each decision. A non-interactive run prints
+a pending-proposals notice and returns without waiting for input. Setting
+`lifecycle.auto_approve: true` bypasses the prompt for enabled triggers; it does
+not enable detection by itself. Approval is currently CLI-only.
+
+Approval commits the decision event, new child status, and deterministic child
+round together. The next durable grow pass schedules those children. Repeating
+approval has no effect, and an interrupted run can recover the committed work.
+The gate does not reopen the parent or its dependents. Rejection leaves proposed
+children deferred and records the decision. Both decisions appear on the grow
+root span.
+
+The source verdict identifies the proposal attempt. A rejected attempt does not
+consume an accepted generation, so a later research round may propose a different
+set of sub-claims at that generation. Already consumed verdicts do not trigger
+another proposal when grow is repeated. The migration that enables these attempts
+preserves existing proposals. Rejected cells still count against the dish budget.
+Only a recorded convergence circuit breaker enables the stalled trigger; user
+stops and stalls without that provenance do not.

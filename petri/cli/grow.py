@@ -38,6 +38,9 @@ def register(app: typer.Typer) -> None:
         max_concurrent: int = typer.Option(
             MAX_CONCURRENT, "--max-concurrent", help="Max parallel cells"
         ),
+        redecompose_on: str = typer.Option("", "--redecompose-on", help="Propose sub-claims for inconclusive, flaw, caveats, or stalled verdicts"),
+        approve_all: bool = typer.Option(False, "--approve-all", help="Approve matching re-decomposition proposals"),
+        reject_all: bool = typer.Option(False, "--reject-all", help="Reject matching re-decomposition proposals"),
         export: bool = typer.Option(False, "--export", help="Export derived text after grow completes"),
         dry_run: bool = typer.Option(
             False, "--dry-run", help="Show what would process without running"
@@ -59,6 +62,28 @@ def register(app: typer.Typer) -> None:
         # when the user didn't scope to a specific cell or colony.
         selected_cells: list[str] | None = cell or None
         all_cells: bool = not selected_cells and not colony_name
+
+        from petri.lifecycle.gate import ApprovalGate, parse_triggers
+        from petri.lifecycle.config import LifecycleConfig
+        from petri.config import load_dish_config
+        from petri.execution.dbos_backend import DBOSExecutionBackend
+
+        try:
+            enabled = parse_triggers(redecompose_on)
+            if approve_all and reject_all:
+                raise ValueError("Choose either --approve-all or --reject-all.")
+            if (approve_all or reject_all) and not enabled:
+                raise ValueError("Approval flags require --redecompose-on.")
+            if enabled:
+                if not isinstance(backend, DBOSExecutionBackend):
+                    raise ValueError("Re-decomposition requires the DBOS execution backend.")
+                backend.after_pass = ApprovalGate(
+                    enabled=enabled, config=LifecycleConfig.model_validate(load_dish_config(petri_dir).get("lifecycle", {})),
+                    approve_all=approve_all, reject_all=reject_all,
+                    selected_cells=selected_cells, colony=colony_name,
+                )
+        except ValueError as error:
+            print_error_and_exit(str(error))
 
         check = backend.preflight()
         if not check.passed:

@@ -56,6 +56,8 @@ class EventType(str, Enum):
     scan_completed = "scan_completed"
     redecomposition_proposed = "redecomposition_proposed"
     redecomposition_halted = "redecomposition_halted"
+    redecomposition_approved = "redecomposition_approved"
+    redecomposition_rejected = "redecomposition_rejected"
     search_executed = "search_executed"
     source_reviewed = "source_reviewed"
     freshness_checked = "freshness_checked"
@@ -166,6 +168,7 @@ class DebateMediatedData(BaseModel):
 
 class ConvergenceCheckedData(BaseModel):
     converged: bool
+    stall_reason: str | None = None
     blocking_verdicts: Optional[dict] = None
     weakest_link: Optional[str] = None
     focused_directive: Optional[str] = None
@@ -230,6 +233,12 @@ class RedecompositionProposedData(BaseModel):
     guard_status: str
 
 
+class RedecompositionDecisionData(BaseModel):
+    proposal_id: str
+    generation: int = Field(ge=1)
+    child_cell_ids: list[str]
+
+
 class RedecompositionHaltedData(BaseModel):
     proposal_id: str
     generation: int = Field(ge=1)
@@ -250,6 +259,8 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "scan_completed": ScanCompletedData,
     "redecomposition_proposed": RedecompositionProposedData,
     "redecomposition_halted": RedecompositionHaltedData,
+    "redecomposition_approved": RedecompositionDecisionData,
+    "redecomposition_rejected": RedecompositionDecisionData,
     "search_executed": SearchExecutedData,
     "source_reviewed": SourceReviewedData,
     "freshness_checked": FreshnessCheckedData,

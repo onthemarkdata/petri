@@ -25,6 +25,7 @@ class RedecompositionTrigger(BaseModel):
     caveat_text: str = ""
     flaw_text: str = ""
     generation: int = Field(default=0, ge=0)
+    source_event_id: str = ""
 
 
 class TriggerContext(BaseModel):
