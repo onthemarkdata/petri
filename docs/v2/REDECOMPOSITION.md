@@ -66,3 +66,10 @@ another proposal when grow is repeated. The migration that enables these attempt
 preserves existing proposals. Rejected cells still count against the dish budget.
 Only a recorded convergence circuit breaker enables the stalled trigger; user
 stops and stalls without that provenance do not.
+
+When an enabled proposal remains reserved after a failed model step, the next
+explicit grow invocation retries that recorded attempt. DBOS records step
+exceptions, so resuming an errored workflow alone would replay the same error.
+Petri uses the public [workflow rewind API](https://docs.dbos.dev/python/reference/contexts#rewind_workflow)
+to restart at the failed step while preserving earlier checkpoints. Cancelled
+attempts use resume. Failures outside a recorded step require inspection.
