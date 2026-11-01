@@ -1,0 +1,62 @@
+{
+  "mechanism": "logfire",
+  "pydantic_ai_version": "2.64.0",
+  "opentelemetry_sdk_version": "1.45.2",
+  "logfire_sdk_imported": true,
+  "network_connection_attempts": 0,
+  "exporter": "InMemorySpanExporter",
+  "requests": 2,
+  "input_tokens": 12,
+  "output_tokens": 5,
+  "spans": [
+    {
+      "name": "chat function:respond:",
+      "span_id": 1072593374649590242,
+      "parent_span_id": 16677173414529680976,
+      "attributes": {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.agent.name": "instrumentation_probe",
+        "gen_ai.provider.name": "function",
+        "gen_ai.request.model": "function:respond:",
+        "gen_ai.usage.input_tokens": 5,
+        "gen_ai.usage.output_tokens": 3,
+        "gen_ai.response.model": "function:respond:"
+      }
+    },
+    {
+      "name": "execute_tool lookup",
+      "span_id": 7490230621293908096,
+      "parent_span_id": 16677173414529680976,
+      "attributes": {
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": "lookup",
+        "gen_ai.agent.name": "instrumentation_probe"
+      }
+    },
+    {
+      "name": "chat function:respond:",
+      "span_id": 12209096313841780929,
+      "parent_span_id": 16677173414529680976,
+      "attributes": {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.agent.name": "instrumentation_probe",
+        "gen_ai.provider.name": "function",
+        "gen_ai.request.model": "function:respond:",
+        "gen_ai.usage.input_tokens": 7,
+        "gen_ai.usage.output_tokens": 2,
+        "gen_ai.response.model": "function:respond:"
+      }
+    },
+    {
+      "name": "invoke_agent instrumentation_probe",
+      "span_id": 16677173414529680976,
+      "parent_span_id": null,
+      "attributes": {
+        "gen_ai.agent.name": "instrumentation_probe",
+        "gen_ai.operation.name": "invoke_agent",
+        "gen_ai.aggregated_usage.input_tokens": 12,
+        "gen_ai.aggregated_usage.output_tokens": 5
+      }
+    }
+  ]
+}
