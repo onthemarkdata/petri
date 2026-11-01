@@ -2,6 +2,10 @@
 
 import json
 import shutil
+import subprocess
+import sys
+from collections.abc import Callable
+from typing import NamedTuple
 from pathlib import Path
 
 import pytest
@@ -523,3 +527,46 @@ from tests.harness_utils import (  # noqa: E402, F401, RUF100
     evidence_matches_test_model,
     scripted_assessment_model,
 )
+# Capture before the harness offline guard patches subprocess construction.
+_FAKE_PI_POPEN_INIT = subprocess.Popen.__init__
+
+
+class FakePi(NamedTuple):
+    """Executable path and helper that writes a scenario and selects it for this test."""
+
+    path: Path
+    scenario: Callable[..., Path]
+
+
+@pytest.fixture
+def fake_pi(tmp_path, monkeypatch):
+    """Allow only the local fake pi executable through the subprocess guard.
+
+    The scenario helper accepts one or more dictionaries; the final scenario
+    repeats on subsequent prompts. Network and model API guards remain active.
+    """
+    path = Path(__file__).parent / "fixtures" / "fake_pi.py"
+    path = path.resolve()
+
+    def script(*scenarios):
+        target = tmp_path / "fake-pi-scenario.json"
+        target.write_text(json.dumps(list(scenarios) or [{}]), encoding="utf-8")
+        monkeypatch.setenv("FAKE_PI_SCENARIO", str(target))
+        return target
+
+    def guarded_init(process, args, *positional, **kwargs):
+        command = [os_arg if isinstance(os_arg, str) else str(os_arg) for os_arg in args]
+        allowed = (
+            command[:1] == [str(path)]
+            or command[:2] == [sys.executable, str(path)]
+        )
+        if (
+            not allowed or positional or kwargs.get("shell", False)
+            or kwargs.get("executable") not in (None, command[0])
+        ):
+            raise RuntimeError("The fake_pi fixture permits only its local stub subprocess.")
+        _FAKE_PI_POPEN_INIT(process, args, **kwargs)
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", guarded_init)
+    script()
+    return FakePi(path, script)
