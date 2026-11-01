@@ -128,6 +128,7 @@ Architecture Decision Records append here as the migration makes further decisio
 | ADR | Title | Status |
 |-----|-------|--------|
 | ADR-0001 | Storage: single Petri-owned `petri.sqlite` per dish (the D4 amendment) — replaces the earlier JSONL-files-plus-DuckDB read-layer design; text becomes a derived `petri export` artifact | Accepted — full write-up pending (tracked by the M1 "Finalize docs/ARCHITECTURE-V2.md" issue) |
+| ADR-0002 | [GitHub feedback as structured re-entry](rfc-github-feedback.md) | Proposed — design-first; no implementation scheduled (#95) |
 
 ## Typed roster and temporary legacy defaults
 
