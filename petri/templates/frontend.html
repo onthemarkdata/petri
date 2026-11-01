@@ -2039,7 +2039,8 @@ var eventSource = null;
 
 function connectSSE() {
   if (eventSource) eventSource.close();
-  eventSource = new EventSource(API + '/api/stream');
+  var cursor = State.eventCursor ? '?cursor=' + encodeURIComponent(State.eventCursor) : '';
+  eventSource = new EventSource(API + '/api/stream' + cursor);
 
   eventSource.addEventListener('connected', function() {
     State.sseConnected = true;
@@ -2048,6 +2049,8 @@ function connectSSE() {
 
   eventSource.addEventListener('event_inserted', function(evt) {
     var data = JSON.parse(evt.data);
+    if (evt.lastEventId) State.eventCursor = evt.lastEventId;
+    if (State.events.some(function(event) { return event.id === data.id; })) return;
     State.events.unshift(data);
     if (State.events.length > 500) State.events.length = 500;
     if (State.currentView === 'logs') appendLogRow(data);
@@ -2061,6 +2064,15 @@ function connectSSE() {
       var line = '[' + (data.type || '?') + '] ' + (data.cell_id || '') + ' · ' + (data.agent || '');
       XTERM.writeln(ANSI.grey + ANSI.dim + line + ANSI.reset);
     }
+  });
+
+  eventSource.addEventListener('agent_progress', function(evt) {
+    var progress = JSON.parse(evt.data);
+    var row = {type:'agent_progress', cell_id:progress.cell_id, agent:progress.agent,
+      timestamp:new Date().toISOString(), data:{summary:progress.text_delta, kind:progress.kind}};
+    State.events.unshift(row);
+    if (State.events.length > 500) State.events.length = 500;
+    if (State.currentView === 'logs') appendLogRow(row);
   });
 
   eventSource.onerror = function() {
