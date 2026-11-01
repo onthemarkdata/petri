@@ -112,7 +112,7 @@ def create_petri_dish(
     config_path = defaults_dest / "petri.yaml"
     if not config_path.exists():
         result.created_config = True
-        src_config = DEFAULTS_DIR / "petri.yaml"
+        src_config = DEFAULTS_DIR / "legacy-petri.yaml"
         if src_config.exists():
             try:
                 import yaml

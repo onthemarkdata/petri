@@ -25,7 +25,7 @@ _DEFAULTS_DIR = Path(__file__).parent.parent / "defaults"
 def load_agent_roles(config_path: Path | None = None) -> dict[str, AgentRole]:
     """Load agent roles from petri.yaml.
 
-    Falls back to ``petri/defaults/petri.yaml`` when *config_path* is None
+    Falls back to ``petri/defaults/legacy-petri.yaml`` when *config_path* is None
     or points to a file that does not exist.
 
     *config_path* may point to either ``petri.yaml`` (consolidated) or
@@ -33,7 +33,7 @@ def load_agent_roles(config_path: Path | None = None) -> dict[str, AgentRole]:
 
     Returns a dict of agent name -> AgentRole.
     """
-    path = config_path if config_path and config_path.exists() else _DEFAULTS_DIR / "petri.yaml"
+    path = config_path if config_path and config_path.exists() else _DEFAULTS_DIR / "legacy-petri.yaml"
     raw = yaml.safe_load(path.read_text())
     agents: dict[str, AgentRole] = {}
     for name, cfg in raw.get("agents", {}).items():

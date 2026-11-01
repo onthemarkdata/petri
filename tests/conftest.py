@@ -259,6 +259,7 @@ def petri_env(tmp_path):
     src_defaults = Path(__file__).parent.parent / "petri" / "defaults"
     dst_defaults = petri_dir / "defaults"
     shutil.copytree(src_defaults, dst_defaults)
+    shutil.copyfile(src_defaults / "legacy-petri.yaml", dst_defaults / "petri.yaml")
 
     # Write petri.yaml
     (petri_dir / "petri.yaml").write_text(
@@ -414,6 +415,7 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
     src_defaults = Path(__file__).parent.parent / "petri" / "defaults"
     dst_defaults = petri_dir / "defaults"
     shutil.copytree(src_defaults, dst_defaults)
+    shutil.copyfile(src_defaults / "legacy-petri.yaml", dst_defaults / "petri.yaml")
 
     # Override petri.yaml with canonical test config (matches CANONICAL_DISH_ID)
     (dst_defaults / "petri.yaml").write_text(
