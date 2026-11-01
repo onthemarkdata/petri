@@ -148,6 +148,22 @@ def _write(db_path: Path) -> Iterator[sqlite3.Connection]:
             raise
 
 
+@contextmanager
+def write_connection(db_path: Path, connection: sqlite3.Connection | None = None) -> Iterator[sqlite3.Connection]:
+    """Own a writer transaction, or join an active caller-owned transaction.
+
+    A supplied connection is never committed, rolled back, migrated, or closed.
+    The caller must use a writer transaction and roll it back if an operation fails.
+    """
+    if connection is not None:
+        if not connection.in_transaction:
+            raise ValueError('A supplied connection requires an active writer transaction')
+        yield connection
+        return
+    with _write(db_path) as owned:
+        yield owned
+
+
 def stable_event_id(cell_id: str, *identity: str | int) -> str:
     """Hash a versioned JSON array; field boundaries and types remain distinct."""
     if (
@@ -177,13 +193,13 @@ def _event(row: sqlite3.Row) -> Event:
     )
 
 
-def append_event(db_path: Path, event: Event) -> tuple[Event, bool]:
+def append_event(db_path: Path, event: Event, *, connection: sqlite3.Connection | None = None) -> tuple[Event, bool]:
     """Insert an immutable event; a duplicate returns the stored event and False."""
     data = validate_event_data(event.type.value, event.data)
     if not event.id or not event.cell_id or not event.timestamp:
         raise ValueError("Event ID, cell ID, and timestamp must be nonempty")
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-    with _write(db_path) as conn:
+    with write_connection(db_path,connection) as conn:
         cursor = conn.execute(
             "INSERT OR IGNORE INTO events "
             "(id,cell_id,event_type,agent,iteration,payload,created_at) VALUES (?,?,?,?,?,?,?)",
@@ -236,7 +252,7 @@ def read_events(
         return [_event(row).model_dump(mode="json") for row in conn.execute(query, values)]
 
 
-def put_cell(db_path: Path, cell: Mapping[str, Any]) -> None:
+def put_cell(db_path: Path, cell: Mapping[str, Any], *, connection: sqlite3.Connection | None = None) -> None:
     """Insert or update a cell record; dependencies live in the edges table."""
     record = {"status": "NEW", "relation": None, "is_atomic": False, "bedrock_reason": None, **cell}
     columns = (
@@ -251,7 +267,7 @@ def put_cell(db_path: Path, cell: Mapping[str, Any]) -> None:
         "bedrock_reason",
         "created_at",
     )
-    with _write(db_path) as conn:
+    with write_connection(db_path,connection) as conn:
         conn.execute(
             f"INSERT INTO cells ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) "
             "ON CONFLICT(id) DO UPDATE SET " + ",".join(f"{c}=excluded.{c}" for c in columns[1:]),

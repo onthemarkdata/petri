@@ -43,27 +43,28 @@ def reserve_colony(db_path: Path, colony: Colony) -> None:
             raise ColonyExistsError(f"Colony '{colony.id}' already exists") from error
 
 
-def save_colony(db_path: Path, graph: ColonyGraph, colony: Colony) -> None:
-    """Persist cells before edges, retaining existing events and other colonies."""
+def save_colony(db_path: Path, graph: ColonyGraph, colony: Colony, *,
+                connection: sqlite3.Connection | None = None) -> None:
+    """Save topology atomically, or join the caller's active writer transaction."""
     now = datetime.now(timezone.utc).isoformat()
-    for cell in graph.get_all_cells():
-        if not cell.created_at:
-            cell.created_at = now
-        record = cell.model_dump(mode="json")
-        record["colony"] = cell.colony_id
-        record["seq"] = parse_key(cell.id, colony.dish, strict=True)["seq"]
-        database.put_cell(db_path, record)
-    with closing(database.connect(db_path)) as conn:
-        conn.execute(
-            "INSERT INTO colonies VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
-            "center_claim=excluded.center_claim, clarifications=excluded.clarifications",
-            (colony.id, colony.dish, colony.center_cell_id, colony.center_claim,
-             json.dumps(colony.clarifications), colony.created_at or now),
+    with database.write_connection(db_path,connection) as writer:
+        for cell in graph.get_all_cells():
+            if not cell.created_at:
+                cell.created_at = now
+            record = cell.model_dump(mode='json')
+            record['colony'] = cell.colony_id
+            record['seq'] = parse_key(cell.id,colony.dish,strict=True)['seq']
+            database.put_cell(db_path,record,connection=writer)
+        writer.execute(
+            'INSERT INTO colonies VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET '
+            'center_claim=excluded.center_claim, clarifications=excluded.clarifications',
+            (colony.id,colony.dish,colony.center_cell_id,colony.center_claim,
+             json.dumps(colony.clarifications),colony.created_at or now),
         )
-    for cell_id in graph.removed_cell_ids:
-        retire_cell(db_path,cell_id)
-    for edge in graph.get_edge_records():
-        append(db_path,edge)
+        for cell_id in graph.removed_cell_ids:
+            retire_cell(db_path,cell_id,connection=writer)
+        for edge in graph.get_edge_records():
+            append(db_path,edge,connection=writer)
 
 
 def load_colony(db_path: Path, colony: str) -> tuple[ColonyGraph, Colony]:
