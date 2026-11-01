@@ -30,12 +30,12 @@ def test_seed_exception_closes_worker(monkeypatch, tmp_path):
     monkeypatch.setattr(resolve, "resolve_model", lambda config: model)
     created = []
 
-    def build(*args, **kwargs):
-        provider = HarnessInferenceProvider(*args, **kwargs)
-        created.append(provider)
-        return provider
+    class RecordingProvider(HarnessInferenceProvider):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created.append(self)
 
-    monkeypatch.setattr(legacy_bridge, "HarnessInferenceProvider", build)
+    monkeypatch.setattr(legacy_bridge, "HarnessInferenceProvider", RecordingProvider)
     result = CliRunner().invoke(app, ["seed", "A substantive claim", "--no-questions"])
     assert result.exit_code != 0
     assert created[0]._worker.closed

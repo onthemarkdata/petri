@@ -457,6 +457,9 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 "Could not resolve inference provider: petri.yaml is missing a model entry.",
             )
 
+        from petri.harness.legacy_bridge import HarnessInferenceProvider
+        from petri.reasoning.decomposition_settings import DecompositionSettings
+
         try:
             result = decompose_claim(
                 claim=claim,
@@ -464,6 +467,8 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 dish_id=dish_id,
                 colony_name=colony_name,
                 provider=provider,
+                agent_runner=provider if isinstance(provider, HarnessInferenceProvider) else None,
+                settings=DecompositionSettings.from_dish(petri_dir),
             )
         except Exception as exc:
             raise HTTPException(500, f"Decomposition failed: {exc}") from exc
