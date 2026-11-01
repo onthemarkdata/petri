@@ -121,3 +121,14 @@ frontend overhaul (dish-wide DAG, sidebar, cross-colony edge rendering).
 - **grow-phase data scarcity**: no dish ever completed a real grow run (`queue.json` empty); all
   validation-pipeline evidence comes from the prototype's logs. v2 produces a committed golden
   end-to-end grow fixture as part of the durable-execution spike.
+
+## Private archives and public fixtures
+
+Historical research archives remain private. Public regression tests use synthetic
+fixtures; maintainers can opt into local archive checks with `PETRI_PRIVATE_ARCHIVE`.
+Keep research documents, source paths, and provenance manifests outside tracked files.
+An archive check does not authorize publishing its inputs or output.
+
+Before removing an obsolete worktree, preserve its committed history and any
+uncommitted or ignored files that need to survive. Verify the archive against the
+source before removing the worktree. Keep private preservation records local.

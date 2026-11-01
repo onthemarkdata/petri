@@ -23,13 +23,13 @@ def _port_is_listening(port: int) -> bool:
 
 
 def _is_petri_dashboard(port: int) -> bool:
-    """Return True iff ``GET /api/health`` on ``port`` returns the petri shape.
+    """Return True iff ``GET /api/ping`` on ``port`` returns the petri shape.
 
     This is the self-identification check that lets us safely kill a
     prior dashboard instance without risking an unrelated dev server
     that happens to be on the same port.
     """
-    url = f"http://127.0.0.1:{port}/api/health"
+    url = f"http://127.0.0.1:{port}/api/ping"
     try:
         with urllib.request.urlopen(url, timeout=1.0) as response:
             payload = json.loads(response.read())
@@ -63,15 +63,15 @@ def _free_port_or_exit(port: int) -> None:
     """Ensure ``port`` is free before we bind, killing a prior petri dashboard
     instance if that's what's holding it. Fails loudly on anything else.
 
-    The sqlite index is disposable (rebuilt from JSONL on every launch), so
-    SIGKILLing a stale dashboard is safe — no in-memory state to preserve.
+    Committed dish data remains in SQLite. Replacing a stale dashboard can lose
+    buffered telemetry and interrupt active inference calls; it does not rebuild data.
     """
     if not _port_is_listening(port):
         return
     if not _is_petri_dashboard(port):
         typer.echo(
             f"ERROR: Port {port} is already in use, but the process on it "
-            f"is not a petri dashboard (no valid /api/health response). "
+            f"is not a petri dashboard (no valid /api/ping response). "
             f"Free it manually:  lsof -iTCP:{port} -sTCP:LISTEN",
             err=True,
         )
@@ -131,15 +131,13 @@ def register(app: typer.Typer) -> None:
 
         from petri.cli.init import create_petri_dish
         from petri.dashboard.api import create_app
-        from petri.dashboard.migrate import rebuild_sqlite
 
         # Free the port first so a stale dashboard from a prior session
-        # doesn't block us. The sqlite index is disposable — killing is safe.
+        # doesn't block us. Committed dish data stays in SQLite.
         _free_port_or_exit(port)
 
         project_dir = Path.cwd()
         petri_dir = project_dir / ".petri"
-        db_path = petri_dir / "petri.sqlite"
 
         # Auto-heal the dish: if `.petri/` is missing OR partially
         # initialized (e.g. user deleted defaults/petri.yaml but left
@@ -162,17 +160,23 @@ def register(app: typer.Typer) -> None:
                 repaired.append("defaults/constitution.md")
             if creation.created_dishes_dir:
                 repaired.append("petri-dishes/")
-            if creation.created_queue:
-                repaired.append("queue.json")
+            if creation.created_database:
+                repaired.append("petri.sqlite")
             typer.echo(
                 "Repaired petri dish — added missing: " + ", ".join(repaired)
             )
 
-        typer.echo("Building event index...")
-        count = rebuild_sqlite(petri_dir, db_path)
-        typer.echo(f"Indexed {count} events.")
+        from petri.config import get_telemetry_config
+        from petri.telemetry.span_store import prune
 
-        dashboard_app = create_app(petri_dir, db_path)
+        from petri.cli._bootstrap import bootstrap_telemetry
+
+        bootstrap_telemetry(petri_dir)
+        telemetry = get_telemetry_config(petri_dir)
+        if telemetry.enabled and telemetry.local.enabled:
+            prune(petri_dir, telemetry.local.retention_days)
+
+        dashboard_app = create_app(petri_dir)
 
         # The browser always opens localhost even when we're also bound on
         # a wider interface, because localhost is always reachable from the

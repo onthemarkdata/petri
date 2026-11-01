@@ -7,6 +7,12 @@
 #claude
 .claude/
 
+# Personal agent configuration and local task state
+/.codex/
+/AGENTS.override.md
+/.kata/local/
+/.kata.local.toml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -145,6 +151,10 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
 .envrc
 .venv
 env/

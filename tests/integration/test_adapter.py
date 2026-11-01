@@ -12,7 +12,7 @@ import json
 import pytest
 
 from petri.adapters.claude_code import ClaudeCodeAdapter
-from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+from tests.conftest import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
 from petri.analysis.convergence import load_agent_roles
 from petri.models import PetriConfig
 from petri.analysis.scanner import scan
@@ -69,13 +69,13 @@ class TestClaudeCodeAdapterGeneration:
                 f"Missing agent: {agent_name}"
             )
 
-    def test_generate_creates_14_agents(self, adapter, petri_env):
+    def test_generate_creates_code_roster(self, adapter, petri_env):
         output_dir = petri_env / ".claude"
         adapter.generate(output_dir)
 
-        # 3 leads + 10 specialists + 1 exploratory (socratic_questioner) = 14 agents
+        from petri.agents.contract import AGENT_SPECS
         agent_files = list((output_dir / "agents").glob("*.md"))
-        assert len(agent_files) == 14
+        assert {path.stem for path in agent_files} == {name.value for name in AGENT_SPECS}
 
     def test_generate_creates_all_skill_files(self, adapter, petri_env):
         output_dir = petri_env / ".claude"
@@ -84,7 +84,6 @@ class TestClaudeCodeAdapterGeneration:
         expected_skills = [
             "event_log_write.md",
             "event_log_read.md",
-            "queue_update.md",
             "convergence_check.md",
             "read_cell.md",
         ]
@@ -98,7 +97,7 @@ class TestClaudeCodeAdapterGeneration:
         adapter.generate(output_dir)
 
         expected_commands = [
-            "seed.md", "grow.md", "check.md", "feed.md", "analyze.md", "stop.md",
+            "seed.md", "grow.md", "check.md", "feed.md", "launch.md", "stop.md",
         ]
         for cmd in expected_commands:
             assert (output_dir / "commands" / cmd).exists(), (
@@ -182,9 +181,8 @@ class TestCustomConfigPropagation:
 
     def test_get_generated_files_lists_all(self, adapter):
         files = adapter.get_generated_files()
-        # 5 rules + 14 agents (3 leads + 10 specialists + 1 exploratory
-        # socratic_questioner) + 5 skills + 6 commands + 1 settings
-        assert len(files) == 31
+        # Five rules, the code roster, four skills, six commands, and settings.
+        assert len(files) == 29
 
     def test_validate_returns_list(self, adapter, petri_env):
         output_dir = petri_env / ".claude"

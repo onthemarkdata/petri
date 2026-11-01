@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
+import yaml
 
 
 def register(app: typer.Typer) -> None:
@@ -11,7 +14,18 @@ def register(app: typer.Typer) -> None:
         """Check that all prerequisites are installed and working."""
         from petri.engine.preflight import run_preflight
 
-        results = run_preflight()
+        path = Path.cwd() / ".petri" / "defaults" / "petri.yaml"
+        if path.exists():
+            try:
+                config = yaml.safe_load(path.read_text())
+                if not isinstance(config, dict):
+                    raise ValueError("Expected a configuration mapping.")
+            except (OSError, ValueError, yaml.YAMLError) as error:
+                typer.echo(f"Cannot read {path}: {error}", err=True)
+                raise typer.Exit(code=1) from error
+        else:
+            config = {"harness": {"backend": "pi"}}
+        results = run_preflight(config)
 
         typer.echo("\n  Petri Environment Check\n")
         all_passed = True

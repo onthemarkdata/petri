@@ -12,70 +12,14 @@ import json
 from pathlib import Path
 from string import Template
 
+from petri.agents.contract import AGENT_SPECS
+from petri.presentation import EDGE_STYLES, EVENT_COLORS, QUEUE_ACTIVE_STATES, STATUS_COLORS
+
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 # ── Color maps ───────────────────────────────────────────────────────────
 
-STATUS_COLORS = {
-    "NEW": "#5c5c6e",
-    "RESEARCH": "#4a9eff",
-    "RED_TEAM": "#ef4444",
-    "EVALUATE": "#a855f7",
-    "VALIDATED": "#22c55e",
-    "DISPROVEN": "#dc2626",
-    "NEEDS_EXPERIMENT": "#eab308",
-    "DEFER_OPEN": "#78716c",
-    "DEFER_CLOSED": "#44403c",
-    "STALLED": "#f97316",
-}
-
-EVENT_COLORS = {
-    "search_executed": "#4a9eff",
-    "source_reviewed": "#a855f7",
-    "freshness_checked": "#eab308",
-    "verdict_issued": "#22c55e",
-    "evidence_appended": "#06b6d4",
-    "debate_mediated": "#f97316",
-    "convergence_checked": "#ef4444",
-    "cell_reopened": "#ec4899",
-    "propagation_triggered": "#818cf8",
-    "decomposition_created": "#8b5cf6",
-    "decomposition_audit": "#a78bfa",
-}
-
-QUEUE_ACTIVE_STATES = [
-    "socratic_active",
-    "research_active",
-    "critique_active",
-    "mediating",
-    "red_team_active",
-    "evaluating",
-]
-
-PASS_VERDICTS = [
-    "EVIDENCE_SUFFICIENT",
-    "EVIDENCE_CONTRADICTS",
-    "EVIDENCE_CURRENT",
-    "STALE_BUT_HOLDS",
-    "DEPENDENCIES_CLEAN",
-    "ARGUMENT_WITHSTANDS_CRITIQUE",
-    "STRONG_CASE",
-    "DEFENSIBLE_WITH_CAVEATS",
-    "PRODUCTION_READY",
-    "DIRECTIONALLY_CORRECT",
-    "APPROPRIATELY_SCOPED",
-    "COULD_BE_SIMPLER",
-    "HIGH_VALUE",
-    "MODERATE_VALUE",
-    "DECOMPOSITION_COMPLETE",
-    "PIPELINE_COMPLETE",
-    "EVIDENCE_CONFIRMS",
-    "CRITICAL_PATH",
-    "SUPPORTING_NOT_BLOCKING",
-    "STRONG_DISPROVAL_CASE",
-    "WEAK_DISPROVAL_CASE",
-    "NO_CONTRADICTING_EVIDENCE",
-]
+PASS_VERDICTS = sorted({verdict for spec in AGENT_SPECS.values() for verdict in spec.verdicts_pass})
 
 STARTER_CLAIM = (
     "Open source AI models are catching up to frontier lab models"
@@ -104,6 +48,7 @@ def build_frontend_html(version: str | None = None) -> str:
     tmpl = Template(template_path.read_text())
 
     return tmpl.safe_substitute(
+        edge_styles_json=json.dumps(EDGE_STYLES),
         status_colors_json=json.dumps(STATUS_COLORS),
         event_colors_json=json.dumps(EVENT_COLORS),
         queue_active_states_json=json.dumps(QUEUE_ACTIVE_STATES),

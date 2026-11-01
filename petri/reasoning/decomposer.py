@@ -10,7 +10,14 @@ template-stamped tree.
 from __future__ import annotations
 
 import re
-from typing import Callable, Optional, cast
+from pathlib import Path
+from typing import TYPE_CHECKING
+from typing import Callable, Optional
+
+from petri.reasoning.decomposition_settings import DecompositionSettings
+
+if TYPE_CHECKING:
+    from petri.reasoning.decomposition_runner import DecompositionRunner
 
 from petri.models import (
     Cell,
@@ -51,25 +58,9 @@ def generate_clarifying_questions(
             "the wizard is fully agentic and has no hardcoded fallback."
         )
 
-    # The InferenceProvider protocol annotates this as returning
-    # list[ClarifyingQuestion], but every concrete provider returns raw JSON
-    # dicts here — this wrapper is the dict -> ClarifyingQuestion conversion
-    # step. Cast to the true runtime type so the dict access below
-    # type-checks; cast() is a no-op at runtime and preserves behavior.
-    raw = cast(
-        "list[dict]",
-        provider.generate_clarifying_questions(
-            claim, max_questions, on_progress=on_progress
-        ),
-    )
-    return [
-        ClarifyingQuestion(
-            question=question["question"],
-            options=question.get("options", []),
-            answer=question.get("answer"),
-        )
-        for question in raw[:max_questions]
-    ]
+    raw = provider.generate_clarifying_questions(claim, max_questions, on_progress=on_progress)
+    return [question if isinstance(question, ClarifyingQuestion)
+            else ClarifyingQuestion.model_validate(question) for question in raw[:max_questions]]
 
 
 def decompose_claim(
@@ -82,6 +73,11 @@ def decompose_claim(
     on_progress: Optional[Callable[[str], None]] = None,
     on_cell_created: Optional[OnCellCreated] = None,
     center: Optional[Cell] = None,
+    settings: DecompositionSettings | None = None,
+    agent_runner: DecompositionRunner | None = None,
+    db_path: Path | None = None,
+    resume: bool = False,
+    search_db_path: Path | None = None,
 ) -> DecompositionResult:
     """Decompose a claim into a colony of cells and edges.
 
@@ -107,6 +103,16 @@ def decompose_claim(
     When ``center`` is None, the decomposer constructs its own level-0
     cell internally (backwards-compatible default used by unit tests).
     """
+    if agent_runner is not None:
+        from petri.reasoning.decomposition_runner import decompose_typed
+
+        return decompose_typed(
+            claim, clarifications, dish_id, colony_name, agent_runner,
+            settings=settings or DecompositionSettings.defaults(), guidance=guidance,
+            db_path=db_path, center=center, on_progress=on_progress, on_cell_created=on_cell_created,
+            resume=resume, search_db_path=search_db_path,
+        )
+
     if provider is None:
         raise ValueError(
             "decompose_claim requires an InferenceProvider; "
@@ -123,6 +129,7 @@ def decompose_claim(
         on_progress=on_progress,
         on_cell_created=on_cell_created,
         center=center,
+        settings=settings or DecompositionSettings.defaults(),
     )
 
 
@@ -234,6 +241,7 @@ def _provider_decompose(
     on_progress: Optional[Callable[[str], None]] = None,
     on_cell_created: Optional[OnCellCreated] = None,
     center: Optional[Cell] = None,
+    settings: DecompositionSettings | None = None,
 ) -> DecompositionResult:
     """Decompose using iterative Five Whys via an LLM provider.
 
@@ -242,25 +250,20 @@ def _provider_decompose(
        the next level down.
     3. Repeat until premises are atomic or max_depth is reached.
 
-    Each level is capped at ``get_max_nodes_per_layer()`` total cells.
-    The provider prompts ask the model to brainstorm broadly, prioritise,
-    and return only the top N most important premises; the decomposer
-    additionally hard-truncates as a safety net so the cap holds even if
-    the model ignores the instruction.
+    Code truncates root premises to ``settings.level_one_cap`` and each
+    later expansion to ``settings.per_parent_cap``. The layer and depth
+    settings are safety ceilings; the prompts do not expose numeric quotas.
 
     Each new cell fires ``on_cell_created`` *immediately* so the CLI can
     persist it to disk and log a ``cell_created`` event before the next
     LLM call begins. ``on_progress`` is forwarded to every provider call.
     """
-    from petri.config import get_max_decomposition_depth, get_max_nodes_per_layer
-
-    max_depth = get_max_decomposition_depth()
-    max_per_layer = get_max_nodes_per_layer()
+    settings = settings or DecompositionSettings.defaults()
+    max_depth = settings.depth
+    max_per_layer = settings.per_layer
     colony_id = f"{dish_id}-{colony_name}"
 
-    # Per-level usage tracker — used to enforce the cap and to compute
-    # remaining budget for each Five Whys call so the model can be told
-    # how many top-N picks are still available at the target level.
+    # Track per-level usage to enforce the safety ceiling in code.
     cells_per_level: dict[int, int] = {0: 1}  # center already exists
 
     # Step 1: Get initial decomposition (Level 0 + Level 1)
@@ -272,21 +275,13 @@ def _provider_decompose(
         }
         for clarification in clarifications
     ]
-    # The InferenceProvider protocol annotates decompose_claim as returning
-    # DecompositionResult, but concrete providers return the raw JSON dict
-    # ({"nodes": [...], "edges": [...]}) that this function parses below via
-    # raw.get(...). Cast to the true runtime type so the dict access
-    # type-checks; cast() is a no-op at runtime and preserves behavior.
-    raw = cast(
-        "dict",
-        provider.decompose_claim(
-            claim,
-            clarification_dicts,
-            guidance=guidance,
-            max_premises=max_per_layer,
-            on_progress=on_progress,
-        ),
+    raw = provider.decompose_claim(
+        claim, clarification_dicts, guidance=guidance, on_progress=on_progress,
     )
+    # Typed bridge cells contain temporary IDs. Only claim/level data enters
+    # this reader; the dish assigns every persisted ID below.
+    raw_cells = ([cell.model_dump() for cell in raw.cells]
+                 if isinstance(raw, DecompositionResult) else raw.get("nodes", []))
 
     # Build Level 0 center cell — the CLI is responsible for serializing
     # this one (it's created and persisted before _provider_decompose runs)
@@ -311,14 +306,11 @@ def _provider_decompose(
     all_cells: list[Cell] = [center]
     all_edges: list[Edge] = []
 
-    # Parse Level 1 cells from initial decomposition. Hard-truncate to
-    # the per-layer cap as a safety net (the prompt asks for at most N,
-    # but we don't trust the model to obey).
-    raw_cells = raw.get("nodes", [])
+    # Truncate root premises in code; no count is sent to the model.
     level_one_cells: list[Cell] = []
     seq_counter = 1
     for raw_cell in raw_cells:
-        if len(level_one_cells) >= max_per_layer:
+        if len(level_one_cells) >= settings.level_one_cap:
             break  # cap reached
         raw_level = raw_cell.get("level", 1)
         if raw_level == 0:
@@ -371,8 +363,7 @@ def _provider_decompose(
             continue
 
         # Stop if the next level is already at the per-layer cap
-        remaining_budget = max_per_layer - cells_per_level.get(next_level, 0)
-        if remaining_budget <= 0:
+        if cells_per_level.get(next_level, 0) >= max_per_layer:
             continue
 
         # Ask "Why is this true?" — if atomic, skip
@@ -383,7 +374,6 @@ def _provider_decompose(
             parent_cell.claim_text,
             parent_level=current_level,
             parent_seq=0,
-            max_premises=remaining_budget,
             on_progress=on_progress,
         )
 
@@ -393,7 +383,8 @@ def _provider_decompose(
 
         child_keys: list[str] = []
         for sub_premise in sub_premises:
-            if cells_per_level.get(next_level, 0) >= max_per_layer:
+            if (len(child_keys) >= settings.per_parent_cap
+                    or cells_per_level.get(next_level, 0) >= max_per_layer):
                 break  # cap reached mid-iteration
             if not isinstance(sub_premise, dict):
                 continue

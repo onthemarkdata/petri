@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Any, Callable, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Literal, Optional, Protocol, runtime_checkable
 
 import logging
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
-from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 
 
 # ── Enums ────────────────────────────────────────────────────────────────
@@ -34,29 +33,19 @@ class CellStatus(str, Enum):
     STALLED = "STALLED"
 
 
-class QueueState(str, Enum):
-    queued = "queued"
-    socratic_active = "socratic_active"
-    research_active = "research_active"
-    critique_active = "critique_active"
-    mediating = "mediating"
-    converged = "converged"
-    stalled = "stalled"
-    needs_human = "needs_human"
-    red_team_active = "red_team_active"
-    evaluating = "evaluating"
-    done = "done"
-    deferred_open = "deferred_open"
-    deferred_closed = "deferred_closed"
-    sync_conflict = "sync_conflict"
-
-
 class EventType(str, Enum):
+    cell_queued = "cell_queued"
+    scan_completed = "scan_completed"
+    redecomposition_proposed = "redecomposition_proposed"
+    redecomposition_halted = "redecomposition_halted"
+    redecomposition_approved = "redecomposition_approved"
+    redecomposition_rejected = "redecomposition_rejected"
     search_executed = "search_executed"
     source_reviewed = "source_reviewed"
     freshness_checked = "freshness_checked"
     verdict_issued = "verdict_issued"
     evidence_appended = "evidence_appended"
+    evidence_fed = "evidence_fed"
     evidence_summarized = "evidence_summarized"
     debate_mediated = "debate_mediated"
     convergence_checked = "convergence_checked"
@@ -64,6 +53,11 @@ class EventType(str, Enum):
     propagation_triggered = "propagation_triggered"
     decomposition_created = "decomposition_created"
     decomposition_audit = "decomposition_audit"
+    decomposition_warning = "decomposition_warning"
+    decomposition_edited = "decomposition_edited"
+    agent_execution_failed = "agent_execution_failed"
+    cell_expansion_completed = "cell_expansion_completed"
+    cell_marked_atomic = "cell_marked_atomic"
     # Agent lifecycle events fired incrementally during `petri seed`
     seed_started = "seed_started"
     clarifying_questions_requested = "clarifying_questions_requested"
@@ -102,11 +96,22 @@ class Confidence(str, Enum):
 
 
 class SearchExecutedData(BaseModel):
+    source_urls: list[str] | None = None
+    search_provider: str | None = None
     query: str
     sources_found: int = Field(ge=0)
 
 
+class CellQueuedData(BaseModel):
+    priority: int = Field(ge=1)
+    workflow_id: str
+    round_number: int = Field(ge=0)
+
+
 class SourceReviewedData(BaseModel):
+    retrieved_at: str | None = None
+    content_sha256: str | None = None
+    retrieval_method: str | None = None
     url: str
     title: str = ""
     pub_date: str = ""
@@ -124,6 +129,7 @@ class FreshnessCheckedData(BaseModel):
 
 
 class VerdictIssuedData(BaseModel):
+    failure_detail: dict | None = None
     verdict: str
     summary: str = ""
     arguments: str = ""
@@ -151,6 +157,7 @@ class DebateMediatedData(BaseModel):
 
 class ConvergenceCheckedData(BaseModel):
     converged: bool
+    stall_reason: str | None = None
     blocking_verdicts: Optional[dict] = None
     weakest_link: Optional[str] = None
     focused_directive: Optional[str] = None
@@ -159,6 +166,21 @@ class ConvergenceCheckedData(BaseModel):
 class CellReopenedData(BaseModel):
     trigger: str
     prior_status: str
+    original_workflow_id: str | None = None
+    forked_workflow_id: str | None = None
+    generation: int | None = Field(default=None, ge=1)
+    today_iso: str | None = None
+    max_iterations: int | None = Field(default=None, ge=1)
+
+
+class EvidenceFedData(BaseModel):
+    content: str
+    evidence_path: str
+    content_sha256: str
+    source_kind: str
+    original_workflow_id: str | None = None
+    forked_workflow_id: str
+    generation: int = Field(ge=1)
 
 
 class PropagationTriggeredData(BaseModel):
@@ -179,6 +201,26 @@ class DecompositionAuditData(BaseModel):
     should_restructure: bool = False
 
 
+class AgentExecutionFailedData(BaseModel):
+    phase: str
+    error_type: str
+    message: str
+    failure_detail: dict
+
+
+class DecompositionEditedData(BaseModel):
+    attempt: int = Field(ge=0)
+    original_text: str
+    edited_text: str
+    state: dict
+
+
+class DecompositionWarningData(BaseModel):
+    reason: str
+    claim_text: str
+    threshold: float
+
+
 class AgentStepData(BaseModel):
     """Permissive payload for agent lifecycle events emitted during seed.
 
@@ -193,15 +235,49 @@ class AgentStepData(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class RedecompositionProposedData(BaseModel):
+    proposal_id: str
+    parent_cell_id: str
+    generation: int = Field(ge=1)
+    trigger_verdict: str
+    child_cell_ids: list[str]
+    guard_status: str
+
+
+class RedecompositionDecisionData(BaseModel):
+    proposal_id: str
+    generation: int = Field(ge=1)
+    child_cell_ids: list[str]
+
+
+class RedecompositionHaltedData(BaseModel):
+    proposal_id: str
+    generation: int = Field(ge=1)
+    reason: str
+
+
+class ScanCompletedData(BaseModel):
+    findings: list[dict]
+    findings_count: int = Field(ge=0)
+    trigger: Literal["manual", "scheduled"]
+
+
 # ── Event Data Dispatch ──────────────────────────────────────────────────
 
 
 EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
+    "cell_queued": CellQueuedData,
+    "scan_completed": ScanCompletedData,
+    "redecomposition_proposed": RedecompositionProposedData,
+    "redecomposition_halted": RedecompositionHaltedData,
+    "redecomposition_approved": RedecompositionDecisionData,
+    "redecomposition_rejected": RedecompositionDecisionData,
     "search_executed": SearchExecutedData,
     "source_reviewed": SourceReviewedData,
     "freshness_checked": FreshnessCheckedData,
     "verdict_issued": VerdictIssuedData,
     "evidence_appended": EvidenceAppendedData,
+    "evidence_fed": EvidenceFedData,
     "evidence_summarized": EvidenceSummarizedData,
     "debate_mediated": DebateMediatedData,
     "convergence_checked": ConvergenceCheckedData,
@@ -209,6 +285,11 @@ EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "propagation_triggered": PropagationTriggeredData,
     "decomposition_created": DecompositionCreatedData,
     "decomposition_audit": DecompositionAuditData,
+    "decomposition_warning": DecompositionWarningData,
+    "decomposition_edited": DecompositionEditedData,
+    "agent_execution_failed": AgentExecutionFailedData,
+    "cell_expansion_completed": AgentStepData,
+    "cell_marked_atomic": AgentStepData,
     # Agent lifecycle events fired incrementally by `petri seed` so the
     # on-disk event log reflects what each agent has done at the moment
     # the work happens (instead of being batched at the end).
@@ -268,6 +349,9 @@ class Cell(BaseModel):
     claim_text: str
     level: int = Field(ge=0)
     status: CellStatus = CellStatus.NEW
+    relation: Literal["supports", "limits", "rebuts"] = "supports"
+    is_atomic: bool = False
+    bedrock_reason: str | None = None
     dependencies: list[str] = Field(default_factory=list)  # composite cell keys
     dependents: list[str] = Field(default_factory=list)  # composite cell keys
     created_at: str = ""  # ISO 8601 UTC
@@ -279,6 +363,7 @@ class Edge(BaseModel):
     from_cell: str  # composite cell key (the cell that depends)
     to_cell: str  # composite cell key (the dependency)
     edge_type: str = "intra_colony"  # "intra_colony" or "cross_colony"
+    reason: str = ""
 
 
 class Colony(BaseModel):
@@ -301,20 +386,6 @@ class PetriDish(BaseModel):
     colonies: list[Colony] = Field(default_factory=list)
     config: dict = Field(default_factory=dict)  # parsed petri.yaml
     created_at: str = ""
-
-
-class QueueEntry(BaseModel):
-    """A cell's position in the validation workflow."""
-
-    cell_id: str  # composite cell key
-    queue_state: QueueState = QueueState.queued
-    iteration: int = Field(default=0, ge=0)
-    max_iterations: int = Field(default=MAX_ITERATIONS, ge=1)
-    cycle_start_iteration: int = Field(default=0, ge=0)
-    weakest_link: Optional[str] = None
-    focused_directive: Optional[str] = None
-    entered_at: str = ""
-    last_activity: str = ""
 
 
 class AgentRole(BaseModel):
@@ -346,8 +417,8 @@ class PetriConfig(BaseModel):
     name: str = ""
     model: dict = Field(default_factory=dict)  # {name, provider}
     harness: str = "claude-code"
-    max_iterations: int = MAX_ITERATIONS
-    max_concurrent: int = MAX_CONCURRENT
+    max_iterations: int = 5
+    max_concurrent: int = 4
     agents: dict[str, AgentRole] = Field(default_factory=dict)
     debates: list[Debate] = Field(default_factory=list)
     source_hierarchy: dict = Field(default_factory=dict)
@@ -519,7 +590,7 @@ def build_event_key(cell_key: str, hex_id: str) -> str:
     return f"{cell_key}-{hex_id}"
 
 
-def parse_key(key: str, dish_id: str | None = None) -> dict:
+def parse_key(key: str, dish_id: str | None = None, *, strict: bool = False) -> dict:
     """Parse a composite key from right to left.
 
     Returns dict with available segments:
@@ -527,8 +598,17 @@ def parse_key(key: str, dish_id: str | None = None) -> dict:
     - If event key (5+ segments ending in 8-hex): 'event_hex', 'seq', 'level', 'colony_prefix'
     - If cell key (ends in two 3-digit groups): 'seq', 'level', 'colony_prefix'
     - If dish_id provided: 'dish', 'colony' (split from colony_prefix)
+    - If strict: require a cell ID with three-digit level and sequence fields.
     """
+    if not isinstance(key, str):
+        raise ValueError(f"cell_id must be a string, got {type(key).__name__}")
     parts = key.split("-")
+    if strict:
+        if len(parts) < 4:
+            raise ValueError(f"cell_id {key!r} has fewer than 4 hyphen-separated parts")
+        for label, segment in (("level", parts[-2]), ("seq", parts[-1])):
+            if not re.fullmatch(r"\d{3}", segment):
+                raise ValueError(f"cell_id {key!r} {label} segment {segment!r} must be three digits")
     result: dict[str, Any] = {"raw": key}
 
     # Try to parse from the right
@@ -656,9 +736,9 @@ class InferenceProvider(Protocol):
         when non-empty it should be threaded into the model context so the
         next decomposition reflects the user's refinement.
 
-        ``max_premises`` is the per-layer cap. The provider should ask the
-        model to brainstorm broadly and then return only the top N most
-        important premises so it doesn't bias toward whatever's salient.
+        ``max_premises`` remains a compatibility argument. Decomposition
+        counts follow the claim's structure; the decomposer enforces caps
+        in code without exposing numeric quotas to the model.
         """
         ...
 
@@ -672,9 +752,8 @@ class InferenceProvider(Protocol):
     ) -> list[dict]:
         """Five Whys: ask 'why is this true?' for a single premise.
 
-        ``max_premises`` caps how many sub-premises the model should
-        return. As with ``decompose_claim`` the provider should ask the
-        model to brainstorm and prioritise before selecting the top N.
+        ``max_premises`` remains a compatibility argument. The decomposer
+        enforces parent and layer caps after the model selects premises.
         """
         ...
 

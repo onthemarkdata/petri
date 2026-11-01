@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import typer
 
 from petri.cli_ui import print_error_and_exit
-from petri.config import (
-    LLM_INFERENCE_MODEL,
-    MAX_CONCURRENT,
-    MAX_ITERATIONS,
-)
+from petri.config import load_config, load_dish_config
 
 DEFAULTS_DIR = Path(__file__).parent.parent / "defaults"
 
@@ -34,7 +29,7 @@ class DishCreationResult:
     created_config: bool
     created_constitution: bool
     created_dishes_dir: bool
-    created_queue: bool
+    created_database: bool
 
     @property
     def any_created(self) -> bool:
@@ -45,7 +40,7 @@ class DishCreationResult:
                 self.created_config,
                 self.created_constitution,
                 self.created_dishes_dir,
-                self.created_queue,
+                self.created_database,
             ]
         )
 
@@ -58,7 +53,7 @@ class DishCreationResult:
                 self.created_defaults,
                 self.created_config,
                 self.created_dishes_dir,
-                self.created_queue,
+                self.created_database,
             ]
         )
 
@@ -67,9 +62,9 @@ def create_petri_dish(
     petri_dir: Path,
     *,
     dish_name: str,
-    model_name: str = LLM_INFERENCE_MODEL,
-    max_concurrent: int = MAX_CONCURRENT,
-    max_iterations: int = MAX_ITERATIONS,
+    model_name: str | None = None,
+    max_concurrent: int | None = None,
+    max_iterations: int | None = None,
 ) -> DishCreationResult:
     """Idempotently create or repair a petri dish directory.
 
@@ -90,6 +85,10 @@ def create_petri_dish(
     / iteration values; the defaults here match ``petri init --no-
     questions``.
     """
+    defaults = load_config()
+    model_name = model_name or defaults.model
+    max_concurrent = max_concurrent or defaults.execution.worker_concurrency
+    max_iterations = max_iterations or defaults.max_iterations
     result = DishCreationResult(
         petri_dir=petri_dir,
         created_root=False,
@@ -97,7 +96,7 @@ def create_petri_dish(
         created_config=False,
         created_constitution=False,
         created_dishes_dir=False,
-        created_queue=False,
+        created_database=False,
     )
 
     if not petri_dir.exists():
@@ -112,37 +111,16 @@ def create_petri_dish(
     config_path = defaults_dest / "petri.yaml"
     if not config_path.exists():
         result.created_config = True
-        src_config = DEFAULTS_DIR / "petri.yaml"
-        if src_config.exists():
-            try:
-                import yaml
+        import yaml
 
-                with open(src_config) as f:
-                    config = yaml.safe_load(f) or {}
-                config["name"] = dish_name
-                config.setdefault("model", {})["name"] = model_name
-                config["max_concurrent"] = max_concurrent
-                config["max_iterations"] = max_iterations
-                with open(config_path, "w") as f:
-                    f.write("# Petri Dish Configuration\n")
-                    f.write(f"# Initialized for dish: {dish_name}\n\n")
-                    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-            except ImportError:
-                config_path.write_text(
-                    f"name: {dish_name}\n"
-                    f"model:\n  name: {model_name}\n"
-                    f"max_concurrent: {max_concurrent}\n"
-                    f"max_iterations: {max_iterations}\n",
-                    encoding="utf-8",
-                )
-        else:
-            config_path.write_text(
-                f"name: {dish_name}\n"
-                f"model:\n  name: {model_name}\n"
-                f"max_concurrent: {max_concurrent}\n"
-                f"max_iterations: {max_iterations}\n",
-                encoding="utf-8",
-            )
+        config = defaults.model_dump(mode="json")
+        config["name"] = dish_name
+        config["model"] = model_name
+        config["harness"]["model"] = model_name
+        config["execution"]["backend"] = "dbos"
+        config["execution"]["worker_concurrency"] = max_concurrent
+        config["max_iterations"] = max_iterations
+        config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     constitution_dest = defaults_dest / "constitution.md"
     if not constitution_dest.exists():
@@ -156,13 +134,13 @@ def create_petri_dish(
         result.created_dishes_dir = True
     dishes_dir.mkdir(exist_ok=True)
 
-    queue_path = petri_dir / "queue.json"
-    if not queue_path.exists():
-        result.created_queue = True
-        queue_data: dict[str, Any] = {"version": 1, "last_updated": None, "entries": {}}
-        queue_path.write_text(
-            json.dumps(queue_data, indent=2) + "\n", encoding="utf-8"
-        )
+    from petri.storage.database import connect
+    from petri.storage.paths import dish_db_path, dish_dir
+
+    path = dish_db_path(petri_dir)
+    result.created_database = not path.exists()
+    connect(path).close()
+    (dish_dir(petri_dir) / "exports").mkdir(exist_ok=True)
 
     return result
 
@@ -187,9 +165,10 @@ def register(app: typer.Typer) -> None:
         dish_name = name or target.name
 
         # ── Interactive Setup Wizard ─────────────────────────────────────
-        model_name = LLM_INFERENCE_MODEL
-        max_concurrent = MAX_CONCURRENT
-        max_iterations = MAX_ITERATIONS
+        defaults = load_config()
+        model_name = defaults.model
+        max_concurrent = defaults.execution.worker_concurrency
+        max_iterations = defaults.max_iterations
         interactive = not no_questions
 
         if interactive:
@@ -239,8 +218,8 @@ def register(app: typer.Typer) -> None:
 
             if model_choice == "_custom":
                 model_name = questionary.text(
-                    "Model name (as recognized by Claude Code):",
-                    default=LLM_INFERENCE_MODEL,
+                    "Model name (as recognized by pi):",
+                    default=defaults.model,
                 ).ask()
                 if model_name is None:
                     typer.echo("Cancelled.")
@@ -251,7 +230,7 @@ def register(app: typer.Typer) -> None:
             # Max concurrent agents
             concurrent_input = questionary.text(
                 "Max concurrent agents:",
-                default=str(MAX_CONCURRENT),
+                default=str(defaults.execution.worker_concurrency),
             ).ask()
             if concurrent_input is None:
                 typer.echo("Cancelled.")
@@ -259,12 +238,12 @@ def register(app: typer.Typer) -> None:
             try:
                 max_concurrent = int(concurrent_input)
             except ValueError:
-                max_concurrent = MAX_CONCURRENT
+                max_concurrent = defaults.execution.worker_concurrency
 
             # Max iterations per convergence cycle
             iterations_input = questionary.text(
                 "Max iterations per convergence cycle:",
-                default=str(MAX_ITERATIONS),
+                default=str(defaults.max_iterations),
             ).ask()
             if iterations_input is None:
                 typer.echo("Cancelled.")
@@ -272,7 +251,7 @@ def register(app: typer.Typer) -> None:
             try:
                 max_iterations = int(iterations_input)
             except ValueError:
-                max_iterations = MAX_ITERATIONS
+                max_iterations = defaults.max_iterations
 
             typer.echo("")
 
@@ -294,7 +273,7 @@ def register(app: typer.Typer) -> None:
             # Non-blocking preflight warnings
             from petri.engine.preflight import run_preflight
 
-            results = run_preflight()
+            results = run_preflight(load_dish_config(petri_dir).model_dump(mode="json"))
             warnings = [result for result in results if not result.passed]
             if warnings:
                 typer.echo("\n  Prerequisites:")

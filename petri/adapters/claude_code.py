@@ -30,15 +30,11 @@ from petri.analysis.convergence import load_agent_roles
 _SKILL_NAMES = [
     "event_log_write",
     "event_log_read",
-    "queue_update",
     "convergence_check",
     "read_cell",
 ]
 
-# Commands to generate. Note: "analyze" is the historical name of the
-# combined analyze command, preserved here because the adapter generates
-# command skeletons that may still predate the CLI split.
-_COMMAND_NAMES = ["seed", "grow", "check", "feed", "analyze", "stop"]
+_COMMAND_NAMES = ["seed", "grow", "check", "feed", "launch", "stop"]
 
 
 class ClaudeCodeAdapter(AbstractAdapter):

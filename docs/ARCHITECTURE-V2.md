@@ -128,3 +128,370 @@ Architecture Decision Records append here as the migration makes further decisio
 | ADR | Title | Status |
 |-----|-------|--------|
 | ADR-0001 | Storage: single Petri-owned `petri.sqlite` per dish (the D4 amendment) — replaces the earlier JSONL-files-plus-DuckDB read-layer design; text becomes a derived `petri export` artifact | Accepted — full write-up pending (tracked by the M1 "Finalize docs/ARCHITECTURE-V2.md" issue) |
+| ADR-0002 | [GitHub feedback as structured re-entry](rfc-github-feedback.md) | Proposed — design-first; no implementation scheduled (#95) |
+
+## Typed roster and temporary legacy defaults
+
+`petri.agents.contract` defines the ordered 13-agent roster: three non-blocking
+leads, six blocking specialists, one conditional specialist, and three advisory
+specialists. `socratic_questioner` lives under `pre_pipeline` in the shipped YAML;
+it remains a clarifying-question utility outside `AgentName`. Its original
+instruction and verdict vocabulary are preserved. Each roster member has a
+verdict enum and explicit pass/block tuples.
+
+During the migration, `defaults/legacy-petri.yaml` preserves the v0.3.x content.
+The legacy config loader, convergence/debate default loaders, and v1 init select
+that file. Existing dish filenames remain `defaults/petri.yaml`. The filename
+change in the convergence loader is necessary because its unchanged tests expect
+14 entries while v2 requires 13; convergence decisions and `AgentRole` are
+unchanged. Legacy test fixtures explicitly copy the legacy file to the dish's
+normal filename. The final v2 CLI switch must initialize from the current v2
+`petri.yaml` and use the selected v2 harness instead of this temporary path.
+
+## V2 agent-content schema
+
+The v2 loader is `petri.agents.config.load_agent_config(path)`. Callers must pass
+an explicit path and retain the returned `AgentConfig`; there is no fallback,
+module-level loaded config, or cache. Missing files raise `AgentConfigError`.
+The shipped file declares `schema_version: 2`. A v0.3.x dish configuration fails
+validation; v2 does not silently migrate it (D8).
+
+| Status | Configuration | V2 representation |
+| --- | --- | --- |
+| Stays in YAML | Instructions; pass/block verdict lists | `agents.<name>` content; verdicts must remain in the code-defined partition |
+| Stays in YAML | Default model, tools, iteration cap | `model` string, `agent_tools`, `max_iterations` |
+| Stays in YAML | Source hierarchy | Six typed levels and the terminal eligibility threshold |
+| Stays in YAML | Debate participants and purpose | Typed roster references; whole/half rounds accepted at the boundary |
+| Moves to code | Agent membership, display name, lead flag, phase, blocking, scope, redirect | `AgentName` and frozen `AgentSpec`; these keys are rejected in content |
+| Moves to code | Meaning of fractional debate rounds | Programmatic debate protocol; YAML supplies the configured value |
+| New in YAML | Per-agent model override | Optional `agents.<name>.model` |
+| New in YAML | Usage caps | `limits.run` and `limits.debate`, convertible with `usage_kwargs()` |
+| New in YAML | Harness selection | `harness` mapping with backend, optional model/provider, and tools |
+| Relocated | Socratic utility content | `pre_pipeline.socratic_questioner`, outside the roster |
+
+The default cell-run caps are 25 requests, 200,000 tokens and 10 tool calls.
+Debates have caps of 6 requests and 50,000 tokens. These are configuration values
+for the execution layer to enforce; loading a configuration does not itself
+limit inference. Defaults use the pi harness. No inference occurs during loading.
+
+Users can select a subset of an agent's existing verdict vocabulary, but cannot
+invent verdict strings or move a verdict between pass and block partitions.
+Blocking and conditional agents must retain a nonempty block vocabulary.
+Duplicate YAML keys, duplicate verdicts, unknown roster names, missing agents,
+unknown content fields and invalid debate participants are errors. Importing agent modules
+loads no YAML configuration and creates no inference models. Decomposer-specific settings
+remain outside this schema until the decomposer milestone adds them explicitly.
+
+### Agent factory decisions
+
+`build_agents` takes validated content and explicit constitution text. It validates
+all content again before resolving any model, then builds uniquely named agents
+with constitution text in pydantic-ai `instructions`. Instructions are supplied on
+each run, including runs that reuse message history. `run_agent` supplies the
+configured cell-run `UsageLimits`; callers of raw `Agent.run` must supply limits
+explicitly. Configuration and inference models can be injected for offline tests.
+
+The simplifier's `OVERCOMPLICATED` verdict is legal advisory vocabulary. It never
+blocks convergence because the simplifier's code-defined mode is NON_BLOCKING.
+This preserves the existing behavior in both contract and factory validation.
+
+The installed API verified for this migration is pydantic-ai 2.64.0. The factory
+uses ToolOutput for direct provider models and PromptedOutput for pi and Claude
+Code transports. Both delivery modes pass FunctionModel tests; tool output also
+passed a separate real local Gemma readiness check. A real CLI-harness factory
+run remains an integration gate until the M1 transports are integrated. Callers
+can explicitly select either mode for a tested backend. Validation retries are
+bounded; invalid verdicts are reflected to the model and never coerced to a
+passing value. In 2.64.0, tool-output retries are represented by a ToolReturnPart
+with `outcome='retried'`, rather than always by RetryPromptPart.
+
+Fractional YAML rounds normalize through `DebateContent.protocol`: `1.5` becomes
+two first-participant turns, with the final partial exchange ending after that
+participant speaks. Agent phases
+and blocking semantics come solely from `AgentSpec`; the v2 content loader
+rejects legacy numeric phase and structural fields instead of duplicating them.
+
+### Source validation and exhausted retries
+
+V2 citations require a syntactically valid HTTP(S) URL. This blocks missing or
+malformed URLs during typed output validation; syntax validation does not prove
+that a page exists or supports a claim. Retrieval and source verification remain
+separate research responsibilities.
+
+The evidence evaluator applies a pure source-hierarchy policy to
+`EVIDENCE_CONFIRMS` and `EVIDENCE_REFUTES`. Its strongest level is the smallest
+supplied level, and it must meet the configured `minimum_terminal_level`.
+`EVIDENCE_INCONCLUSIVE` may contain no sources. Invalid outputs produce model
+reflection and consume the configured output-retry allowance.
+
+The exhaustion policy is to fail the run, preserving the distinction between an
+inference failure and inconclusive evidence. The supported `run_agent` entrypoint
+raises `AgentRunError` with the agent identity, diagnostic detail and
+`EXECUTION_ERROR` marker; it never converts failure into a research verdict.
+Callers record that marker in the domain event log and treat it as nonconvergent.
+The output validator is attached to the agent itself; execution callers use
+`run_agent` to receive the typed failure and enforce configured usage limits.
+
+### Deterministic mechanical convergence
+
+`petri.agents.convergence` evaluates typed roster facts without YAML reads or LLM
+calls. The latest nonempty verdict per agent wins; leads do not vote. Missing
+blocking verdicts outrank failing verdicts. Conditional triage redirects only
+when its block verdict matches and every other blocking agent passes.
+`CANNOT_DETERMINE` follows the same rule for `needs_experiment`. Short-circuit
+checks consume a precomputed convergence result.
+
+Weakest-link ties now follow `AgentName` definition order. This replaces YAML
+insertion order without changing pass/fail criteria. An `EXECUTION_ERROR` record
+is a present, failing verdict and can never satisfy convergence. The execution
+layer is responsible for appending that failure to the domain event log; this
+pure evaluator does not write events. Circuit-breaker counting remains relative
+to the current cycle: `iteration - cycle_start_iteration >= max_iterations`.
+
+### Real debate hand-off
+
+A `DebateProtocol.rounds` value counts the first participant's scheduled turns.
+YAML `1.5` normalizes to `rounds=2, final_word=pair[0]`, producing A, B, A;
+YAML `1` produces A, B. The final partial round contains only `final_word`.
+This makes the fractional-round behavior explicit without adding an LLM mediator.
+
+`run_debate` passes each completed run's actual messages to the next participant
+and accepts retained history from an earlier iteration. All turns share one
+RunUsage and the configured per-debate limits. A budget or output-validation
+failure returns a typed status, completed exchanges, attempted message history,
+and measured usage. `log_debate` appends through the SQLite event-log seam using
+the standard event envelope; the summary preserves turn output and usage.
+
+### D7 instrumentation decision: native Pydantic AI OpenTelemetry
+
+The instrumentation spike for #65 tested the locked Pydantic AI 2.64.0 runtime
+with OpenTelemetry SDK 1.45.2. Use the first-party
+`Agent.instrument_all(InstrumentationSettings(tracer_provider=provider))` entry
+point. Pass Petri's shared provider explicitly. Disable prompt, completion, binary,
+and model-request-parameter capture; token usage and span relationships remain
+available. No Logfire account, token, SDK configuration, or cloud exporter is
+required for this mechanism.
+
+Both evaluated paths emitted one agent-run span, two model-request spans, and one
+tool-call span to an in-memory exporter. Each model and tool span had the agent
+span as its parent. The model reported 12 input and 5 output tokens in total.
+
+| Path | Configuration | SDK import | Connection attempts |
+|---|---|---|---|
+| Chosen native OTel | `InstrumentationSettings(tracer_provider=provider)` | Logfire import blocked for the probe | 0 |
+| Logfire alternative | `logfire.configure(local=True, send_to_logfire=False, console=False, metrics=False, additional_span_processors=[processor])`, then local `instrument_pydantic_ai()` | Logfire imported | 0 |
+
+The native experiment blocks `logfire` imports before importing Pydantic AI;
+its optional installed Pydantic plugin warns and is skipped. Both experiments
+reject socket connections, clear inherited telemetry export settings within the
+probe process, and use only an in-memory exporter. The Logfire alternative works
+without sending to Logfire, but adds no required capability for Petri. Production
+wiring therefore uses the native mechanism. The current broad `pydantic-ai`
+distribution includes Logfire as a transitive extra, pinned by `uv.lock`; this ADR
+adds no direct Logfire dependency or separate pin. Installed and configured are
+different states: Petri does not call `logfire.configure()`.
+
+The observed attributes are:
+
+| Span | Operation | Token attributes |
+|---|---|---|
+| Agent run | `gen_ai.operation.name=invoke_agent` | `gen_ai.aggregated_usage.input_tokens`, `gen_ai.aggregated_usage.output_tokens` |
+| Model request | `gen_ai.operation.name=chat` | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` |
+| Tool call | `gen_ai.operation.name=execute_tool` | None; tool spans carry `gen_ai.tool.name` |
+
+Keep aggregate usage on the agent span distinct from request usage to avoid
+counting the same tokens twice. This decision uses the default instrumentation
+format version 5 in Pydantic AI 2.64.0; it does not assume the older 2.9.0 API.
+
+Reproduce the two offline experiments with:
+
+```bash
+uv run python scripts/spikes/agent_instrumentation.py native
+uv run python scripts/spikes/agent_instrumentation.py logfire
+uv run pytest tests/unit/test_instrumentation_spike.py
+```
+
+Captured results are in [instrumentation-native.json](validation/instrumentation-native.json)
+and [instrumentation-logfire.json](validation/instrumentation-logfire.json). This
+spike verifies agent/model/tool spans and usage. DBOS parenting and Petri domain
+attributes are implemented and tested separately in #67 and #68.
+
+The #67 implementation lives in `petri.telemetry.instrument_agents` and is called
+by CLI inference bootstrap after provider initialization. It configures all
+factory agents and later-created Pydantic AI agents through one shared default;
+changing the active dish/provider installs new settings. It uses `Agent.run()`
+and does not depend on streaming.
+
+`tests/integration/test_dbos_agent_spans.py` verified Pydantic AI 2.64.0 inside an
+actual async DBOS 3.4.0 step: the agent span's parent ID equals the DBOS step span
+ID, and reported token usage survives. The test uses SQLite, an in-memory span
+exporter, and a socket connection guard (zero attempts). DBOS obtains its tracer
+from OpenTelemetry's global provider, so the isolated test process installs the
+same provider globally. Production DBOS wiring belongs to #66 and must connect
+that global tracer to Petri's active provider. In DBOS 3.4.0, `enable_otlp=False`
+disables span creation as well as export; recording locally requires it enabled
+with empty exporter endpoints. No Logfire endpoint is configured.
+
+### D7 domain attributes and command roots
+
+`petri.telemetry.attributes` owns the typed attribute keys and deterministic
+attribute maps. `CellSpanContext` takes the explicit dish ID, full colony ID,
+level, and sequence; its cell key comes from `build_cell_key`. It never guesses
+the dish boundary by splitting a hyphenated ID. Setter helpers apply these maps
+to the supplied span. They do not read configuration, write events, or import DBOS.
+
+| Attribute | Type | Present when |
+|---|---|---|
+| `petri.command` | string | Root command: `seed`, `grow`, `scan`, `feed`, or `re-decompose` |
+| `petri.dish_id` | string | Command roots and cell/phase spans |
+| `petri.colony_id` | string | Cell context is supplied; full composite colony ID |
+| `petri.cell_id` | string | Cell context is supplied; `build_cell_key` output |
+| `petri.level` | integer | Cell context is supplied |
+| `petri.seq` | integer | Cell context is supplied |
+| `petri.phase` | string | A phase span is open |
+| `petri.agent_role` | string | A specialist is supplied; canonical `AgentName` |
+| `petri.agent_blocking` | boolean | A specialist is supplied; true for blocking and conditional roles |
+| `petri.verdict` | string | A validated verdict or mechanical convergence result is available |
+| `petri.iteration` | integer | A phase span is open; dispatcher-owned iteration |
+| `petri.weakest_link` | string | A weakest link is known |
+| `petri.tokens_input` | integer | RunUsage includes measured token usage |
+| `petri.tokens_output` | integer | RunUsage includes measured token usage |
+| `petri.cost_usd` | number | All requests have measured usage and the exact model has configured prices |
+| `petri.outcome` | string | A mechanical pipeline outcome is available |
+
+A dish can supply `prices` keyed by exact model ID, with
+`input_per_million` and `output_per_million` in USD. Cost is the sum of each rate
+multiplied by its measured token count, divided by one million. These rates do
+not model cache discounts or other provider billing rules. Missing prices or
+usage omit cost; an explicit zero rate remains a configured zero cost. Partial
+usage can report measured token totals, but omits cost when any request was
+unmeasured. A dry run has no inferred token or cost attributes.
+
+The pi RPC adapter supports usage: it sums assistant `usage.input`, `output`,
+`cacheRead`, and `cacheWrite` across the request; input totals include cache
+reads and writes. It marks missing usage with `unmeasured_requests`, which the
+domain helpers preserve by omitting unknown totals and incomplete costs. The
+source of these fields is the harness response, never the agent's assessment.
+
+`phase_span` and `set_verdict_attributes` supply phase/agent hooks without coupling
+research code to DBOS. Workflow code must apply `set_cell_attributes` through the
+execution seam. `root_command_span` supplies the same command identity for
+lifecycle operations; the existing seed/grow/scan/feed commands use the
+`traced_command` wrapper. Re-decomposition (#84–#88) must use
+`root_command_span("re-decompose", dish_id)` when its command is added. These hooks
+preserve the distinction between execution spans and domain events.
+
+## Iterative lifecycle (D10, #84)
+
+Status: **informed by seeding**. Re-validate the proposal framing and guard defaults
+after the first full v2 grow. This section specifies the lifecycle; individual
+implementation issues record which parts have shipped. Mechanical convergence
+and the agent verdict vocabularies remain unchanged.
+
+### Trigger contract
+
+Detection runs over the latest verdict per agent after a cell round settles.
+A trigger describes a proposal; it does not reopen the parent or its dependents.
+
+| Verdict | Fire point | Captured context | Proposed behavior |
+|---|---|---|---|
+| `EVIDENCE_INCONCLUSIVE` | Evidence evaluation settles without adequate support | Evaluator summary, weakest link, focused directive | Propose narrower, testable claims for the missing evidence |
+| `CRITICAL_FLAW_FOUND` | A completed round retains the skeptic's flaw verdict | Flaw text, weakest link, focused directive | Propose at least one counterargument addressing the flaw |
+| `DEFENSIBLE_WITH_CAVEATS` | A completed round retains the champion's caveat verdict | Champion caveat text and round context | Turn material caveats into explicit limiting sub-claims |
+| `PIPELINE_STALLED` | The iteration circuit breaker settles a round | Recorded stall reason, weakest link, focused directive | Propose a narrower decomposition of the unresolved dependency |
+
+A `PIPELINE_STALLED` event from `petri stop` is a user decision, not a circuit
+breaker. Only an explicit `circuit_breaker` stall reason is eligible; a missing
+or unknown reason does not authorize a proposal.
+
+The boundary model is:
+
+```python
+class RedecompositionTrigger(BaseModel):
+    cell_id: str
+    trigger_verdict: Literal[
+        "EVIDENCE_INCONCLUSIVE", "CRITICAL_FLAW_FOUND",
+        "DEFENSIBLE_WITH_CAVEATS", "PIPELINE_STALLED",
+    ]
+    agent: str
+    fire_point: Literal["settled_round", "circuit_breaker"]
+    weakest_link: str | None = None
+    focused_directive: str = ""
+    caveat_text: str = ""
+    flaw_text: str = ""
+    generation: int = Field(ge=0)
+```
+
+Generation is a lifecycle counter scoped to the cell, separate from the research
+iteration inside one validation round. The recorded source event and generation
+identify a trigger deterministically; replay must not create another proposal.
+
+### Guards and approval
+
+These defaults belong under the `lifecycle` key in `petri.yaml`:
+
+```yaml
+lifecycle:
+  max_rounds_per_cell: 2
+  per_parent_cap: 4
+  stop_at_bedrock: true
+  dish_proposal_budget: 100
+  auto_approve: false
+```
+
+The round limit counts accepted proposal generations. The per-parent cap bounds
+proposed children and must also respect the decomposition settings' layer limit.
+An atomic parent stops proposal generation when `stop_at_bedrock` is true. The
+dish budget counts all persisted proposed children, including rejected proposals,
+so repeated rejection cannot evade the budget. Reserve capacity before model
+execution and record the reason when a guard prevents a proposal.
+
+`petri grow --redecompose-on=inconclusive,flaw,caveats,stalled` opts into the named
+signals. Without the flag, detection and proposal generation stay off, including
+when `auto_approve` is configured. The default approval gate shows each proposed
+sub-claim, trigger, generation, and guard result. Approve enqueues the proposed
+cells with deterministic cell-and-generation workflow IDs. Reject records the
+decision and enqueues nothing. `--approve-all` and `--reject-all` provide explicit
+batch decisions; `auto_approve: true` opts into approval without a prompt.
+
+A noninteractive run with pending proposals and no explicit decision reports
+that approval is pending and exits without waiting for input. Approval never
+substitutes for validation. Existing dependents are flagged for human review;
+they are not automatically reopened or enqueued. The first interface is CLI-only.
+
+### Durable execution questions
+
+- **Generation identity:** a workflow ID must include dish, cell, source event,
+  and generation. Confirm that an approval replay and a restored domain snapshot
+  cannot advance the generation twice; reconciliation must park mismatches.
+- **Checkpoint size:** use IDs and evidence paths in workflow inputs. Keep each
+  serialized step payload below 2 MiB, enforced before persistence. Confirm the
+  installed DBOS serializer and whether metadata overhead changes this bound.
+- **Crash window:** a recorded step result can be reused. A process killed after
+  a model returns but before any durable result commits can repeat that call;
+  the design must not promise exactly-once provider billing.
+- **First-grow review:** inspect whether flaw proposals remain counterarguments,
+  caveat proposals remain conditional, and the budget stops repeated expansion
+  without changing the mechanical verdict of the original cell.
+
+### D10 verification: native DBOS spans on SQLite
+
+The #66 integration test runs DBOS 3.4.0 against its SQLite system database.
+One workflow calling two steps emits one workflow span and two child step spans;
+the test checks their parent span IDs. A second dish in the same process sends
+its spans to its own provider. Disabling telemetry emits no DBOS spans. These
+checks do not establish PostgreSQL parity; PostgreSQL was not exercised.
+
+DBOS 3.4.0 obtains its tracer from OpenTelemetry's process-global provider and
+has no provider injection API. Petri owns a provider per dish without replacing
+an embedding application's global provider. The version-pinned adapter in
+`petri.execution.otel` therefore routes the SDK's native `start_span` call to the
+current dish's provider and restores the SDK method when the owner closes. An
+SDK upgrade requires reviewing this isolated use of a private API.
+
+Petri initializes that provider before `DBOS.launch()`. Its existing exporters
+own endpoint configuration, headers, sampling, and the local SQLite sink. The
+SDK receives `enable_otlp`, semantic attribute names, and empty exporter endpoint
+lists to avoid duplicate export. This replaces the issue's proposed direct SDK
+endpoint forwarding: the test asserts the configured endpoint at Petri's owned
+exporter boundary instead. No pipeline module imports DBOS for tracing.

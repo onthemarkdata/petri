@@ -9,9 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
-from petri.config import MAX_ITERATIONS
+from petri.config import load_config
 from petri.models import AgentRole, ConvergenceCheckResult, ShortCircuitCondition, Verdict
 
 # ── Defaults ──────────────────────────────────────────────────────────────
@@ -23,26 +21,25 @@ _DEFAULTS_DIR = Path(__file__).parent.parent / "defaults"
 
 
 def load_agent_roles(config_path: Path | None = None) -> dict[str, AgentRole]:
-    """Load agent roles from petri.yaml.
+    """Combine validated agent content with the fixed code roster."""
+    from petri.agents.contract import AGENT_SPECS, BlockingMode, Phase
 
-    Falls back to ``petri/defaults/petri.yaml`` when *config_path* is None
-    or points to a file that does not exist.
-
-    *config_path* may point to either ``petri.yaml`` (consolidated) or
-    a legacy ``agents.yaml`` — both are supported.
-
-    Returns a dict of agent name -> AgentRole.
-    """
-    path = config_path if config_path and config_path.exists() else _DEFAULTS_DIR / "petri.yaml"
-    raw = yaml.safe_load(path.read_text())
-    agents: dict[str, AgentRole] = {}
-    for name, cfg in raw.get("agents", {}).items():
-        # YAML parses bare ``true``/``false`` as booleans — coerce to the
-        # string representation that AgentRole expects.
-        if "blocking" in cfg:
-            cfg["blocking"] = str(cfg["blocking"]).lower()
-        agents[name] = AgentRole(name=name, **cfg)
-    return agents
+    content = load_config(config_path)
+    phase_numbers = {Phase.SOCRATIC: 0, Phase.RESEARCH: 1, Phase.CRITIQUE: 2,
+                     Phase.POST_CONVERGENCE: 3, Phase.LEAD: 0}
+    blocking = {BlockingMode.BLOCKING: "true", BlockingMode.NON_BLOCKING: "false",
+                BlockingMode.CONDITIONAL: "conditional"}
+    return {
+        name.value: AgentRole(
+            name=name.value, display_name=spec.display_name, phase=phase_numbers[spec.phase],
+            blocking=blocking[spec.blocking_mode], is_lead=spec.is_lead,
+            scope=spec.scope, redirect_on_block=spec.redirect_on_block,
+            verdicts_pass=content.agents[name].verdicts_pass,
+            verdicts_block=content.agents[name].verdicts_block,
+            instruction=content.agents[name].instruction,
+        )
+        for name, spec in AGENT_SPECS.items()
+    }
 
 
 # ── Core Convergence ──────────────────────────────────────────────────────
@@ -165,7 +162,7 @@ def evaluate_short_circuits(
     Returns ``None`` if no short-circuit applies, otherwise a
     ``ShortCircuitCondition``.
     """
-    from petri.config import get_short_circuit_rules
+    from petri.agents.contract import AGENT_SPECS
 
     convergence = check_convergence(verdicts, agent_roles)
     blocking = convergence.blocking_results
@@ -173,7 +170,14 @@ def evaluate_short_circuits(
     if convergence.missing_blocking:
         return None
 
-    for rule in get_short_circuit_rules():
+    rules: list[dict[str, str]] = []
+    for name, spec in AGENT_SPECS.items():
+        if spec.redirect_on_block:
+            rules.extend({"agent": name.value, "verdict": verdict, "type": spec.redirect_on_block.lower()}
+                         for verdict in spec.verdicts_block)
+        elif "CANNOT_DETERMINE" in spec.verdicts_block:
+            rules.append({"agent": name.value, "verdict": "CANNOT_DETERMINE", "type": "needs_experiment"})
+    for rule in rules:
         triggering_agent = rule["agent"]
         triggering_verdict = rule["verdict"]
         circuit_type = rule["type"]
@@ -201,11 +205,11 @@ def evaluate_short_circuits(
 def compute_circuit_breaker(
     iteration: int,
     cycle_start_iteration: int,
-    max_iterations: int = MAX_ITERATIONS,
+    max_iterations: int | None = None,
 ) -> bool:
     """Return ``True`` if the circuit breaker should fire.
 
     The breaker fires when the number of iterations since the cycle started
     reaches or exceeds *max_iterations*.
     """
-    return (iteration - cycle_start_iteration) >= max_iterations
+    return (iteration - cycle_start_iteration) >= (max_iterations or load_config().max_iterations)

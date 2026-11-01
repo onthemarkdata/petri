@@ -9,32 +9,42 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from petri.storage.dish import resolve_dish_id
+
 from petri.cli_ui import print_error_and_exit
-from petri.config import get_agent_tools, load_dish_config
+from petri.config import load_dish_config
+
+get_dish_id = resolve_dish_id
 
 
 def resolve_provider(petri_dir: Path):
-    """Resolve an InferenceProvider from petri.yaml config.
+    """Resolve the typed inference bridge from this dish's validated settings."""
+    from click import get_current_context
+    from petri.harness.legacy_bridge import HarnessInferenceProvider
+    from petri.harness.resolve import resolve_model
 
-    All inference routes through Claude Code CLI, which handles auth
-    and model routing via the Anthropic API. Tool grants come from
-    ``agent_tools`` in the dish config (defaults to a research-focused
-    set including WebSearch and WebFetch).
-    """
     config = load_dish_config(petri_dir)
-    model_cfg = config.get("model", {})
-    if isinstance(model_cfg, dict):
-        model_name = model_cfg.get("name")
-    else:
-        model_name = str(model_cfg) if model_cfg else None
+    bootstrap_telemetry(petri_dir, config=config)
+    provider = HarnessInferenceProvider(resolve_model(config.model_dump(mode="json")), config=config.model_dump(mode="json"))
+    context = get_current_context(silent=True)
+    if context is not None:
+        context.call_on_close(provider.close)
+    return provider
 
-    if not model_name:
-        return None
 
-    allowed_tools = get_agent_tools(config)
+def bootstrap_telemetry(petri_dir: Path, *, config=None):
+    """Initialize local tracing and agent instrumentation for the current dish."""
+    from petri.config import get_telemetry_config
+    from petri.telemetry import init_telemetry
+    from petri.telemetry.instrument_agents import instrument_agents
 
-    from petri.reasoning.claude_code_provider import ClaudeCodeProvider
-    return ClaudeCodeProvider(model=model_name, allowed_tools=allowed_tools)
+    dish = config if config is not None else load_dish_config(petri_dir)
+    provider = init_telemetry(
+        get_telemetry_config(petri_dir), dish_id=dish.name,
+        petri_dir=petri_dir,
+    )
+    instrument_agents(provider)
+    return provider
 
 
 def find_petri_dir(start: Path | None = None) -> Path:
@@ -48,28 +58,12 @@ def find_petri_dir(start: Path | None = None) -> Path:
     return petri_dir
 
 
-def get_dish_id(petri_dir: Path) -> str:
-    """Get the dish ID from config or derive from directory name."""
-    config = load_dish_config(petri_dir)
-    return config.get("name", petri_dir.parent.name)
-
-
 def load_colonies(petri_dir: Path, dish_id: str) -> list[tuple]:
-    """Load all colonies from the petri-dishes directory."""
-    from petri.graph.colony import deserialize_colony
+    """Load v2 colonies from the configured dish database."""
+    from petri.storage.colonies import list_colonies
+    from petri.storage.paths import dish_db_path
 
-    colonies: list[tuple] = []
-    dishes_dir = petri_dir / "petri-dishes"
-    if not dishes_dir.exists():
-        return colonies
-    for colony_dir in sorted(dishes_dir.iterdir()):
-        if colony_dir.is_dir():
-            try:
-                graph, colony = deserialize_colony(colony_dir, dish_id)
-                colonies.append((graph, colony))
-            except Exception:
-                continue
-    return colonies
+    return list_colonies(dish_db_path(petri_dir, dish_id))
 
 
 def detect_interactive_mode() -> tuple[bool, object]:

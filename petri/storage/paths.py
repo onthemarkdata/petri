@@ -1,40 +1,24 @@
-"""Centralized filesystem path helpers for petri's on-disk layout.
+"""Canonical v2 dish paths and temporary legacy path helpers.
 
-All of petri's persistent state lives under ``<petri_dir>/petri-dishes/``
-in a fixed tree::
-
-    <petri_dir>/petri-dishes/
-        <colony_slug>/
-            colony.json
-            <level:03d>-<seq:03d>/          # fallback cell directory name
-                events.jsonl
-                metadata.json
-                evidence.md
-
-In practice the cell directory on disk is whatever
-:func:`petri.graph.colony.serialize_colony` wrote into
-``colony.cell_paths`` (a slugified ``<level>-<level_slug>/<seq>-<cell_slug>``
-layout), but callers that have only a cell ID fall back to the
-``<level:03d>-<seq:03d>`` convention — which is what the helpers here
-build.
-
-Cell IDs follow the schema defined by
-:func:`petri.models.build_cell_key`::
-
-    {dish}-{colony}-{level:03d}-{seq:03d}
-
-Because both the dish ID and the colony slug may themselves contain
-hyphens, parsing is always performed right-to-left: the final two
-hyphen-separated segments are the level and seq, and everything before
-them is the ``{dish}-{colony}`` prefix.
+V2 stores cells, edges, and events in
+``<petri_dir>/petri-dishes/<dish_id>/petri.sqlite`` and derived files in
+that dish's ``exports/`` directory. Only ``dish_dir`` constructs the dish
+path. Legacy cell-directory helpers remain for the v1 engine until its
+retirement; v2 seed and read paths do not use them.
 """
 
 from __future__ import annotations
 
+import warnings
+
 from pathlib import Path
+
+from petri.models import parse_key
 from typing import Iterator
 
 __all__ = [
+    "dish_dir",
+    "dish_db_path",
     "parse_cell_id",
     "colony_dir",
     "cell_dir",
@@ -44,62 +28,37 @@ __all__ = [
 ]
 
 
-def parse_cell_id(cell_id: str) -> tuple[str, str, int, int]:
-    """Parse a composite cell ID into its four logical parts.
+def dish_dir(petri_dir: Path, dish_id: str | None = None) -> Path:
+    """Return the v2 dish directory without creating it."""
+    from petri.storage.dish import resolve_dish_id
 
-    Cell IDs use the schema ``{dish}-{colony}-{level:03d}-{seq:03d}``.
-    Both the dish and colony slugs may contain hyphens, so parsing is
-    done right-to-left: the last two hyphen-separated segments are
-    ``level`` and ``seq``, and everything before them is the combined
-    ``{dish}-{colony}`` prefix.
+    name = resolve_dish_id(petri_dir) if dish_id is None else dish_id
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise ValueError("Dish ID must be one nonempty path component")
+    path = petri_dir / "petri-dishes" / name
+    if path.is_symlink():
+        raise ValueError(f"Dish directory must not be a symbolic link: {path}")
+    return path
 
-    When the ID has exactly four hyphen-separated parts, the first is
-    treated as the dish and the second as the colony slug. When it has
-    more, the first segment is taken as the dish and the remaining
-    middle segments are joined back together as the colony slug. This
-    is a lossy heuristic — the cell ID alone does not carry enough
-    information to unambiguously recover a multi-hyphen dish — but it
-    matches the right-to-left convention used elsewhere in the
-    codebase (see :func:`petri.models.parse_key`).
 
-    Args:
-        cell_id: Composite cell ID string.
+def dish_db_path(petri_dir: Path, dish_id: str | None = None) -> Path:
+    """Return the domain database path for the configured dish."""
+    return dish_dir(petri_dir, dish_id) / "petri.sqlite"
 
-    Returns:
-        ``(dish, colony_slug, level, seq)`` with level and seq as ints.
 
-    Raises:
-        ValueError: If ``cell_id`` has fewer than four hyphen-separated
-            parts, or if the level/seq segments are not integers.
+def parse_cell_id(cell_id: str, dish_id: str | None = None) -> tuple[str, str, int, int]:
+    """Deprecated tuple wrapper around ``models.parse_key``.
+
+    Supply ``dish_id`` to distinguish hyphens in dish and colony names. Without
+    it, the historical first-segment dish heuristic remains for compatibility.
     """
-    if not isinstance(cell_id, str):
-        raise ValueError(f"cell_id must be a string, got {type(cell_id).__name__}")
-
-    parts = cell_id.split("-")
-    if len(parts) < 4:
-        raise ValueError(
-            f"cell_id {cell_id!r} has fewer than 4 hyphen-separated parts; "
-            f"expected '{{dish}}-{{colony}}-{{level}}-{{seq}}'"
-        )
-
-    level_str = parts[-2]
-    seq_str = parts[-1]
-    try:
-        level_int = int(level_str)
-    except ValueError as exc:
-        raise ValueError(
-            f"cell_id {cell_id!r} level segment {level_str!r} is not an integer"
-        ) from exc
-    try:
-        seq_int = int(seq_str)
-    except ValueError as exc:
-        raise ValueError(
-            f"cell_id {cell_id!r} seq segment {seq_str!r} is not an integer"
-        ) from exc
-
-    dish = parts[0]
-    colony_slug = "-".join(parts[1:-2])
-    return dish, colony_slug, level_int, seq_int
+    warnings.warn("Use petri.models.parse_key instead.", DeprecationWarning, stacklevel=2)
+    parsed = parse_key(cell_id, dish_id, strict=True)
+    if dish_id is None:
+        dish, _, colony = parsed["colony_prefix"].partition("-")
+    else:
+        dish, colony = parsed["dish"], parsed["colony"]
+    return dish, colony, parsed["level"], parsed["seq"]
 
 
 def colony_dir(petri_dir: Path, dish_id: str, colony_id: str) -> Path:

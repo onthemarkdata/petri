@@ -1,0 +1,31 @@
+# Public synthetic claims. These are not copied from the private field archive.
+- name: scoped-workflow-family
+  kind: organic
+  claims:
+    - A research workflow with source tracking reduces repeated review work.
+    - A research workflow with source tracking and revision comparison reduces repeated review work across changing specifications.
+    - A research workflow with source tracking and revision comparison reduces repeated review work across changing specifications when reviewers use the same acceptance criteria and preserve unresolved disagreements.
+  layer_sizes: [[4, 7, 5], [7, 4], [5, 8, 6, 4]]
+- name: metric-calibration-exploration
+  kind: organic
+  claims: [Metric unit definitions support consistent length comparisons when measurement instruments are calibrated.]
+  layer_sizes: [[4, 7, 5]]
+- name: axiomatic-units
+  kind: axiom
+  claims: [A kilometer is defined as one thousand meters.]
+  layer_sizes: [[1]]
+  axiom_texts: [A kilometer is defined as one thousand meters.]
+- name: shared-generation-premise
+  kind: reference
+  claims:
+    - Photovoltaic panels convert incident light into electricity under suitable operating conditions.
+    - Daytime grid imports decrease when photovoltaic generation supplies the coincident electrical demand.
+  layer_sizes: [[4], [1]]
+- name: hotdog-template
+  kind: negative
+  claims: [A hot dog is a sandwich.]
+  fixture: hotdog-template.json
+- name: legacy-default-template
+  kind: negative
+  claims: [A research workflow reduces repeated manual review work.]
+  fixture: legacy-default-template.json

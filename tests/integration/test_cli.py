@@ -39,12 +39,9 @@ class TestInit:
         # petri-dishes/ directory
         assert (petri_dir / "petri-dishes").is_dir()
 
-        # queue.json with valid JSON
-        queue_path = petri_dir / "queue.json"
-        assert queue_path.is_file()
-        queue = json.loads(queue_path.read_text())
-        assert "version" in queue
-        assert "entries" in queue
+        from petri.storage.paths import dish_db_path
+        assert dish_db_path(petri_dir).is_file()
+        assert not (petri_dir / "queue.json").exists()
 
     def test_init_with_name(self, clean_dir):
         result = runner.invoke(app, ["init", "--name", "my-research"])
@@ -133,14 +130,10 @@ class TestFullFlow:
         r = runner.invoke(app, ["graph"])
         assert r.exit_code == 0, r.output
 
-        # Cell count consistency: check should report the same number
-        # of cells as live in the colony directory.
-        dishes_dir = seeded_petri_dir["petri_dir"] / "petri-dishes"
-        colony_dirs = [d for d in dishes_dir.iterdir() if d.is_dir()]
-        assert len(colony_dirs) == 1
+        from petri.storage.database import list_cells
+        from petri.storage.paths import dish_db_path
 
-        metadata_files = list(colony_dirs[0].rglob("metadata.json"))
-        assert len(metadata_files) == check_count
+        assert len(list_cells(dish_db_path(seeded_petri_dir["petri_dir"]))) == check_count
 
 
 # ── on-disk integrity (SC-002) ──────────────────────────────────────────
@@ -173,12 +166,11 @@ class TestColonyOnDiskIntegrity:
             meta = json.loads(meta_path.read_text())
             assert "id" in meta, f"metadata missing 'id' in {cell_path.name}"
 
-        # queue.json must be present, valid JSON, and have an entry per cell
-        queue_path = petri_dir / "queue.json"
-        queue = json.loads(queue_path.read_text())
-        assert "entries" in queue
-        assert "version" in queue
-        assert len(queue["entries"]) == 5
+        from petri.storage import database
+        from petri.storage.paths import dish_db_path
+
+        assert len(database.list_cells(dish_db_path(petri_dir))) == 5
+        assert not (petri_dir / "queue.json").exists()
 
 
 

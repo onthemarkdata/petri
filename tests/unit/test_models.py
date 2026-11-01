@@ -12,7 +12,6 @@ from petri.models import (
     Edge,
     Event,
     EventType,
-    QueueEntry,
     InferenceProvider,
     SearchExecutedData,
     build_cell_key,
@@ -69,20 +68,6 @@ class TestCell:
                 claim_text="x",
                 level=-1,
             )
-
-
-class TestQueueEntry:
-    def test_negative_iteration_rejected(self):
-        with pytest.raises(ValidationError):
-            QueueEntry(cell_id="n1", iteration=-1)
-
-    def test_max_iterations_zero_rejected(self):
-        with pytest.raises(ValidationError):
-            QueueEntry(cell_id="n1", max_iterations=0)
-
-    def test_negative_cycle_start_rejected(self):
-        with pytest.raises(ValidationError):
-            QueueEntry(cell_id="n1", cycle_start_iteration=-1)
 
 
 class TestDecompositionResult:

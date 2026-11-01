@@ -1,25 +1,11 @@
-"""Integration tests for the Petri dashboard (migrate + API + SSE).
-
-Tests cover:
-- SQLite rebuild from JSONL (migrate)
-- REST endpoint responses (GET /api/events, /api/queue, /api/cells, /api/cell/{id}, /api/health, /api/stats)
-- SSE stream delivers new events after incremental sync
-"""
+"""Dashboard REST and SSE integration over per-dish SQLite."""
 
 from __future__ import annotations
 
-import json
-import sqlite3
 
 import pytest
 
-from petri.dashboard.migrate import (
-    incremental_sync,
-    init_db,
-    rebuild_sqlite,
-)
-from petri.storage.event_log import append_event, rollup_to_combined
-from petri.storage.queue import add_to_queue
+from petri.storage.event_log import append_event
 
 
 @pytest.fixture
@@ -61,150 +47,21 @@ def dashboard_env(petri_env_with_colony):
         data={"parent_cell_id": env["center"].id, "child_cell_ids": [env["cell1"].id]},
     )
 
+    from petri.models import Event
+    from petri.storage import database
+    from petri.storage.event_log import load_events
+    from petri.storage.paths import dish_db_path
+
+    for path in (cell1_events_path, center_events_path):
+        for event in load_events(path):
+            database.append_event(dish_db_path(env["petri_dir"]), Event.model_validate(event))
+
     # Add a queue entry
-    add_to_queue(env["petri_dir"] / "queue.json", env["cell1"].id)
 
     return {
         **env,
         "db_path": env["tmp_path"] / "petri.sqlite",
     }
-
-
-# ── migrate: rebuild_sqlite ─────────────────────────────────────────────
-
-
-class TestRebuildSqlite:
-    def test_rebuilds_from_jsonl(self, dashboard_env):
-        env = dashboard_env
-        count = rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        assert count == 5  # 3 search + 1 verdict + 1 decomposition
-        assert env["db_path"].exists()
-
-    def test_schema_has_expected_tables(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        conn = sqlite3.connect(str(env["db_path"]))
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
-        conn.close()
-
-        table_names = {t[0] for t in tables}
-        assert "events" in table_names
-
-    def test_events_queryable_by_cell_id(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        conn = sqlite3.connect(str(env["db_path"]))
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE cell_id = ?",
-            [env["cell1"].id],
-        ).fetchone()
-        conn.close()
-
-        assert rows[0] == 4  # 3 search + 1 verdict
-
-    def test_events_queryable_by_type(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        conn = sqlite3.connect(str(env["db_path"]))
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE type = 'verdict_issued'"
-        ).fetchone()
-        conn.close()
-
-        assert rows[0] == 1
-
-    def test_idempotent_rebuild(self, dashboard_env):
-        """INSERT OR IGNORE means rebuilding twice doesn't duplicate."""
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        # Second rebuild may insert 0 (OR IGNORE) or same count
-        # but total in DB should still be 5
-        conn = sqlite3.connect(str(env["db_path"]))
-        total = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        conn.close()
-
-        assert total == 5
-
-    def test_wal_journal_mode(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        conn = sqlite3.connect(str(env["db_path"]))
-        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-        conn.close()
-
-        assert mode == "wal"
-
-
-# ── migrate: incremental_sync ───────────────────────────────────────────
-
-
-class TestIncrementalSync:
-    def test_syncs_new_events_after_offset(self, dashboard_env):
-        env = dashboard_env
-        # First, do a full rebuild
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        # Rollup to get combined.jsonl and record its size
-        combined = rollup_to_combined(env["petri_dir"])
-        initial_size = combined.stat().st_size
-        file_offsets = {str(combined): initial_size}
-
-        # Append a new event — resolve path from colony.json
-        colony_data = json.loads((env["colony_path"] / "colony.json").read_text())
-        cell1_rel = colony_data["cell_paths"][env["cell1"].id]
-        cell1_events_path = env["colony_path"] / cell1_rel / "events.jsonl"
-        append_event(
-            cell1_events_path,
-            cell_id=env["cell1"].id,
-            event_type="verdict_issued",
-            agent="skeptic",
-            iteration=2,
-            data={"verdict": "ARGUMENT_WITHSTANDS_CRITIQUE", "summary": "Solid"},
-        )
-
-        # Re-rollup so combined.jsonl picks up the new event
-        rollup_to_combined(env["petri_dir"])
-
-        # Incremental sync should pick up only the new event
-        inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
-        assert inserted >= 1
-
-        # Verify in SQLite
-        conn = sqlite3.connect(str(env["db_path"]))
-        total = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        conn.close()
-
-        assert total == 6  # 5 original + 1 new
-
-    def test_no_new_events_returns_zero(self, dashboard_env):
-        env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
-
-        combined = rollup_to_combined(env["petri_dir"])
-        file_offsets = {str(combined): combined.stat().st_size}
-
-        inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
-        assert inserted == 0
-
-    def test_missing_combined_returns_zero(self, dashboard_env):
-        env = dashboard_env
-        init_db(env["db_path"])
-
-        file_offsets: dict[str, int] = {}
-        inserted = incremental_sync(env["petri_dir"], env["db_path"], file_offsets)
-        assert inserted == 0
-
-
-# ── FastAPI REST endpoints ──────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -216,11 +73,10 @@ def api_client(dashboard_env):
         pytest.skip("fastapi not installed")
 
     env = dashboard_env
-    rebuild_sqlite(env["petri_dir"], env["db_path"])
 
     from petri.dashboard.api import create_app
 
-    app = create_app(env["petri_dir"], env["db_path"])
+    app = create_app(env["petri_dir"])
     client = TestClient(app, raise_server_exceptions=True)
     return client, env
 
@@ -228,7 +84,7 @@ def api_client(dashboard_env):
 class TestHealthEndpoint:
     def test_health_returns_ok(self, api_client):
         client, _ = api_client
-        resp = client.get("/api/health")
+        resp = client.get("/api/ping")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
@@ -297,7 +153,7 @@ class TestQueueEndpoint:
         entries = resp.json()
         assert isinstance(entries, list)
         assert len(entries) >= 1
-        assert entries[0]["cell_id"] == env["cell1"].id
+        assert any(row["cell_id"] == env["cell1"].id for row in entries)
 
 
 class TestCellsEndpoint:
@@ -407,7 +263,6 @@ class TestDishesEndpoint:
             pytest.skip("fastapi not installed")
 
         env = dashboard_env
-        rebuild_sqlite(env["petri_dir"], env["db_path"])
 
         # Remove all colony directories
         dishes_dir = env["petri_dir"] / "petri-dishes"
@@ -417,7 +272,7 @@ class TestDishesEndpoint:
 
         from petri.dashboard.api import create_app
 
-        app = create_app(env["petri_dir"], env["db_path"])
+        app = create_app(env["petri_dir"])
         client = TestClient(app, raise_server_exceptions=True)
 
         resp = client.get("/api/dishes")

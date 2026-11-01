@@ -2,14 +2,25 @@
 
 import json
 import shutil
+import subprocess
+import sys
+from collections.abc import Callable
+from typing import NamedTuple
 from pathlib import Path
 
 import pytest
 
+from petri.config import load_config
+import yaml
+
 from petri.graph.colony import ColonyGraph, serialize_colony
-from petri.config import LLM_INFERENCE_MODEL, MAX_CONCURRENT, MAX_ITERATIONS
+from petri.storage.colonies import save_colony
+from petri.storage.paths import dish_db_path
 from petri.models import Cell, CellStatus, Colony, Edge, Verdict, build_cell_key
 
+LLM_INFERENCE_MODEL = load_config().model
+MAX_CONCURRENT = load_config().execution.worker_concurrency
+MAX_ITERATIONS = load_config().max_iterations
 
 # ── Fake InferenceProvider ───────────────────────────────────────────────
 # A dependency-injectable InferenceProvider used by unit tests. It is passed
@@ -110,6 +121,29 @@ class FakeProvider:
         )
         self._emit_progress(on_progress)
         return self.why_response
+
+
+class TypedFakeProvider(FakeProvider):
+    """Use the existing scripted responses through the durable typed seed seam."""
+
+    def initial_decomposition(self, request, on_progress=None):
+        from petri.reasoning.decomposition_schemas import InitialDecomposition
+        raw = self.decompose_claim(request.claim, request.clarifications, request.guidance,
+                                   on_progress=on_progress)
+        return InitialDecomposition.model_validate({"nodes": [
+            {key: value for key, value in node.items() if key not in {"level", "seq"}}
+            for node in raw["nodes"]
+        ]})
+
+    def expand_why(self, request, on_progress=None):
+        from petri.reasoning.decomposition_schemas import WhyExpansion
+        children = self.decompose_why(request.claim, request.parent_level, request.parent_seq,
+                                      on_progress=on_progress)
+        return WhyExpansion.model_validate({
+            "is_atomic": not children,
+            "bedrock_reason": "A scripted test premise" if not children else "",
+            "sub_premises": children,
+        })
 
 
 # ── Canonical Constants ──────────────────────────────────────────────────
@@ -225,10 +259,6 @@ def tmp_petri_dir(tmp_path):
         f"max_iterations: {config['max_iterations']}\n"
     )
 
-    # Empty queue
-    queue = {"version": 1, "last_updated": None, "entries": {}}
-    (petri_dir / "queue.json").write_text(json.dumps(queue, indent=2) + "\n")
-
     return tmp_path
 
 
@@ -258,15 +288,11 @@ def petri_env(tmp_path):
     shutil.copytree(src_defaults, dst_defaults)
 
     # Write petri.yaml
-    (petri_dir / "petri.yaml").write_text(
-        "name: test-dish\n"
-        "model:\n"
-        f"  name: {LLM_INFERENCE_MODEL}\n"
-        "  provider: local\n"
-        "harness: claude-code\n"
-        f"max_iterations: {MAX_ITERATIONS}\n"
-        f"max_concurrent: {MAX_CONCURRENT}\n"
-    )
+    config_values = load_config().model_dump(mode="json")
+    config_values["name"] = CANONICAL_DISH_ID
+    config_target = petri_dir / "defaults" / "petri.yaml"
+    config_target.parent.mkdir(exist_ok=True)
+    config_target.write_text(yaml.safe_dump(config_values, sort_keys=False))
 
     # Empty queue
     queue = {"version": 1, "last_updated": None, "entries": {}}
@@ -387,8 +413,7 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
         expect)
       - ``petri-dishes/<canonical colony>/`` serialized via the same
         ``serialize_colony`` path the production seed command uses
-      - ``queue.json`` with a queue entry for every cell in the canonical
-        colony, in the default ``new`` state
+      - the canonical colony in the dish's SQLite database
 
     Sets cwd to ``tmp_path`` so ``runner.invoke(app, [...])`` finds the
     petri dir without further plumbing. Returned dict mirrors
@@ -413,15 +438,11 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
     shutil.copytree(src_defaults, dst_defaults)
 
     # Override petri.yaml with canonical test config (matches CANONICAL_DISH_ID)
-    (dst_defaults / "petri.yaml").write_text(
-        f"name: {CANONICAL_DISH_ID}\n"
-        "model:\n"
-        f"  name: {LLM_INFERENCE_MODEL}\n"
-        "  provider: local\n"
-        "harness: claude-code\n"
-        f"max_iterations: {MAX_ITERATIONS}\n"
-        f"max_concurrent: {MAX_CONCURRENT}\n"
-    )
+    config_values = load_config().model_dump(mode="json")
+    config_values["name"] = CANONICAL_DISH_ID
+    config_target = petri_dir / "defaults" / "petri.yaml"
+    config_target.parent.mkdir(exist_ok=True)
+    config_target.write_text(yaml.safe_dump(config_values, sort_keys=False))
 
     # Serialize the canonical colony to disk via the production code path
     colony_path = petri_dir / "petri-dishes" / canonical_colony["colony_name"]
@@ -429,25 +450,7 @@ def seeded_petri_dir(tmp_path, monkeypatch, canonical_colony):
         canonical_colony["graph"], canonical_colony["colony_model"], colony_path
     )
 
-    # Populate queue.json with entries for every cell — matches the state
-    # the engine expects after seeding (all cells NEW / queued state empty).
-    queue_entries: dict = {}
-    for cell in canonical_colony["graph"].get_all_cells():
-        queue_entries[cell.id] = {
-            "cell_id": cell.id,
-            "queue_state": "",
-            "iteration": 0,
-            "entered_at": "2026-01-01T00:00:00+00:00",
-            "last_activity": "2026-01-01T00:00:00+00:00",
-        }
-    queue_data = {
-        "version": 1,
-        "last_updated": "2026-01-01T00:00:00+00:00",
-        "entries": queue_entries,
-    }
-    (petri_dir / "queue.json").write_text(
-        json.dumps(queue_data, indent=2) + "\n"
-    )
+    save_colony(dish_db_path(petri_dir), canonical_colony["graph"], canonical_colony["colony_model"])
 
     return {
         "tmp_path": tmp_path,
@@ -476,22 +479,15 @@ def petri_env_with_colony(tmp_path, canonical_colony_validated_cells):
     colony = canonical_colony_validated_cells
     petri_dir = tmp_path / ".petri"
     petri_dir.mkdir()
-    (petri_dir / "petri-dishes").mkdir()
-
-    (petri_dir / "petri.yaml").write_text(
-        "name: test-dish\n"
-        "model:\n"
-        f"  name: {LLM_INFERENCE_MODEL}\n"
-        "  provider: local\n"
-        "harness: claude-code\n"
-        f"max_iterations: {MAX_ITERATIONS}\n"
-    )
-
-    queue_data = {"version": 1, "last_updated": None, "entries": {}}
-    (petri_dir / "queue.json").write_text(json.dumps(queue_data, indent=2) + "\n")
+    config_values = load_config().model_dump(mode="json")
+    config_values["name"] = CANONICAL_DISH_ID
+    config_target = petri_dir / "defaults" / "petri.yaml"
+    config_target.parent.mkdir(exist_ok=True)
+    config_target.write_text(yaml.safe_dump(config_values, sort_keys=False))
 
     colony_path = petri_dir / "petri-dishes" / colony["colony_name"]
     serialize_colony(colony["graph"], colony["colony_model"], colony_path)
+    save_colony(dish_db_path(petri_dir), colony["graph"], colony["colony_model"])
 
     return {
         "tmp_path": tmp_path,
@@ -508,3 +504,62 @@ def petri_env_with_colony(tmp_path, canonical_colony_validated_cells):
         "cell1": colony["cell1"],
         "cell2": colony["cell2"],
     }
+
+
+# ── pydantic-ai offline harness fixtures (v2) ─────────────────────────────
+# Defined in tests/harness_utils.py; importing them here registers them as
+# shared fixtures for the whole suite. See that module's docstring. Imported
+# at the bottom (not the top) so FakeProvider stays anchored at lines 21-112;
+# the suppression spans E402 (fires on ruff<0.16 for this placement) and
+# RUF100 (fires on ruff>=0.16, where E402 is off and its code reads as unused).
+
+from tests.harness_utils import (  # noqa: E402, F401, RUF100
+    assessment_test_model,
+    clarifying_questions_test_model,
+    decomposition_test_model,
+    evidence_matches_test_model,
+    scripted_assessment_model,
+)
+# Capture before the harness offline guard patches subprocess construction.
+_FAKE_PI_POPEN_INIT = subprocess.Popen.__init__
+
+
+class FakePi(NamedTuple):
+    """Executable path and helper that writes a scenario and selects it for this test."""
+
+    path: Path
+    scenario: Callable[..., Path]
+
+
+@pytest.fixture
+def fake_pi(tmp_path, monkeypatch):
+    """Allow only the local fake pi executable through the subprocess guard.
+
+    The scenario helper accepts one or more dictionaries; the final scenario
+    repeats on subsequent prompts. Network and model API guards remain active.
+    """
+    path = Path(__file__).parent / "fixtures" / "fake_pi.py"
+    path = path.resolve()
+
+    def script(*scenarios):
+        target = tmp_path / "fake-pi-scenario.json"
+        target.write_text(json.dumps(list(scenarios) or [{}]), encoding="utf-8")
+        monkeypatch.setenv("FAKE_PI_SCENARIO", str(target))
+        return target
+
+    def guarded_init(process, args, *positional, **kwargs):
+        command = [os_arg if isinstance(os_arg, str) else str(os_arg) for os_arg in args]
+        allowed = (
+            command[:1] == [str(path)]
+            or command[:2] == [sys.executable, str(path)]
+        )
+        if (
+            not allowed or positional or kwargs.get("shell", False)
+            or kwargs.get("executable") not in (None, command[0])
+        ):
+            raise RuntimeError("The fake_pi fixture permits only its local stub subprocess.")
+        _FAKE_PI_POPEN_INIT(process, args, **kwargs)
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", guarded_init)
+    script()
+    return FakePi(path, script)

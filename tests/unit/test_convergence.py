@@ -31,11 +31,10 @@ def agent_roles():
 
 class TestLoadAgentRoles:
     def test_loads_default_agents(self, agent_roles):
-        # 13 original agents + socratic_questioner (exploratory phase 0)
-        assert len(agent_roles) == 14
+        assert len(agent_roles) == 13
         assert "investigator" in agent_roles
         assert "cell_lead" in agent_roles
-        assert "socratic_questioner" in agent_roles
+        assert "socratic_questioner" not in agent_roles
 
     def test_leads_are_non_blocking(self, agent_roles):
         for name in ("decomposition_lead", "cell_lead", "red_team_lead"):
@@ -52,10 +51,9 @@ class TestLoadAgentRoles:
         # skeptic, champion, pragmatist + 1 conditional: triage = 7
         assert len(blocking) == 7
 
-    def test_fallback_to_defaults_on_missing_path(self):
-        roles = load_agent_roles(Path("/nonexistent/agents.yaml"))
-        # 13 original agents + socratic_questioner (exploratory phase 0)
-        assert len(roles) == 14
+    def test_missing_explicit_config_fails(self):
+        with pytest.raises(FileNotFoundError):
+            load_agent_roles(Path("/nonexistent/agents.yaml"))
 
 
 # ── check_convergence ────────────────────────────────────────────────────

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
 import typer
+
+from petri.telemetry.commands import traced_command
 
 from petri.cli._bootstrap import (
     find_petri_dir,
@@ -15,11 +16,18 @@ from petri.cli._bootstrap import (
     resolve_provider,
 )
 from petri.cli_ui import print_error_and_exit
-from petri.storage.paths import (
-    cell_dir as cell_dir_for,
-    events_path as events_file_path,
-    parse_cell_id,
+from petri.execution import resolve_backend
+from petri.reasoning.seed_events import current_attempt, record_completion
+from petri.storage.colonies import (
+    clear_unapproved_colony,
+    colony_exists,
+    reserve_colony,
+    save_colony,
 )
+from petri.storage.seed_guard import ColonyExistsError
+from petri.storage.backup import snapshot_before_destructive
+from petri.storage.database import SQLiteEventLog
+from petri.storage.paths import dish_db_path
 
 if TYPE_CHECKING:
     from petri.models import ClarifyingQuestion
@@ -67,9 +75,7 @@ def _run_substance_check(
     while True:
         try:
             with Spinner("substance check", force_plain=force_plain) as spinner:
-                assessment = provider.assess_claim_substance(
-                    claim, on_progress=spinner.update
-                )
+                assessment = provider.assess_claim_substance(claim, on_progress=spinner.update)
         except Exception as exc:
             typer.echo(
                 f"Warning: substance check failed ({exc}); continuing anyway.",
@@ -102,50 +108,40 @@ def _run_substance_check(
             return claim, True, False
 
         # Edit claim — re-prompt and loop
-        new_claim = questionary.text(
-            "Edit the claim:", default=suggested or claim
-        ).ask()
+        new_claim = questionary.text("Edit the claim:", default=suggested or claim).ask()
         if new_claim is None:
             return claim, False, True
         claim = new_claim.strip() or claim
 
 
-def _events_path_for(colony_path: Path, colony_model, cell_id: str) -> Path:
-    """Resolve a cell's events.jsonl path.
-
-    Prefers the colony model's ``cell_paths`` mapping when available,
-    falling back to parsing the cell ID via ``storage.paths``.
-    """
-    relative_path = colony_model.cell_paths.get(cell_id)
-    if relative_path:
-        return colony_path / relative_path / "events.jsonl"
-    _, _, level, seq = parse_cell_id(cell_id)
-    return events_file_path(cell_dir_for(colony_path, level, seq))
+def _events_path_for(colony_path: Path, colony_model, cell_id: str) -> SQLiteEventLog:
+    """Select one cell's event stream in the dish database."""
+    return SQLiteEventLog(colony_path, cell_id)
 
 
 def _log_cell_event(
-    events_path: Path,
+    events_path: SQLiteEventLog,
     cell_id: str,
     event_type: str,
     data: dict | None = None,
+    *,
+    sequence: int = 0,
+    attempt: int = 0,
 ) -> None:
-    """Append an event to a cell's events.jsonl with error handling."""
+    """Persist a seed event, failing if its history cannot be saved."""
     from petri.storage.event_log import append_event
 
-    try:
-        append_event(
-            events_path=events_path,
-            cell_id=cell_id,
-            event_type=event_type,
-            agent="decomposition_lead",
-            iteration=0,
-            data=data or {},
-        )
-    except Exception as exc:
-        typer.echo(
-            f"Warning: failed to log event {event_type} for {cell_id}: {exc}",
-            err=True,
-        )
+    append_event(
+        events_path=events_path,
+        cell_id=cell_id,
+        event_type=event_type,
+        agent="decomposition_lead",
+        iteration=0,
+        data=data or {},
+        node="seed",
+        sequence=sequence,
+        round_number=attempt,
+    )
 
 
 def _make_cell_created_callback(
@@ -156,40 +152,130 @@ def _make_cell_created_callback(
     spinner,
     log_event: Callable[[str, str, dict], None],
 ) -> Callable:
-    """Return a callback for ``decompose_claim`` that persists each new cell.
-
-    The callback adds the cell + edges to the graph, re-serializes the
-    colony, logs a ``cell_created`` event, and prints the new claim above
-    the live spinner so the user retains a permanent record.
-    """
-    from petri.graph.colony import serialize_colony
+    """Persist each created cell and its edges before reporting progress."""
 
     def _on_cell_created(cell, new_edges) -> None:
-        try:
-            graph.add_cell(cell)
-            for edge in new_edges:
-                graph.add_edge(edge)
-            # Re-serialize incrementally — serialize_colony preserves
-            # existing events.jsonl files (touch only on first create).
-            serialize_colony(graph, colony_model, colony_path)
-            log_event(
-                cell.id,
-                "cell_created",
-                {
-                    "level": cell.level,
-                    "parents": [edge.from_cell for edge in new_edges],
-                },
-            )
-            # Print the new claim as a permanent line above the live
-            # spinner so the user has a record of what was just created.
-            spinner.print_line(cell.claim_text)
-        except Exception as exc:
-            typer.echo(
-                f"Warning: failed to persist cell {cell.id}: {exc}",
-                err=True,
-            )
+        graph.add_cell(cell)
+        for edge in new_edges:
+            graph.add_edge(edge)
+        save_colony(colony_path, graph, colony_model)
+        log_event(
+            cell.id,
+            "cell_created",
+            {
+                "level": cell.level,
+                "parents": [edge.from_cell for edge in new_edges],
+            },
+        )
+        spinner.print_line(cell.claim_text)
 
     return _on_cell_created
+
+
+class _IncompleteSeed(RuntimeError):
+    pass
+
+
+class _CompletedSeedRunner:
+    """Rebuild committed output events and signal if a new model call is needed."""
+
+    def initial_decomposition(self, request, on_progress=None):
+        raise _IncompleteSeed()
+
+    def expand_why(self, request, on_progress=None):
+        raise _IncompleteSeed()
+
+
+def _resume_colony(
+    petri_dir: Path, dish_id: str, colony_name: str, no_questions: bool, backend
+) -> None:
+    """Resume the retained seed draft through the selected execution backend."""
+    from petri.graph.colony import ColonyGraph
+    from petri.reasoning.decomposer import decompose_claim, format_colony_display
+    from petri.reasoning.decomposition_settings import DecompositionSettings
+    from petri.storage import database
+    from petri.storage.colonies import load_colony
+
+    path = dish_db_path(petri_dir, dish_id)
+    colony_id = f"{dish_id}-{colony_name}"
+    if not colony_exists(path, colony_id):
+        print_error_and_exit(f"Colony '{colony_name}' does not exist; seed it first.", code=1)
+    graph, colony_model = load_colony(path, colony_id)
+    center_id = colony_model.center_cell_id
+    events = database.read_events(path, cell_id=center_id)
+    if any(event["type"] == "colony_approved" for event in events):
+        typer.echo(f"Colony '{colony_name}': nothing to resume.")
+        return
+    arguments = dict(
+        claim=colony_model.center_claim,
+        clarifications=_clarifications_to_models(colony_model.clarifications),
+        dish_id=dish_id,
+        colony_name=colony_name,
+        settings=DecompositionSettings.from_dish(petri_dir),
+        db_path=path,
+        resume=True,
+    )
+    provider = None
+    result = None
+    try:
+        result = decompose_claim(
+            colony_model.center_claim, _clarifications_to_models(colony_model.clarifications),
+            dish_id, colony_name, provider=None, agent_runner=_CompletedSeedRunner(),
+            settings=DecompositionSettings.from_dish(petri_dir), db_path=path, resume=True,
+        )
+        runner = _CompletedSeedRunner()
+    except _IncompleteSeed:
+        provider = resolve_provider(petri_dir)
+        if provider is None or not hasattr(provider, "initial_decomposition"):
+            print_error_and_exit("Seed resume requires the configured typed agent backend.", code=2)
+        runner = provider
+    try:
+        if result is None:
+            result = backend.seed_colony(
+                petri_dir=petri_dir, **arguments, provider=runner, agent_runner=runner
+            )
+    except Exception as error:
+        print_error_and_exit(f"Seed resume failed: {error}", code=2)
+    finally:
+        if provider is not None and hasattr(provider, "close"):
+            provider.close()
+    graph = ColonyGraph(colony_id=colony_id)
+    for cell in result.cells:
+        graph.add_cell(cell)
+    for edge in result.edges:
+        graph.add_edge(edge)
+    save_colony(path, graph, colony_model)
+    record_completion(
+        path, center_id, attempt=current_attempt(path, center_id), cell_count=len(result.cells)
+    )
+    typer.echo(format_colony_display(result))
+    import sys
+
+    if sys.stdin.isatty() and not no_questions:
+        try:
+            import questionary
+        except ImportError:
+            if not typer.confirm("Accept this colony?", default=True):
+                typer.echo("Draft retained. Run seed --resume to review it again.")
+                return
+        else:
+            while True:
+                action = questionary.select(
+                    "What would you like to do?", choices=["Accept", "Edit", "Keep draft"], default="Accept",
+                ).ask()
+                if action == "Accept":
+                    break
+                if action != "Edit":
+                    typer.echo("Draft retained. Run seed --resume to review it again.")
+                    return
+                from petri.cli.seed_edit import edit_pending_result
+
+                result = edit_pending_result(result, arguments["settings"], path, petri_dir, dish_id, questionary)
+                typer.echo(format_colony_display(result))
+    _log_cell_event(
+        SQLiteEventLog(path), center_id, "colony_approved", {"cell_count": len(result.cells)}
+    )
+    typer.echo(f"Colony '{colony_name}' resumed with {len(result.cells)} cells.")
 
 
 # ── Command registration ────────────────────────────────────────────────
@@ -197,26 +283,41 @@ def _make_cell_created_callback(
 
 def register(app: typer.Typer) -> None:
     @app.command()
+    @traced_command("seed")
     def seed(
-        source: str = typer.Argument(
-            ..., help="Claim text, URL, or file path to decompose"
-        ),
-        colony: Optional[str] = typer.Option(
-            None, help="Colony name (default: auto-generated)"
+        source: str = typer.Argument("", help="Claim text, URL, or file path to decompose"),
+        colony: Optional[str] = typer.Option(None, help="Colony name (default: auto-generated)"),
+        resume: bool = typer.Option(
+            False, "--resume", help="Continue an interrupted seed; requires --colony"
         ),
         no_questions: bool = typer.Option(
             False, "--no-questions", help="Skip clarifying questions and auto-accept"
         ),
     ) -> None:
-        """Seed a new colony from a claim, URL, or file. Requires Claude Code CLI."""
+        """Seed a colony from a claim, URL, or file. Seed foundations first so later colonies can reference their premises."""
         petri_dir = find_petri_dir()
         dish_id = get_dish_id(petri_dir)
+        try:
+            backend = resolve_backend(petri_dir)
+        except ValueError as error:
+            print_error_and_exit(str(error), code=2)
+        typer.echo(f"Execution backend: {getattr(backend, 'backend_name', 'custom')}")
+        if resume:
+            if not colony:
+                print_error_and_exit("Use --colony to identify the seed to resume.", code=2)
+            _resume_colony(petri_dir, dish_id, colony, no_questions, backend)
+            return
+        if not source:
+            print_error_and_exit("Provide a claim, URL, or file path to seed.", code=2)
+        from petri.reasoning.decomposition_settings import DecompositionSettings
+        from petri.harness.legacy_bridge import HarnessInferenceProvider
+
+        settings = DecompositionSettings.from_dish(petri_dir)
 
         from petri.cli_ui import Spinner
-        from petri.graph.colony import ColonyGraph, serialize_colony
+        from petri.graph.colony import ColonyGraph
         from petri.models import Cell, Colony, build_cell_key
         from petri.reasoning.decomposer import (
-            decompose_claim,
             format_colony_display,
             generate_clarifying_questions,
             generate_colony_name,
@@ -307,15 +408,17 @@ def register(app: typer.Typer) -> None:
         typer.echo(f"Claim: {claim}")
         typer.echo()
 
-        # ── Phase C: Pre-create colony directory + center cell ──
+        # ── Phase C: Reserve the colony and persist its center ──
         colony_name = colony or generate_colony_name(claim)
         colony_id = f"{dish_id}-{colony_name}"
         center_id = build_cell_key(dish_id, colony_name, 0, 0)
-        colony_path = petri_dir / "petri-dishes" / colony_name
-
-        # Wipe any leftover from a previous run before we start writing
-        if colony_path.exists():
-            shutil.rmtree(colony_path)
+        colony_path = dish_db_path(petri_dir, dish_id)
+        if colony_exists(colony_path, colony_id):
+            print_error_and_exit(
+                f"Colony '{colony_name}' already exists. Choose another name; "
+                "use seed --resume --colony with this name to continue an interrupted seed.",
+                code=1,
+            )
 
         center_cell = Cell(
             id=center_id,
@@ -334,17 +437,29 @@ def register(app: typer.Typer) -> None:
             clarifications=[],
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        serialize_colony(graph, colony_model, colony_path)
+        try:
+            reserve_colony(colony_path, colony_model)
+        except ColonyExistsError as error:
+            print_error_and_exit(str(error), code=1)
+        save_colony(colony_path, graph, colony_model)
 
-        def log_for_this_run(
-            cell_id: str, event_type: str, data: dict | None = None
-        ) -> None:
+        event_sequences: dict[tuple[int, str, str], int] = {}
+        attempt = current_attempt(colony_path, center_id) + 1
+
+        def log_for_this_run(cell_id: str, event_type: str, data: dict | None = None) -> None:
+            nonlocal attempt
+            if event_type == "decomposition_started":
+                attempt = current_attempt(colony_path, center_id) + 1
+                data = {**(data or {}), "attempt": attempt}
             events_file = _events_path_for(colony_path, colony_model, cell_id)
-            _log_cell_event(events_file, cell_id, event_type, data)
+            key = (attempt, cell_id, event_type)
+            sequence = event_sequences.get(key, 0)
+            _log_cell_event(
+                events_file, cell_id, event_type, data, sequence=sequence, attempt=attempt
+            )
+            event_sequences[key] = sequence + 1
 
-        log_for_this_run(
-            center_id, "seed_started", {"claim": claim, "no_questions": no_questions}
-        )
+        log_for_this_run(center_id, "seed_started", {"claim": claim, "no_questions": no_questions})
 
         # ── Phase D: Clarifying questions wizard ──
         clarifications: list[dict] = []
@@ -354,19 +469,13 @@ def register(app: typer.Typer) -> None:
             assert questionary is not None
             log_for_this_run(center_id, "clarifying_questions_requested")
             try:
-                with Spinner(
-                    "clarifying questions", force_plain=force_plain_spinner
-                ) as spinner:
+                with Spinner("clarifying questions", force_plain=force_plain_spinner) as spinner:
                     questions = generate_clarifying_questions(
                         claim, provider=provider, on_progress=spinner.update
                     )
             except Exception as exc:
-                log_for_this_run(
-                    center_id, "clarifying_questions_failed", {"error": str(exc)}
-                )
-                print_error_and_exit(
-                    f"Failed to generate clarifying questions: {exc}", code=2
-                )
+                log_for_this_run(center_id, "clarifying_questions_failed", {"error": str(exc)})
+                print_error_and_exit(f"Failed to generate clarifying questions: {exc}", code=2)
             log_for_this_run(
                 center_id,
                 "clarifying_questions_received",
@@ -379,13 +488,9 @@ def register(app: typer.Typer) -> None:
 
                 if options:
                     choices = [*options, "Skip"]
-                    answer = questionary.select(
-                        question_text, choices=choices
-                    ).ask()
+                    answer = questionary.select(question_text, choices=choices).ask()
                 else:
-                    answer = questionary.text(
-                        f"{question_text} (leave blank to skip)"
-                    ).ask()
+                    answer = questionary.text(f"{question_text} (leave blank to skip)").ask()
 
                 if answer is None:
                     typer.echo("Cancelled.")
@@ -399,9 +504,7 @@ def register(app: typer.Typer) -> None:
                     )
                     continue
 
-                clarifications.append(
-                    {"question": question_text, "answer": answer}
-                )
+                clarifications.append({"question": question_text, "answer": answer})
                 log_for_this_run(
                     center_id,
                     "clarification_recorded",
@@ -411,18 +514,18 @@ def register(app: typer.Typer) -> None:
             # Persist user clarifications onto the colony so a kill mid-flow
             # doesn't lose them.
             colony_model.clarifications = clarifications
-            serialize_colony(graph, colony_model, colony_path)
+            save_colony(colony_path, graph, colony_model)
 
         # ── Phase E: Decompose / Accept / Regenerate / Abort loop ──
         guidance = ""
         result = None
         while True:
-            # Each re-roll wipes the colony dir and rebuilds — no stale state
-            if colony_path.exists():
-                shutil.rmtree(colony_path)
+            # Only this run's cells are replaced during regeneration.
+            snapshot_before_destructive(petri_dir, dish_id)
+            clear_unapproved_colony(colony_path, colony_id, release_reservation=False)
             graph = ColonyGraph(colony_id=colony_id)
             graph.add_cell(center_cell)
-            serialize_colony(graph, colony_model, colony_path)
+            save_colony(colony_path, graph, colony_model)
 
             log_for_this_run(
                 center_id,
@@ -431,9 +534,7 @@ def register(app: typer.Typer) -> None:
             )
 
             try:
-                with Spinner(
-                    "decomposing claim", force_plain=force_plain_spinner
-                ) as spinner:
+                with Spinner("decomposing claim", force_plain=force_plain_spinner) as spinner:
                     on_cell_created = _make_cell_created_callback(
                         graph=graph,
                         colony_model=colony_model,
@@ -441,7 +542,8 @@ def register(app: typer.Typer) -> None:
                         spinner=spinner,
                         log_event=log_for_this_run,
                     )
-                    result = decompose_claim(
+                    result = backend.seed_colony(
+                        petri_dir=petri_dir,
                         claim=claim,
                         clarifications=_clarifications_to_models(clarifications),
                         dish_id=dish_id,
@@ -451,6 +553,11 @@ def register(app: typer.Typer) -> None:
                         on_progress=spinner.update,
                         on_cell_created=on_cell_created,
                         center=center_cell,
+                        settings=settings,
+                        agent_runner=provider
+                        if isinstance(provider, HarnessInferenceProvider)
+                        else None,
+                        db_path=colony_path,
                     )
             except Exception as exc:
                 log_for_this_run(
@@ -460,50 +567,67 @@ def register(app: typer.Typer) -> None:
                 )
                 print_error_and_exit(f"Decomposition failed: {exc}", code=2)
 
-            log_for_this_run(
+            graph = ColonyGraph(colony_id=colony_id)
+            for cell_result in result.cells:
+                graph.add_cell(cell_result)
+            for edge_result in result.edges:
+                graph.add_edge(edge_result)
+
+            record_completion(
+                colony_path,
                 center_id,
-                "decomposition_completed",
-                {"cell_count": len(result.cells)},
+                attempt=current_attempt(colony_path, center_id),
+                cell_count=len(result.cells),
             )
 
-            typer.echo(format_colony_display(result))
+            while True:
+                typer.echo(format_colony_display(result))
+                if not interactive:
+                    action = "Accept"
+                    break
+                assert questionary is not None
+                action = questionary.select(
+                    "What would you like to do?",
+                    choices=["Accept", "Edit", "Regenerate with guidance", "Abort"],
+                    default="Accept",
+                ).ask()
+                if action != "Edit":
+                    break
+                from petri.cli.seed_edit import edit_pending_result
 
-            if not interactive:
-                break  # non-interactive: auto-accept (used by --no-questions)
-
-            # Reaching here means interactive is True, so the questionary
-            # import above succeeded; narrow away the Optional for mypy.
-            assert questionary is not None
-            action = questionary.select(
-                "What would you like to do?",
-                choices=["Accept", "Regenerate with guidance", "Abort"],
-                default="Accept",
-            ).ask()
+                result = edit_pending_result(result, settings, colony_path, petri_dir, dish_id, questionary)
+                graph = ColonyGraph(colony_id=colony_id)
+                for cell in result.cells:
+                    graph.add_cell(cell)
+                for edge in result.edges:
+                    graph.add_edge(edge)
 
             if action is None or action == "Abort":
-                if colony_path.exists():
-                    shutil.rmtree(colony_path)
+                # Only this run's cells are removed when this run is rejected.
+                snapshot_before_destructive(petri_dir, dish_id)
+                clear_unapproved_colony(colony_path, colony_id)
                 typer.echo("Decomposition rejected.")
                 raise typer.Exit(code=1)
 
             if action == "Accept":
                 break
 
-            # Regenerate path — Claude-Code-style free-text feedback
+            # Regeneration uses the reviewer's guidance on the next model call.
+            assert questionary is not None
             guidance = questionary.text(
                 "What should change? (free text, press Enter to re-roll as-is)"
             ).ask()
             if guidance is None:
-                if colony_path.exists():
-                    shutil.rmtree(colony_path)
+                # Only this run's cells are removed when this run is rejected.
+                snapshot_before_destructive(petri_dir, dish_id)
+                clear_unapproved_colony(colony_path, colony_id)
                 typer.echo("Cancelled.")
                 raise typer.Exit(code=1)
-            # Loop iterates: top of the loop wipes the colony dir and rebuilds
+            # The next iteration replaces draft rows and retains their events.
 
-        # Final colony.json rewrite — ensures cell_paths is consistent and
-        # persists the user's clarifications alongside the approved decomposition.
+        # Persist clarifications alongside the approved cells.
         colony_model.clarifications = clarifications
-        serialize_colony(graph, colony_model, colony_path)
+        save_colony(colony_path, graph, colony_model)
         log_for_this_run(
             center_id,
             "colony_approved",
@@ -511,6 +635,5 @@ def register(app: typer.Typer) -> None:
         )
 
         typer.echo(
-            f"\nColony '{colony_name}' created with "
-            f"{len(result.cells) if result else 0} cells."
+            f"\nColony '{colony_name}' created with {len(result.cells) if result else 0} cells."
         )

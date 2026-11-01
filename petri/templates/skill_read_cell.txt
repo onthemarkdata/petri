@@ -9,30 +9,28 @@ Read a cell's current state, metadata, and evidence.
 ## Usage
 
 ```python
-from petri.graph.colony import deserialize_colony
 from pathlib import Path
-import json
+from petri.query import get_cell
+from petri.storage.colonies import load_colony
+from petri.storage.paths import dish_db_path
 
-# Read cell metadata
-cell_dir = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}")
-metadata = json.loads((cell_dir / "metadata.json").read_text())
+db_path = dish_db_path(Path("$petri_dir"), "{dish_id}")
 
-# Read evidence
-evidence = (cell_dir / "evidence.md").read_text()
+# Read current metadata and evidence without changing the database.
+metadata = get_cell(db_path, "{cell_id}")
+if metadata is None:
+    raise ValueError("Cell not found")
+evidence = metadata["evidence_md"]
 
 # Load full colony graph
-colony_dir = Path("$petri_dir/petri-dishes/{colony}")
-graph, colony = deserialize_colony(colony_dir, dish_id="{dish_id}")
+graph, colony = load_colony(db_path, "{colony_id}")
 
 # Get specific cell
 cell = graph.get_cell("{cell_id}")
 ```
 
-## Cell File Structure
+## Storage
 
-```
-.petri/petri-dishes/{colony}/{level}-{seq}/
-├── evidence.md      # Human-readable research/evidence
-├── events.jsonl     # Append-only event log (source of truth)
-└── metadata.json    # Cell attributes (status, level, dependencies)
-```
+Cells, edges, evidence, and events live in
+`.petri/petri-dishes/{dish_id}/petri.sqlite`. Use `petri export` to generate
+reviewable text; editing an export does not update the database.

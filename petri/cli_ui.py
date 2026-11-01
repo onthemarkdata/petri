@@ -452,7 +452,7 @@ def print_error_and_exit(message: str, *, code: int = 1) -> NoReturn:
 # ── colony visualization renderers ───────────────────────────────────────
 
 
-def render_text_tree(graph, colony) -> None:
+def render_text_tree(graph, colony, *, intelligence=None) -> None:
     """Render a colony as an indented text tree."""
     typer.echo(f"\nColony: {colony.id}")
     typer.echo(f"Center: {colony.center_claim}")
@@ -469,12 +469,19 @@ def render_text_tree(graph, colony) -> None:
         dep_arrow = ""
         if deps:
             dep_arrow = f" -> [{', '.join(deps)}]"
-        typer.echo(f"{indent}[L{cell.level}] {cell.id}: {cell.claim_text}{dep_arrow}")
+        annotation = ''
+        if intelligence is not None and cell.id in intelligence.convergence_points:
+            metric = intelligence.cells[cell.id]
+            annotation = f' [convergence point; importance={metric.importance}; fragility={metric.fragility}]'
+        typer.echo(f"{indent}[L{cell.level}] {cell.id}: {cell.claim_text}{dep_arrow}{annotation}")
 
+    for edge in graph.get_edges():
+        if edge.edge_type == "cross_colony":
+            typer.echo(f"  Across colonies: {edge.from_cell} -> {edge.to_cell}")
     typer.echo("")
 
 
-def render_dot(graph, colony) -> None:
+def render_dot(graph, colony, *, intelligence=None) -> None:
     """Render a colony as Graphviz DOT format."""
     typer.echo(f'digraph "{colony.id}" {{')
     typer.echo("  rankdir=TB;")
@@ -485,14 +492,21 @@ def render_dot(graph, colony) -> None:
         label = cell.claim_text.replace('"', '\\"')
         if len(label) > 50:
             label = label[:47] + "..."
-        typer.echo(f'  "{cell.id}" [label="{label}\\nL{cell.level}"];')
+        marker = ''
+        if intelligence is not None and cell.id in intelligence.convergence_points:
+            metric = intelligence.cells[cell.id]
+            label += f'\\nConvergence point I={metric.importance} F={metric.fragility}'
+            marker = ',peripheries=2,color=gold'
+        typer.echo(f'  "{cell.id}" [label="{label}\\nL{cell.level}"{marker}];')
 
     typer.echo("")
 
     for edge in graph.get_edges():
         style = ""
         if edge.edge_type == "cross_colony":
-            style = ' [style=dashed, color=blue]'
+            from petri.presentation import EDGE_STYLES
+            settings = EDGE_STYLES['cross_colony']
+            style = f" [style={settings['dot_style']}, color={settings['dot_color']}]"
         typer.echo(f'  "{edge.from_cell}" -> "{edge.to_cell}"{style};')
 
     typer.echo("}")
@@ -508,6 +522,8 @@ def grow_status_loop(
     spinner,
     stop_event,
     interval_seconds: float,
+    get_states=None,
+    format_states=None,
 ) -> None:
     """Daemon-thread body that refreshes the aggregate status header.
 
@@ -525,8 +541,8 @@ def grow_status_loop(
     walks event logs for recent verdicts. Shuts down promptly when
     ``stop_event`` is set.
     """
-    from petri.engine.grow_loop import format_state_summary
-    from petri.storage.queue import get_state_summary
+    if get_states is None or format_states is None:
+        raise ValueError("Provide backend state and formatting callbacks")
 
     set_header = getattr(spinner, "set_header", None)
 
@@ -535,11 +551,11 @@ def grow_status_loop(
             return
 
         try:
-            state_counts = get_state_summary(queue_path)
+            state_counts = get_states()
         except Exception:
             state_counts = {}
 
-        status_line = f"status: {format_state_summary(state_counts)}"
+        status_line = f"status: {format_states(state_counts)}"
         if set_header is not None:
             set_header(status_line)
         else:
@@ -564,10 +580,12 @@ def short_cell_id(cell_id: str) -> str:
     ``"petri-ai-considered-commodity-12-001-002"`` -> ``"001-002"``.
     Falls back to the original string if it has fewer than 2 hyphens.
     """
-    parts = cell_id.rsplit("-", 2)
-    if len(parts) < 3:
+    from petri.models import parse_key
+
+    parsed = parse_key(cell_id)
+    if "level" not in parsed:
         return cell_id
-    return f"{parts[-2]}-{parts[-1]}"
+    return f"{parsed['level']:03d}-{parsed['seq']:03d}"
 
 
 def _truncate_summary(summary_text: str, max_chars: int = _STATUS_SUMMARY_MAX_CHARS) -> str:

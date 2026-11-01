@@ -20,22 +20,67 @@ https://github.com/user-attachments/assets/ef47dc07-741d-4ac5-9f35-2afb12fc9046
 
 ## ⚠️ Cost Warning ⚠️
 
-**Petri uses Claude via Claude Code, which costs money.** Each cell goes through 13 agents across multiple iterations, generating significant token usage. A single colony with 10+ cells can produce **thousands of LLM calls** across Socratic analysis, research, critique, debate, red team, and evaluation phases.
+**Hosted inference costs money regardless of the selected backend.** Each cell goes through 13 agents across multiple iterations. A colony with 10+ cells can generate thousands of calls across decomposition, research, critique, debate, red team, and evaluation.
 
-The default model is `claude-sonnet-4-6`. You can switch models in `petri.yaml` or the setup wizard:
+With **pi**, charges follow its configured provider or subscription. **Claude Code** follows your Claude Code account and plan. A direct **provider** backend uses that provider's API credentials and billing. Local models avoid hosted API charges but still require suitable hardware and runtime resources. Start with a small claim and monitor usage before running a large colony. The dashboard shows measured token and cost totals; missing usage or prices appear as n/a. See [Observability](docs/observability.md).
+
+## Choosing an inference backend
+
+The v2 harness block in `.petri/defaults/petri.yaml` selects inference independently of agent content. Fresh dishes select pi. The v2 commands require validated v2 settings; use v0.3.7 for existing v1 dishes, as described in the [retirement guide](docs/v2/RETIRE_V1.md).
+
+For pi, use an exact model ID and provider name recognized by your pi installation:
 
 ```yaml
-model:
-  name: claude-opus-4-6  # most capable, higher cost
+model: anthropic:claude-sonnet-4-6
+harness:
+  backend: pi
+  model: claude-sonnet-4-6
+  provider: anthropic
+  tools: []
 ```
 
-**Monitor your usage.** Start with small claims to understand the cost profile before running large colonies.
+For the Claude Code adapter:
 
-Alternatively, you can [use an open-source model in Claude Code via Ollama, by following this documentation](https://docs.ollama.com/integrations/claude-code). But this requires a bit of setup on your side, and you need hardware capable of running a model locally.
+```yaml
+model: anthropic:claude-sonnet-4-6
+harness:
+  backend: claude-code
+  model: claude-sonnet-4-6
+  tools: [Read, WebSearch, WebFetch]
+```
+
+For a direct Pydantic AI provider, supply its provider-qualified model string. Petri passes this string through unchanged:
+
+```yaml
+model: anthropic:claude-sonnet-4-6
+harness:
+  backend: provider
+  model: anthropic:claude-sonnet-4-6
+```
+
+`harness.model` overrides the top-level model. If omitted, CLI adapters split the top-level `provider:model` string; explicit harness model IDs remain unchanged. `harness.tools` grants tools belonging to the selected CLI. Empty lists disable those tools. Pi's built-in coding tools do not include Claude Code's `WebSearch` or `WebFetch`.
+
+The pi and Claude Code adapters support prompted structured output, validation retries, and declared host function calls through text envelopes. Pydantic AI validates and executes those calls independently of the CLI's built-in tool allowlist. Configured agents can use `search_cells` and the opt-in `web_search` and `web_fetch` tools. Unsupported model settings are rejected.
+
+Direct providers use native final-result tools by default. Set `harness.output_mode: prompted` to request strict JSON final results while retaining native host function calls. The optional `model_settings.max_tokens` bounds each native response; configure CLI response limits in the CLI provider. See the [local grow validation guide](docs/local-grow-validation.md) for the Gemma configuration and its acceptance checks.
+
+### Install pi and Node.js
+
+The npm installation requires Node.js. Petri checks for **Node.js 22.19.0 or newer**, the floor selected by the RPC spike. Install Node from [nodejs.org](https://nodejs.org/en/download), then install the pi version exercised by the local adapter validation:
+
+```bash
+npm install -g @mariozechner/pi-coding-agent@0.73.1
+node --version
+pi --version
+```
+
+Configure your provider in pi before starting a research run. The adapter uses pi's provider configuration and authentication; installing the CLI does not authenticate a provider. `PETRI_PI_BIN` can point to a different pi executable. Petri neither installs Node nor changes your shell configuration. The checked installation path uses npm; standalone pi binaries have not been validated by Petri's preflight.
+
+If Node cannot be installed, select `harness.backend: claude-code` and install [Claude Code](https://docs.anthropic.com/en/docs/claude-code), or use a direct provider backend. Run `petri inspect` from the dish directory to check Python and the selected CLI without making a model call. Outside a dish, it checks pi as the fresh-dish default. Provider credentials are not validated by this command.
 
 ## Setup
 
-Petri needs **Python 3.11+** and the **Claude Code CLI** (which provides the LLM inference). The cleanest path is to install both into a fresh [uv](https://docs.astral.sh/uv/) environment.
+Petri needs **Python 3.11+** and an inference backend. Use a [uv](https://docs.astral.sh/uv/) environment for the Python package; install pi and Node separately for the default backend.
 
 ### 1. Install uv
 
@@ -59,13 +104,9 @@ Every command from here on assumes this venv is active. If you open a new shell,
 uv pip install petri-grow
 ```
 
-### 4. Install and authenticate Claude Code
+### 4. Install an inference backend
 
-Petri uses [Claude Code](https://claude.com/claude-code) as its agent harness. Follow the install + login steps at https://docs.anthropic.com/en/docs/claude-code, then verify:
-
-```bash
-claude --version
-```
+Follow [Install pi and Node.js](#install-pi-and-nodejs) for the default backend, or choose one of the alternatives above.
 
 ### 5. Verify the full prerequisite chain
 
@@ -73,7 +114,7 @@ claude --version
 petri inspect
 ```
 
-This reports any missing pieces (Python version, Claude Code login, PATH issues) without modifying your system.
+This reports missing prerequisites and version mismatches without modifying your system or making an inference request.
 
 ## Quickstart
 
@@ -128,7 +169,42 @@ petri stop
 # → Gracefully halts any active processing
 ```
 
+The Computer tab submits seed, grow, and revalidation runs to the dashboard's
+long-lived execution owner. It follows saved workflow status after a tab refresh;
+STOP requests cancellation. Regenerating a draft with
+`petri seed "claim" --regenerate` takes a snapshot before replacement. The Computer
+tab supports these run commands; it does not provide an interactive shell.
+
+Dashboard-owned direct API agents stream text and tool progress. Request-only CLI
+adapters report agent start and completion without token deltas. A separate CLI
+process does not publish live agent progress to this dashboard; its committed
+domain events still appear through the event stream.
+
+The API allows browser origins `http://127.0.0.1:8090` and
+`http://localhost:8090` by default. Set `dashboard.allowed_origins` in the dish
+configuration to an explicit list of HTTP or HTTPS origins when needed.
+
+If a detached CLI run already owns execution, the dashboard opens with reads and
+domain events available. New run submissions return 503 with recovery instructions.
+After the CLI owner exits, restart the dashboard to acquire run controls.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
+
+Seed foundation colonies before claims that depend on them. With the typed
+harness, decomposition searches earlier colonies in the dish and can reference a
+specific existing premise instead of creating a duplicate. Existing colonies
+are not retroactively linked. Search uses deterministic word overlap; it does
+not establish that two claims are logically equivalent.
+
+At seed approval, choose **Edit** to change the unapproved draft without another
+model call. Petri opens YAML in `$EDITOR` (or `$VISUAL`); keep premise IDs, edit
+text or relations, remove rows to drop premises, or set `is_atomic: true` with a
+`bedrock_reason`. Without an editor, use `edit N <text>`, `drop N`,
+`relation N <supports|limits|rebuts>`, or `atomic N <reason>`, then `done`.
+Dropping a parent or marking it atomic also removes its descendants. Invalid
+edits return to the editor before any draft rows change. Petri backs up the dish
+and records the validated edit before applying it; `seed --resume --colony NAME`
+recovers an interrupted edit. Approved colonies cannot be edited through seed.
 
 ## CLI Reference
 
@@ -176,17 +252,23 @@ Each cell in the colony goes through:
 
 **Citation-first evidence model:** Every agent must back claims with URL-linked sources ranked by a 6-level hierarchy (direct measurement → community report). Summaries are kept terse to prevent context rot across iterations.
 
-Every action is logged as an immutable event in the cell's JSONL file, identified by a composite key (`{dish}-{colony}-{level}-{seq}-{8hex}`).
+Domain actions are recorded as immutable events in the dish's SQLite database.
+Markdown and JSONL exports remain available for text search.
+
+## Observability
+
+Traces and measured token and cost totals are available locally in `petri launch`.
+No external service is required. See the [configuration and optional OTLP recipes](docs/observability.md).
 
 ## Architecture
 
 - **Multi-agent pipeline**: lead orchestrators + specialists (blocking and advisory)
-- **Event sourcing**: append-only JSONL per cell, rolled up to SQLite for the dashboard
-- **Queue state machine**: enforced transitions, file-locked for concurrency
-- **Claude Code native**: Petri runs on top of the Claude Code CLI as its agent harness — Claude Code is a hard dependency, not a pluggable option. The `adapters/` layer exists for internal separation of concerns, not to enable other harnesses.
-- **Live dashboard**: single-file SPA with PTY-backed terminal, interactive colony DAG, and per-cell detail pages
+- **Event sourcing**: append-only SQLite events, with derived text exports
+- **Durable execution**: typed pipeline transitions and DBOS SQLite checkpoints
+- **Typed inference**: first-party pi and Claude Code models, plus configured Pydantic AI providers
+- **Live dashboard**: single-file SPA with durable run controls, live agent progress, an interactive colony DAG, and per-cell detail pages
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, state machine diagram, and agent details.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design, pipeline, and agent details.
 
 ## Development
 
@@ -195,10 +277,64 @@ uv pip install -e ".[all]"
 uv run pytest tests/
 ```
 
+## Decomposition evaluations
+
+The default test suite includes deterministic decomposition evaluations with
+FunctionModel and public synthetic fixtures. They run without network or
+subprocess calls. Run the report directly with:
+
+```sh
+uv run python -m evals.decomposer
+```
+
+The seven evaluators check quota filling, count variation, counterarguments,
+bedrock stops, specific cross-colony references, depth variation, and parent
+restatements. Two historical failure shapes intentionally score poorly.
+Reintroducing quota wording also fails an instruction regression check.
+
+The bedrock case supplies a unit definition directly to the typed five-whys
+agent and checks its atomic flag, stopping depth, and reason. Broad
+metric/calibration decomposition remains a separate organic case. This avoids
+requiring an unspecified kilometer sentence to appear in an open-ended claim's
+decomposition. Expanding the supplied definition or omitting its atomic reason
+still fails the bedrock check; broad live failures remain evidence of model
+quality limits.
+
+Private research stays outside this repository. To validate a local archive
+bundle, set `PETRI_PRIVATE_ARCHIVE` and run the opt-in check:
+
+```sh
+PETRI_PRIVATE_ARCHIVE=/path/to/private-bundle uv run pytest tests/evals -m private_archive -q -s
+```
+
+The bundle contains `claims-graph.json`, `layer-distribution.json`,
+`paired-waves.json`, and six documents under `principle-measurement/`. The
+check prints aggregate counts and retrieval metrics. See the
+[fixture provenance policy](evals/decomposer/fixtures/README.md).
+
+Live evaluation calls the configured model and may incur provider charges. It
+can run several dozen calls per case, with retries and tool calls adding more;
+provider prices and actual token use determine cost. It never runs in CI or
+falls back to another model. After choosing a model and accepting its cost, run:
+
+```sh
+PETRI_LIVE_EVALS=1 PETRI_EVAL_MODEL=provider:model uv run pytest tests/evals -m live -q -s
+```
+
+For a local endpoint, configure its provider environment explicitly and use its
+exact model name. The live test prints a per-case report and fails if the
+reference case does not reuse a specific non-root cell. Passing synthetic
+fixtures does not establish that a live model makes reliable decomposition
+judgments.
+Live responses are capped at 4,096 tokens by default. Set
+`PETRI_EVAL_MAX_TOKENS` for the pytest report, or `--max-tokens` with
+`python -m evals.decomposer --live`, to choose a different positive cap.
+
 ## Contributing
 
-Petri is mid-flight on its **v2 migration** — re-platforming onto Pydantic AI, pydantic-graph,
-and DBOS while staying zero-infrastructure. The roadmap lives in
+Petri runs on Pydantic AI, pydantic-graph, and DBOS with local SQLite storage.
+DBOS is the only execution backend. Fresh dishes need no queue file or external
+database server. Existing v1 dishes remain unchanged; use v0.3.7 to run them. The roadmap lives in
 [docs/v2/MIGRATION_PLAN.md](docs/v2/MIGRATION_PLAN.md), broken into milestone epics with scoped,
 claimable issues — including
 [good first issues](https://github.com/onthemarkdata/petri/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
@@ -208,3 +344,62 @@ that need no prior context. See [CONTRIBUTING.md](CONTRIBUTING.md) for the branc
 ## Credit
 - Image Credits: Gemini Pro, April 2026
 - Music by [Karl Casey @ White Bat Audio](https://youtu.be/o9C-4Gln9Tc?si=7Hi3_ouxqvgd28eR)
+
+### Typed agent configuration
+
+Inside a dish with v2 agent content, inspect and validate the roster before a run:
+
+```sh
+petri agents list
+petri agents list --json
+petri agents check
+petri agents check --config path/to/petri.yaml
+```
+
+Both commands are cost-neutral: they construct no inference models and make no
+LLM calls. `check` exits 0 for valid content, 1 for configuration violations, and
+3 when no `.petri/` dish exists. Errors name the offending YAML fields. The v2
+loader requires `schema_version: 2`; it does not silently convert v0.3.x content.
+See [the schema contract](docs/ARCHITECTURE-V2.md#v2-agent-content-schema).
+
+Run one specialist with the typed output schema and configured usage limits:
+
+```bash
+petri agents run skeptic --claim "A falsifiable claim" --yes
+petri agents run evidence_evaluator --cell CELL_ID --verbose
+petri agents run skeptic --claim "A claim" --model openai:MODEL_ID --max-requests 3 --max-tokens 12000
+```
+
+`--claim` and `--cell` are alternatives. `--model` overrides the selected agent's
+provider model. `--max-requests` includes output retries; `--max-tokens` caps total
+input and output tokens. Token limits are checked after a response, so a response
+can cross the cap. A breached limit exits nonzero and prints the last unvalidated
+model output with measured usage. Terminal evidence verdicts still require a
+citation within the configured source hierarchy threshold.
+
+An interactive terminal asks before inference because model use may incur costs.
+`--yes` skips the warning; noninteractive runs skip it automatically. The usage
+report prints provider-reported requests and input, output, and cache tokens. No
+dollar estimate is shown for an unpriced model. `--verbose` includes output retries.
+
+For a local model that follows JSON instructions more reliably than forced tool
+calls, use `--output-mode prompted`; `tool` explicitly selects tool output. Both
+modes enforce the same typed output and source validators. The live CLI test uses
+[the pinned Docker Model Runner setup](docs/local-model-validation.md) and makes
+real local requests only when enabled:
+
+```bash
+PETRI_LIVE_GEMMA=1 pytest -q tests/unit/test_cli_agents_run.py -m live
+```
+
+### Export derived research text
+
+`petri export` writes deterministic per-cell Markdown and append-ordered
+`events.jsonl` files under the dish's `exports/`, plus `edges.jsonl` and a format
+manifest. Use `--colony <slug>` or `--cell <id>` to limit the scope. `--since <rowid>`
+rewrites cells with later events; unchanged cell files retain their timestamps.
+The database remains authoritative. Editing exported text does not change a dish.
+
+`petri grow --export` exports after completion. Set `auto_export: true` in the
+dish config for the same behavior on each run. `petri backup --with-export`
+includes text generated from the snapshot itself, so its database and text agree.

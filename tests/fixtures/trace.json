@@ -1,0 +1,63 @@
+[
+  {
+    "trace_id": "fixture",
+    "span_id": "0",
+    "parent_span_id": null,
+    "name": "petri grow",
+    "kind": "INTERNAL",
+    "start_time_ns": 0,
+    "end_time_ns": 100000000,
+    "status_code": "OK",
+    "status_message": null,
+    "attributes": {
+      "petri.cell_id": "dish-colony-000-000"
+    },
+    "resource": {}
+  },
+  {
+    "trace_id": "fixture",
+    "span_id": "1",
+    "parent_span_id": "0",
+    "name": "dbos.step",
+    "kind": "INTERNAL",
+    "start_time_ns": 10000000,
+    "end_time_ns": 90000000,
+    "status_code": "OK",
+    "status_message": null,
+    "attributes": {},
+    "resource": {}
+  },
+  {
+    "trace_id": "fixture",
+    "span_id": "2",
+    "parent_span_id": "1",
+    "name": "agent.run",
+    "kind": "INTERNAL",
+    "start_time_ns": 20000000,
+    "end_time_ns": 80000000,
+    "status_code": "OK",
+    "status_message": null,
+    "attributes": {
+      "petri.agent_role": "investigator",
+      "petri.verdict": "VALIDATED",
+      "petri.tokens_input": 100,
+      "petri.tokens_output": 20
+    },
+    "resource": {}
+  },
+  {
+    "trace_id": "fixture",
+    "span_id": "3",
+    "parent_span_id": "2",
+    "name": "model.request",
+    "kind": "INTERNAL",
+    "start_time_ns": 30000000,
+    "end_time_ns": 60000000,
+    "status_code": "OK",
+    "status_message": null,
+    "attributes": {
+      "gen_ai.request.model": "fixture"
+    },
+    "resource": {}
+  }
+]

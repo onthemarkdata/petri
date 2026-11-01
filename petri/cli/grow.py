@@ -2,30 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from collections import Counter
 
 import typer
 
-from petri.cli._bootstrap import find_petri_dir, resolve_provider
+from petri.telemetry.commands import traced_command
+
+from petri.cli._bootstrap import find_petri_dir, get_dish_id, resolve_provider
 from petri.cli_ui import (
     MultiSpinner,
     grow_status_loop,
     print_error_and_exit,
     short_cell_id,
 )
-from petri.config import MAX_CONCURRENT
-from petri.engine.grow_loop import (
-    GROW_STATUS_INTERVAL_SECONDS,
-    GrowLoopOutcome,
-    format_state_summary,
-    grow_loop,
-)
+from petri.config import load_config
+from petri.execution import resolve_backend
+from petri.execution.models import GrowOutcome, NoProviderError, ProgressEvent
 
 
 def register(app: typer.Typer) -> None:
     @app.command()
+    @traced_command("grow")
     def grow(
-        cell: Optional[list[str]] = typer.Option(
+        cell: list[str] | None = typer.Option(
             None,
             "--cell",
             "-c",
@@ -35,72 +34,86 @@ def register(app: typer.Typer) -> None:
                 "processed."
             ),
         ),
-        colony_name: Optional[str] = typer.Option(
+        colony_name: str | None = typer.Option(
             None, "--colony", help="Grow all cells in a specific colony"
         ),
-        max_concurrent: int = typer.Option(
-            MAX_CONCURRENT, "--max-concurrent", help="Max parallel cells"
+        max_concurrent: int | None = typer.Option(
+            None, "--max-concurrent", help="Max parallel cells"
         ),
+        redecompose_on: str = typer.Option("", "--redecompose-on", help="Propose sub-claims for inconclusive, flaw, caveats, or stalled verdicts"),
+        approve_all: bool = typer.Option(False, "--approve-all", help="Approve matching re-decomposition proposals"),
+        reject_all: bool = typer.Option(False, "--reject-all", help="Reject matching re-decomposition proposals"),
+        export: bool = typer.Option(False, "--export", help="Export derived text after grow completes"),
         dry_run: bool = typer.Option(
             False, "--dry-run", help="Show what would process without running"
         ),
     ) -> None:
-        """Run the validation pipeline.
-
-        By default, every eligible cell across every colony is processed.
-        Scope to a subset with ``--cell`` (repeatable) or ``--colony``.
-
-        Internally loops ``process_queue`` until every queue entry is in a
-        terminal state, the cross-process stop sentinel appears, or two
-        consecutive passes make no progress.  A daemon status thread
-        prints periodic progress lines above a persistent spinner.
-        """
+        """Start or resume validation for the selected cells or colonies."""
         import threading
 
         petri_dir = find_petri_dir()
+        try:
+            backend = resolve_backend(petri_dir)
+        except ValueError as error:
+            print_error_and_exit(str(error))
 
-        # The processor's process_queue API still takes three orthogonal
-        # knobs — cell_ids, colony_filter, all_cells — and we keep using
-        # them unchanged. We just no longer expose --all on the CLI
-        # surface because it's the default: all_cells is true exactly
-        # when the user didn't scope to a specific cell or colony.
-        selected_cells: Optional[list[str]] = cell or None
+        concurrency: int = (
+            max_concurrent if max_concurrent is not None
+            else load_config().execution.worker_concurrency
+        )
+        settings = getattr(backend, "settings", None)
+        if max_concurrent is None and settings is not None:
+            concurrency = int(settings.worker_concurrency)
+
+        # An omitted scope grows all eligible colonies.
+        selected_cells: list[str] | None = cell or None
         all_cells: bool = not selected_cells and not colony_name
 
-        # Preflight: check claude CLI before attempting processing
-        from petri.engine.preflight import check_claude_cli
+        from petri.lifecycle.gate import ApprovalGate, parse_triggers
+        from petri.config import load_dish_config
+        from petri.execution.dbos_backend import DBOSExecutionBackend
 
-        claude_check = check_claude_cli()
-        if not claude_check.passed:
+        try:
+            enabled = parse_triggers(redecompose_on)
+            if approve_all and reject_all:
+                raise ValueError("Choose either --approve-all or --reject-all.")
+            if (approve_all or reject_all) and not enabled:
+                raise ValueError("Approval flags require --redecompose-on.")
+            if enabled:
+                if not isinstance(backend, DBOSExecutionBackend):
+                    raise ValueError("Re-decomposition requires the DBOS execution backend.")
+                backend.after_pass = ApprovalGate(
+                    enabled=enabled, config=load_dish_config(petri_dir).lifecycle,
+                    approve_all=approve_all, reject_all=reject_all,
+                    selected_cells=selected_cells, colony=colony_name,
+                )
+        except ValueError as error:
+            print_error_and_exit(str(error))
+
+        check = backend.preflight()
+        if not check.passed:
             print_error_and_exit(
-                f"Error: {claude_check.message}\n"
-                "Run 'petri inspect' to check all prerequisites.",
+                f"Error: {check.message}\nRun 'petri inspect' to check all prerequisites.",
             )
 
-        from petri.engine.processor import (
-            NoProviderError,
-            CellProgressEvent,
-            clear_stop_file,
-            is_stop_file_present,
-            process_queue,
-        )
-        from petri.storage.queue import get_state_summary
+        if check.name == "dbos":
+            typer.echo(check.message)
 
         # Resolve the inference provider from petri.yaml config
-        provider = resolve_provider(petri_dir)
+        provider = (
+            None if getattr(backend, "backend_name", "") == "dbos"
+            else resolve_provider(petri_dir)
+        )
 
         queue_path = petri_dir / "queue.json"
-
-        # Drop any stale stop sentinel from a previous interrupted run.
-        clear_stop_file(petri_dir)
 
         # ── dry-run path: single pass, no loop, no spinner ──
         if dry_run:
             try:
-                dry_result = process_queue(
+                dry_result = backend.process_queue(
                     petri_dir=petri_dir,
                     provider=provider,
-                    max_concurrent=max_concurrent,
+                    max_concurrent=concurrency,
                     cell_ids=selected_cells,
                     colony_filter=colony_name,
                     all_cells=all_cells,
@@ -121,33 +134,44 @@ def register(app: typer.Typer) -> None:
                 typer.echo("No eligible cells found.")
             raise typer.Exit(code=0)
 
+        # DBOS clears cancellation only for the rounds selected by process_queue.
+        if not isinstance(backend, DBOSExecutionBackend):
+            backend.clear_stop(petri_dir)
+
         # ── live path: loop until terminal/stopped/no-progress ──
         def _get_states() -> dict[str, int]:
             try:
-                return get_state_summary(queue_path)
+                if selected_cells or colony_name:
+                    colonies = {colony_name, f"{get_dish_id(petri_dir)}-{colony_name}"}
+                    return dict(Counter(
+                        entry["queue_state"] for entry in backend.entries(petri_dir).values()
+                        if (not selected_cells or entry["cell_id"] in selected_cells)
+                        and (not colony_name or entry["colony_id"] in colonies)
+                    ))
+                return backend.state_summary(petri_dir)
             except Exception:
                 return {}
 
         def _is_stopped() -> bool:
-            return is_stop_file_present(petri_dir)
+            return backend.is_stopped(petri_dir)
 
-        outcome: GrowLoopOutcome | None = None
+        outcome: GrowOutcome | None = None
         interrupted = False
         no_provider = False
         status_stop_event = threading.Event()
         status_thread: threading.Thread | None = None
 
         try:
-            with MultiSpinner("growing", slot_count=max_concurrent) as multi:
+            with MultiSpinner("growing", slot_count=concurrency) as multi:
                 # Render every row up-front with an "idle" label so all
                 # N slots are visible from t=0 — before any worker has
                 # actually picked up a cell.
-                for slot_index in range(max_concurrent):
+                for slot_index in range(concurrency):
                     multi.update_slot(slot_index, "idle")
 
-                def _on_event(event: CellProgressEvent) -> None:
-                    """Translate a processor lifecycle event into a row update."""
-                    if event.slot_idx < 0 or event.slot_idx >= max_concurrent:
+                def _on_event(event: ProgressEvent) -> None:
+                    """Render backend progress in the matching spinner row."""
+                    if event.slot_idx < 0 or event.slot_idx >= concurrency:
                         return
                     cell_label = short_cell_id(event.cell_id)
                     if event.kind == "started":
@@ -158,10 +182,7 @@ def register(app: typer.Typer) -> None:
                         row_text = f"{cell_label} {event.phase} · {event.agent}"
                     elif event.kind == "verdict":
                         verdict_short = (event.verdict or "")[:24]
-                        row_text = (
-                            f"{cell_label} {event.phase} · "
-                            f"{event.agent}: {verdict_short}"
-                        )
+                        row_text = f"{cell_label} {event.phase} · {event.agent}: {verdict_short}"
                     elif event.kind == "agent_text":
                         # Streaming model text — overwrite the slot row
                         # with the latest chunk so the user sees the
@@ -170,10 +191,7 @@ def register(app: typer.Typer) -> None:
                         # will replace this with the final verdict
                         # label when the agent finishes.
                         text_excerpt = (event.text or "")[:120]
-                        row_text = (
-                            f"{cell_label} {event.phase} · "
-                            f"{event.agent}: {text_excerpt}"
-                        )
+                        row_text = f"{cell_label} {event.phase} · {event.agent}: {text_excerpt}"
                     elif event.kind == "finished":
                         if event.error:
                             error_short = (event.error or "")[:60]
@@ -190,10 +208,10 @@ def register(app: typer.Typer) -> None:
                     multi.update_slot(event.slot_idx, row_text)
 
                 def _run_one_pass():
-                    return process_queue(
+                    return backend.process_queue(
                         petri_dir=petri_dir,
                         provider=provider,
-                        max_concurrent=max_concurrent,
+                        max_concurrent=concurrency,
                         cell_ids=selected_cells,
                         colony_filter=colony_name,
                         all_cells=all_cells,
@@ -208,14 +226,16 @@ def register(app: typer.Typer) -> None:
                         "queue_path": queue_path,
                         "spinner": multi,
                         "stop_event": status_stop_event,
-                        "interval_seconds": GROW_STATUS_INTERVAL_SECONDS,
+                        "interval_seconds": backend.status_interval,
+                        "get_states": _get_states,
+                        "format_states": backend.format_state_summary,
                     },
                     daemon=True,
                 )
                 status_thread.start()
 
                 try:
-                    outcome = grow_loop(
+                    outcome = backend.grow_loop(
                         run_one_pass=_run_one_pass,
                         get_states=_get_states,
                         is_stopped=_is_stopped,
@@ -229,7 +249,6 @@ def register(app: typer.Typer) -> None:
             status_stop_event.set()
             if status_thread is not None:
                 status_thread.join(timeout=2.0)
-            clear_stop_file(petri_dir)
 
         if no_provider:
             print_error_and_exit(
@@ -238,18 +257,21 @@ def register(app: typer.Typer) -> None:
             )
 
         if interrupted:
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=0)
 
         assert outcome is not None  # set unless an exception bubbled up
+
+        from petri.config import load_dish_config
+        if export or load_dish_config(petri_dir).auto_export:
+            from petri.storage.export import export_incremental
+
+            export_incremental(petri_dir, get_dish_id(petri_dir))
 
         final_states = outcome.final_states
         last_result = outcome.last_result
 
-        typer.echo(
-            f"\nGrow loop finished: {outcome.reason} "
-            f"after {outcome.passes_run} pass(es)"
-        )
-        typer.echo(f"  Final queue: {format_state_summary(final_states)}")
+        typer.echo(f"\nGrow loop finished: {outcome.reason} after {outcome.passes_run} pass(es)")
+        typer.echo(f"  Final queue: {backend.format_state_summary(final_states)}")
 
         if last_result is not None:
             typer.echo(f"  Last pass processed: {last_result.processed} cells")
@@ -265,6 +287,6 @@ def register(app: typer.Typer) -> None:
                     f"{cell_result.events_logged} events)"
                 )
 
-        if outcome.reason == "all_terminal":
+        if outcome.reason in {"all_terminal", "user_stop"}:
             raise typer.Exit(code=0)
         raise typer.Exit(code=1)
