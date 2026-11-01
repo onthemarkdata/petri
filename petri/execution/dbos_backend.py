@@ -39,7 +39,7 @@ from petri.execution.pipeline import (
 )
 from petri.harness.errors import PermanentHarnessError, RateLimitedError
 from petri.execution.reconciliation import DomainReceipt, capture_receipt, read_conflicts
-from petri.models import ProcessCellResult, QueueProcessingResult, parse_key
+from petri.models import CellStatus, ProcessCellResult, QueueProcessingResult, parse_key
 from petri.storage import database
 from petri.storage.paths import dish_db_path
 
@@ -417,13 +417,13 @@ class DBOSExecutionBackend:
         if not db_path.is_file():
             return []
         eligible = []
+        statuses = {row["id"]:CellStatus(row["status"]) for row in database.list_cells(db_path)}
         for graph, colony in list_colonies(db_path):
             if colony_filter and colony_filter not in {
                 colony.id,
                 colony.id.removeprefix(f"{colony.dish}-"),
             }:
                 continue
-            statuses = {cell.id: cell.status for cell in graph.get_all_cells()}
             eligible.extend(
                 cell
                 for cell in graph.get_eligible_for_validation(statuses)
