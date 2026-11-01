@@ -275,3 +275,59 @@ or workflow child spans.
 
 Repeatable full seed→grow→feed acceptance, known-outcome quality with real
 retrieval, and final approval of the integration PR into `dev` remain pending.
+
+## Integration checks through PR #253 — 2026-11-01
+
+Merged into the integration branch:
+
+- [PR #242](https://github.com/onthemarkdata/petri/pull/242) reconciles content
+  committed before a phase checkpoint while retaining corruption checks.
+- [PR #243](https://github.com/onthemarkdata/petri/pull/243) validates citation
+  confidence before saving assessments.
+- [PR #244](https://github.com/onthemarkdata/petri/pull/244) and
+  [PR #246](https://github.com/onthemarkdata/petri/pull/246) resume only selected
+  cancelled dashboard and CLI work; [PR #249](https://github.com/onthemarkdata/petri/pull/249)
+  reports grow outcomes within that selected scope.
+- [PR #245](https://github.com/onthemarkdata/petri/pull/245) releases discarded
+  draft names and preserves distinct seed attempts and their history.
+- [PR #247](https://github.com/onthemarkdata/petri/pull/247) enforces the verdict
+  vocabulary assigned to each Socratic step.
+- [PR #248](https://github.com/onthemarkdata/petri/pull/248) records the preceding
+  integration evidence and remaining live gates.
+- [PR #250](https://github.com/onthemarkdata/petri/pull/250) projects recorded
+  evaluator summaries for completed cells when legacy summary content is empty.
+- [PR #251](https://github.com/onthemarkdata/petri/pull/251) keeps native retrieval
+  tools available during prompted output and renders the prepared final schema.
+- [PR #252](https://github.com/onthemarkdata/petri/pull/252) supplies the configured
+  source grading rubric and names the verdicts governed by its eligibility threshold.
+- [PR #253](https://github.com/onthemarkdata/petri/pull/253) checks for a retrieval
+  attempt before parsing investigator output, preserving raw malformed responses
+  and the existing post-parse and citation checks.
+
+The full offline checkpoint at `2b841d8` passed 1,412 tests, with two skips and
+34 deselections. Coverage was 90% rounded: 10,173 statements, 1,034 missed.
+Selected integration checks passed 27 tests, with seven skips and 1,414
+deselections. Native protocol and source-rubric follow-ups at `fcf3f5f` passed
+66 focused checks. Mypy checked 149 source files; Ruff, package build, and Twine
+checks passed. The retrieval follow-up at `50cd309` passed 63 focused tests, mypy
+across 149 files, and Ruff.
+[CI #198](https://github.com/onthemarkdata/petri/actions/runs/41360360950)
+had passed build, lint, and type checking when checked; its Python test matrix
+was still running.
+
+In a read-only Chromium observation before PR #253, a Gemma run through the
+direct API emitted nine new committed SSE events. Visible usage matched the
+API; no console, page, or API HTTP errors occurred. A real `web_search` call
+returned zero sources. Its model and
+tool spans shared the investigator parent and a matching tool-call ID; agent
+and DBOS step ancestry were visible. No successful `web_fetch` or source event
+with a retrieval timestamp and content hash was observed. One cell became
+`STALLED` after three
+4,096-token responses ended with `length`; its final summary remained empty.
+The observer stopped without changing the active research run.
+The run subsequently exited with failure: both child cells were stalled, the
+root remained `NEW`, and no cell was eligible for live feed validation.
+
+Successful full seed→grow→feed runs, known-outcome quality with real fetched
+sources, and final integration approval remain open. The observed search and
+stalled cell do not satisfy those gates.
