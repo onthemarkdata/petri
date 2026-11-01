@@ -21,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.0",
+    "croniter>=6.0,<7",
     "dbos==3.4.0",
     "filelock>=3.16",
     "pydantic-ai>=2.64,<3",
