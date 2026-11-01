@@ -130,9 +130,19 @@ async def redecompose(spec: RedecomposeSpec) -> Proposal:
 
 
 async def propose(spec: RedecomposeSpec) -> Proposal:
-    """Attach repeated submissions to the same parent/generation workflow."""
-    with SetWorkflowID(spec.workflow_id):
-        handle = await DBOS.start_workflow_async(redecompose, spec)
+    """Attach to the recorded attempt and resume failed or cancelled inference."""
+    status = await DBOS.get_workflow_status_async(spec.workflow_id)
+    if status is not None and status.status == "ERROR":
+        steps = await DBOS.list_workflow_steps_async(spec.workflow_id)
+        failed = next((step for step in steps if step.get("error") is not None), None)
+        if failed is None:
+            raise RuntimeError("The proposal failed outside a recorded step; inspect its workflow before retrying.")
+        handle = await DBOS.rewind_workflow_async(spec.workflow_id, start_step=failed["function_id"])
+    elif status is not None and status.status == "CANCELLED":
+        handle = await DBOS.resume_workflow_async(spec.workflow_id)
+    else:
+        with SetWorkflowID(spec.workflow_id):
+            handle = await DBOS.start_workflow_async(redecompose, spec)
     await handle.get_result()
     return get_proposal(active_app().db_path,
         proposal_identity(spec.trigger))

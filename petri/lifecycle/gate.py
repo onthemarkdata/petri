@@ -55,6 +55,12 @@ class ApprovalGate:
             return False
         path = dish_db_path(petri_dir)
         proposals = list_proposals(path)
+        for index, proposal in enumerate(proposals):
+            if proposal.state != "reserved" or proposal.trigger.trigger_verdict not in self.enabled:
+                continue
+            parent = database.get_cell(path, proposal.parent_cell_id)
+            if parent is not None and self._selected(parent):
+                proposals[index] = await propose(RedecomposeSpec(trigger=proposal.trigger, config=self.config))
         by_cell: dict[str, list[dict]] = defaultdict(list)
         for event in database.read_events(path):
             by_cell[event["cell_id"]].append(event)

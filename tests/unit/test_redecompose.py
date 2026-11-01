@@ -149,3 +149,33 @@ async def test_function_model_proposal_retries_flaw_and_checkpoints_only_paths(t
     finally:
         await backend.close_async()
         runner.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_proposal_resumes_the_same_reserved_attempt(tmp_path, canonical_colony):
+    from petri.execution.dbos_backend import DBOSExecutionBackend
+    from petri.lifecycle.redecompose import RedecomposeSpec, propose
+    from tests.pipeline_stubs import StubPhases
+    from types import SimpleNamespace
+
+    path = tmp_path / "petri-dishes/test-dish/petri.sqlite"
+    save_colony(path, canonical_colony["graph"], canonical_colony["colony_model"])
+    calls = []
+    def expand(request):
+        calls.append(request)
+        if len(calls) == 1:
+            raise RuntimeError("Provider disconnected before a response was recorded")
+        return output()
+    backend = DBOSExecutionBackend(config={"execution": {"backend": "dbos"}})
+    await backend.start_async(tmp_path, db_path=path, dependencies=lambda _: StubPhases().dependencies(),
+        seed_runner_factory=lambda _: SimpleNamespace(expand_why=expand))
+    spec = RedecomposeSpec(trigger=trigger(canonical_colony["cell1"].id))
+    try:
+        with pytest.raises(RuntimeError, match="Provider disconnected"):
+            await propose(spec)
+        result = await propose(spec)
+        assert result.state == "proposed" and len(calls) == 2
+        assert await propose(spec) == result and len(calls) == 2
+        assert len(database.read_events(path, event_type="redecomposition_proposed")) == 1
+    finally:
+        await backend.close_async()
