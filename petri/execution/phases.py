@@ -121,7 +121,9 @@ def build_socratic_agent(
         selected,
         name="socratic_questioner",
         output_type=output,
-        instructions=constitution + "\n\n" + config.pre_pipeline.socratic_questioner.instruction + "\n\n" + ASSESSMENT_FORMAT,
+        instructions=constitution + "\n\n" + config.pre_pipeline.socratic_questioner.instruction + "\n\n"
+        + "This exploratory phase has no source retrieval tools. Plan what research should retrieve; "
+        "do not claim to have browsed or fabricate citations.\n\n" + ASSESSMENT_FORMAT,
         retries=2,
     )
 
@@ -274,6 +276,7 @@ async def _assessment_impl(
             valid_verdicts=content.verdicts_pass + content.verdicts_block,
             role_instruction=content.instruction,
             today_iso=services.today_iso,
+            require_source_retrieval=phase != "socratic",
         )
         with capture_run_messages() as messages:
             try:
@@ -454,19 +457,19 @@ def build_research_dependencies(
     )
 
 
-# Preserve the v1 Socratic prompts as fixed phase instructions.
+# Keep the Socratic questions while expressing results through the typed assessment fields.
 SOCRATIC_STEPS = (
     (
         "clarify",
-        'SOCRATIC STEP 1 — CLARIFY: What exactly is being claimed? Identify every key term that needs a precise definition. What is ambiguous? What could be interpreted multiple ways? Return JSON with: "definitions" (key terms and their meanings), "ambiguities" (what\'s unclear), "refined_claim" (the claim restated precisely). Set "verdict" to exactly "CLARIFIED" once the claim has been restated precisely and every key term has been defined.',
+        'SOCRATIC STEP 1 — CLARIFY: What exactly is being claimed? Identify every key term that needs a precise definition. What is ambiguous? What could be interpreted multiple ways? Put definitions, ambiguities, and the precisely restated claim in the arguments string of the assessment schema. Set "verdict" to exactly "CLARIFIED" once the claim has been restated precisely and every key term has been defined.',
     ),
     (
         "challenge_assumptions",
-        'SOCRATIC STEP 2 — CHALLENGE ASSUMPTIONS: What are we assuming is true without evidence? List every hidden premise. For each assumption, ask: Is this actually true, or do we just believe it? What would change if this assumption were false? Return JSON with: "assumptions" (list of hidden premises), "if_false" (what changes if each assumption fails), "strongest_assumption" (the most load-bearing one). Set "verdict" to exactly "ASSUMPTIONS_CHALLENGED" once every hidden assumption has been surfaced and pressure-tested.',
+        'SOCRATIC STEP 2 — CHALLENGE ASSUMPTIONS: What are we assuming is true without evidence? List every hidden premise. For each assumption, ask: Is this actually true, or do we just believe it? What would change if this assumption were false? Put hidden assumptions, the consequences if each is false, and the strongest assumption in the arguments string of the assessment schema. Set "verdict" to exactly "ASSUMPTIONS_CHALLENGED" once every hidden assumption has been surfaced and pressure-tested.',
     ),
     (
         "identify_evidence_needed",
-        'SOCRATIC STEP 3 — MAP EVIDENCE: Based on the definitions and assumptions identified, what specific evidence would confirm or deny this claim? What would prove it false (falsification conditions)? What\'s the minimum evidence needed for a judgment? Return JSON with: "evidence_needed" (specific evidence to seek), "falsification_conditions" (what would disprove the claim), "minimum_threshold" (least evidence needed for a judgment). Set "verdict" to exactly "EVIDENCE_MAPPED" once the evidence plan and falsification conditions are on the table.',
+        'SOCRATIC STEP 3 — MAP EVIDENCE: Based on the definitions and assumptions identified, what specific evidence would confirm or deny this claim? What would prove it false (falsification conditions)? What\'s the minimum evidence needed for a judgment? Put the evidence plan, falsification conditions, and minimum decision threshold in the evidence string of the assessment schema; describe needed evidence without claiming it has been retrieved. Set "verdict" to exactly "EVIDENCE_MAPPED" once the evidence plan and falsification conditions are on the table.',
     ),
 )
 SOCRATIC_VERIFY = 'SOCRATIC STEP 4 — VERIFY: Verify that the Socratic analysis above is complete. Check: 1) Were key terms actually DEFINED (not just mentioned)? 2) Were ASSUMPTIONS explicitly identified and challenged? 3) Were specific FALSIFICATION CONDITIONS stated? If any step was superficial or missing, set "verdict" to "SOCRATIC_INCOMPLETE". If all three prior steps were genuinely performed, set "verdict" to exactly "VERIFIED".'
