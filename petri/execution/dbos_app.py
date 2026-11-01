@@ -52,6 +52,7 @@ class DBOSApp:
         self._owner = FileLock(self.petri_dir / ".execution-owner.lock", thread_local=False)
         self._slots = threading.BoundedSemaphore(settings.worker_concurrency)
         self.started = False
+        self.conflicts: dict[str, dict] = {}
 
     def dependencies(self, spec: CellRunSpec) -> PipelineDeps:
         with self._deps_lock:
@@ -80,6 +81,9 @@ class DBOSApp:
         try:
             self._prepare_admission()
             scheduler.prepare_rounds(self.db_path)
+            from petri.execution.reconciliation import reconcile
+
+            self.conflicts = reconcile(self.db_path, self.petri_dir / "dbos.sqlite")
             DBOS(
                 config={
                     "name": "petri",

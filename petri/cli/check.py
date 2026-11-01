@@ -36,11 +36,17 @@ def register(app: typer.Typer) -> None:
                 if colony.id.endswith(f"-{colony_name}")
             ]
 
-        if not colonies:
+        queue_entries = backend.entries(petri_dir)
+        conflicts = {
+            key: value
+            for key, value in queue_entries.items()
+            if value.get("queue_state") == "sync_conflict"
+            and (not colony_name or value.get("colony_id", "").endswith(f"-{colony_name}"))
+        }
+
+        if not colonies and not conflicts:
             typer.echo("No colonies found.")
             raise typer.Exit(code=0)
-
-        queue_entries = backend.entries(petri_dir)
 
         # Detailed cell view
         if cell:
@@ -65,6 +71,8 @@ def register(app: typer.Typer) -> None:
                         "queue_state": queue_entry.get("queue_state", ""),
                         "iteration": queue_entry.get("iteration", 0),
                     }
+                    if queue_entry.get("sync_conflict_reason"):
+                        detail["sync_conflict_reason"] = queue_entry["sync_conflict_reason"]
                     typer.echo(json.dumps(detail, indent=2))
                 else:
                     typer.echo(f"Cell: {cell_obj.id}")
@@ -77,13 +85,13 @@ def register(app: typer.Typer) -> None:
                     if queue_entry:
                         typer.echo(f"  Queue State:  {queue_entry.get('queue_state', '')}")
                         typer.echo(f"  Iteration:    {queue_entry.get('iteration', 0)}")
+                        if queue_entry.get("sync_conflict_reason"):
+                            typer.echo(f"  Sync conflict: {queue_entry['sync_conflict_reason']}")
 
                     # Show events
                     from petri.storage.event_log import load_events
 
-                    cell_events_path = SQLiteEventLog(
-                        dish_db_path(petri_dir, dish_id), cell_obj.id
-                    )
+                    cell_events_path = SQLiteEventLog(dish_db_path(petri_dir, dish_id), cell_obj.id)
                     events = load_events(cell_events_path)
                     if events:
                         typer.echo(f"  Events:       {len(events)}")
@@ -95,6 +103,14 @@ def register(app: typer.Typer) -> None:
                             )
                 break
 
+            if not found and cell in conflicts:
+                detail = {"cell_id": cell, "status": "missing", **conflicts[cell]}
+                typer.echo(
+                    json.dumps(detail, indent=2)
+                    if json_output
+                    else f"Cell: {cell}\n  Sync conflict: {conflicts[cell]['sync_conflict_reason']}"
+                )
+                return
             if not found:
                 print_error_and_exit(f"Cell '{cell}' not found.", code=0)
             return
@@ -112,6 +128,26 @@ def register(app: typer.Typer) -> None:
                         "claim": cell_obj.claim_text,
                         "status": cell_obj.status.value,
                         "queue_state": queue_entry.get("queue_state", ""),
+                        **(
+                            {"sync_conflict_reason": queue_entry["sync_conflict_reason"]}
+                            if queue_entry.get("sync_conflict_reason")
+                            else {}
+                        ),
+                    }
+                )
+
+        known = {item["cell_id"] for item in all_data}
+        for cell_id, conflict in conflicts.items():
+            if cell_id not in known:
+                all_data.append(
+                    {
+                        "colony": conflict.get("colony_id", ""),
+                        "level": conflict.get("level", 0),
+                        "cell_id": cell_id,
+                        "claim": "",
+                        "status": "missing",
+                        "queue_state": "sync_conflict",
+                        "sync_conflict_reason": conflict["sync_conflict_reason"],
                     }
                 )
 
@@ -132,4 +168,6 @@ def register(app: typer.Typer) -> None:
                 typer.echo(
                     f"  {item['cell_id']:<40} {item['status']:<16} {item['queue_state'] or '-':<16}"
                 )
+                if item.get("sync_conflict_reason"):
+                    typer.echo(f"    Sync conflict: {item['sync_conflict_reason']}")
         typer.echo("")

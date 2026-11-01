@@ -11,7 +11,8 @@ from dbos import DBOS, SetEnqueueOptions, SetWorkflowID
 
 from petri.execution.dbos_app import QUEUE_NAME, active_app
 from petri.execution.dbos_backend import CellRunSpec, _bounded, validate_cell
-from petri.models import CellStatus
+from petri.execution.pipeline import SyncConflict
+from petri.models import CellStatus, parse_key
 from petri.storage import database
 from petri.storage.colonies import load_colony
 from petri.storage.event_log import append_event
@@ -104,7 +105,8 @@ def eligible_cells(spec: ColonyRunSpec) -> list[tuple[CellRunSpec, int]]:
                     cell.level,
                 )
                 for cell in graph.get_eligible_for_validation(statuses)
-                if not spec.cell_ids or cell.id in spec.cell_ids
+                if cell.id not in active_app().conflicts
+                and (not spec.cell_ids or cell.id in spec.cell_ids)
             ]
         )
 
@@ -125,6 +127,17 @@ async def enqueue_validation(spec: CellRunSpec, level: int):
 
 @DBOS.workflow(name="petri.grow_colony")
 async def grow_colony(spec: ColonyRunSpec) -> ColonyRunResult:
+    app = active_app()
+    if any(parse_key(cell).get("colony_prefix") == spec.colony_id for cell in app.conflicts):
+        return ColonyRunResult(
+            spec.colony_id,
+            (),
+            tuple(
+                row["id"]
+                for row in database.list_cells(app.db_path, colony=spec.colony_id)
+                if row["status"] == "NEW" and (not spec.cell_ids or row["id"] in spec.cell_ids)
+            ),
+        )
     completed: list[str] = []
     while candidates := await asyncio.to_thread(eligible_cells, spec):
         handles = [await enqueue_validation(cell, level) for cell, level in candidates]
@@ -186,6 +199,8 @@ def resolve_next_round(request: ReopenRequest) -> tuple[CellRunSpec, int]:
 
 @DBOS.workflow(name="petri.revalidate_cell")
 async def revalidate_cell(request: ReopenRequest):
+    if request.cell_id in active_app().conflicts:
+        return SyncConflict(reason=active_app().conflicts[request.cell_id]["reason"])
     spec, level = await asyncio.to_thread(resolve_next_round, request)
     handle = await enqueue_validation(spec, level)
     return await handle.get_result()
