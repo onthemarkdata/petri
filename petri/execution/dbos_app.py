@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from filelock import FileLock, Timeout
 
 from petri.execution.config import ExecutionConfig
+from petri.execution.backend import ExecutionOwnerError
 from petri.storage import database
 
 if TYPE_CHECKING:
@@ -24,10 +25,6 @@ QUEUE_NAME = "petri-cells"
 APPLICATION_VERSION = "petri-cell-pipeline-1"
 CHECKPOINT_LIMIT = 2 * 1024 * 1024
 _ACTIVE: DBOSApp | None = None
-
-
-class ExecutionOwnerError(RuntimeError):
-    """Another process already owns execution for this dish."""
 
 
 def active_app() -> DBOSApp:

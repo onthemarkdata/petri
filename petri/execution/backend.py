@@ -11,6 +11,10 @@ from petri.execution.run_controls import RunRequest, RunStatus, SeedRequest
 from petri.models import InferenceProvider, QueueProcessingResult
 
 
+class ExecutionOwnerError(RuntimeError):
+    """Another process already owns execution for this dish."""
+
+
 @runtime_checkable
 class ExecutionBackend(Protocol):
     async def start_owner(self, petri_dir: Path, *, on_phase_progress=None,
