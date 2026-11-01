@@ -15,7 +15,7 @@ from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment, output_mode
 from petri.agents.source_policy import check_terminal_sources, source_hierarchy_instructions
 from petri.research.tools import ResearchClient, register_research_tools
 from petri.research.staging import (
-    NativeFunctionPromptedOutput, RequiredInvestigationOutput, has_retrieval_attempt, investigation_settings,
+    NativeFunctionPromptedOutput, RequiredInvestigationOutput, investigation_settings, require_retrieval_attempt,
 )
 from petri.research.web import PublicWebClient
 
@@ -109,11 +109,7 @@ def build_agents(
     if web is not None:
         @roster[AgentName.INVESTIGATOR].output_validator
         def require_investigation_attempt(ctx: RunContext[Any], output: AgentAssessment) -> AgentAssessment:
-            if not has_retrieval_attempt(ctx.messages):
-                raise ModelRetry(
-                    "Call web_search or web_fetch before completing the investigation. "
-                    "A failed retrieval attempt may justify an inconclusive result; it is not evidence."
-                )
+            require_retrieval_attempt(ctx.messages)
             return output
 
     @evaluator.output_validator

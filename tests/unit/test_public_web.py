@@ -29,19 +29,21 @@ DEFAULTS = Path(__file__).parents[2] / "petri/defaults/petri.yaml"
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["provider", "pi"])
 @pytest.mark.parametrize("enabled", [False, True])
-async def test_investigator_attempts_retrieval_before_honest_inconclusive_output(fake_pi, backend, enabled, monkeypatch):
+@pytest.mark.parametrize("malformed", [False, True])
+async def test_investigator_attempts_retrieval_before_honest_inconclusive_output(fake_pi, backend, enabled, malformed, monkeypatch):
     raw = load_agent_config(DEFAULTS).model_dump(mode="json")
     raw["research"] = {"public_web": enabled}
     raw["harness"] = {"backend": backend, "model": "local-test", "output_mode": "prompted"}
     config = AgentConfig.model_validate(raw)
     final = {"verdict": "NEEDS_MORE_EVIDENCE", "sources_cited": []}
+    first_text = '{"unfinished"' if enabled and malformed else json.dumps(final)
     model_requests = []
     attempts = []
 
     def respond(request):
         payload = json.loads(request.content)
         model_requests.append(payload)
-        message = {"role": "assistant", "content": json.dumps(final)}
+        message = {"role": "assistant", "content": first_text if len(model_requests) == 1 else json.dumps(final)}
         if len(model_requests) == 2:
             message = {"role": "assistant", "tool_calls": [{"id": "search", "type": "function", "function": {
                 "name": "web_search", "arguments": json.dumps({"query": "fixture evidence"})}}]}
@@ -55,7 +57,7 @@ async def test_investigator_attempts_retrieval_before_honest_inconclusive_output
 
     async with AsyncExitStack() as stack:
         if backend == "pi":
-            fake_pi.scenario({"text": json.dumps(final)},
+            fake_pi.scenario({"text": first_text},
                              {"text": json.dumps({"web_search": [{"query": "fixture evidence"}]})},
                              {"text": json.dumps(final)})
             transport = PiRpcTransport(binary=str(fake_pi.path))
@@ -78,6 +80,11 @@ async def test_investigator_attempts_retrieval_before_honest_inconclusive_output
         assert (model.round_trips if backend == "pi" else len(model_requests)) == (3 if enabled else 1)
     assert len(attempts) == (1 if enabled else 0)
     assert result.output.verdict == "NEEDS_MORE_EVIDENCE" and not result.output.sources_cited
+    if enabled:
+        assert "Call web_search or web_fetch before completing the investigation" in str(model_requests[1])
+        if backend == "provider":
+            assert any(message.get("content") == first_text for message in model_requests[1]["messages"])
+            assert "json_invalid" not in str(model_requests[1])
     if enabled and backend == "provider":
         assert all(request.get("tool_choice") == "required" and "response_format" not in request
                    for request in model_requests[:2])
