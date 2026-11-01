@@ -95,6 +95,7 @@ def test_assessment_instructions_use_custom_source_hierarchy(config):
         instructions = "\n".join(item.instruction for item in agent._instructions)
         assert "Level 2 — Maintainer specification: The primary maintainer documents the behavior." in instructions
         assert "level 1–3" in instructions
+        assert "EVIDENCE_CONFIRMS and EVIDENCE_REFUTES require at least" in instructions
         assert "A grade does not establish that a source was retrieved" in instructions
         for level in range(1, 7):
             assert f"Level {level} — {config.source_hierarchy.levels[level].name}" in instructions

@@ -14,7 +14,7 @@ def source_hierarchy_instructions(hierarchy: SourceHierarchy) -> str:
     for level, content in sorted(hierarchy.levels.items()):
         lines.append(f"Level {level} — {content.name}: {content.description}")
     lines.append(
-        f"Use these definitions when grading each cited source. Terminal verdicts require at least "
+        f"Use these definitions when grading each cited source. EVIDENCE_CONFIRMS and EVIDENCE_REFUTES require at least "
         f"one source at level 1–{hierarchy.minimum_terminal_level}. A grade does not establish that "
         "a source was retrieved or that it supports the claim."
     )
