@@ -22,7 +22,7 @@ def _initial_nodes() -> list[InitialNode | ExpansionNode]:
 
 
 class SeedState(BaseModel):
-    """A checkpoint follows a committed model output and its materialized cells."""
+    """The in-memory worklist is rebuilt from committed output events on resume."""
 
     model_config = ConfigDict(extra="forbid")
     version: Literal[1] = 1

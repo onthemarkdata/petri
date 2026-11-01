@@ -173,6 +173,7 @@ async def validate_cell(spec: CellRunSpec) -> PipelineEnd:
 
 class DBOSExecutionBackend:
     status_interval = 0.25
+    backend_name = "dbos"
 
     def __init__(
         self,
@@ -205,6 +206,9 @@ class DBOSExecutionBackend:
         *,
         db_path: Path,
         dependencies: Callable[[CellRunSpec], PipelineDeps] | None = None,
+        seed_runner_factory=None,
+        seed_on_progress=None,
+        seed_on_cell_created=None,
     ) -> DBOSApp:
         if dependencies is None:
             if self.services_factory is None:
@@ -213,7 +217,16 @@ class DBOSExecutionBackend:
             def dependencies(spec):
                 return build_pipeline_dependencies(self.services_factory(spec))
 
-        self.app = DBOSApp(petri_dir, db_path, self.settings, dependencies).start()
+        self.app = DBOSApp(
+            petri_dir,
+            db_path,
+            self.settings,
+            dependencies,
+            seed_runner_factory=seed_runner_factory or self._default_seed_runner,
+            seed_on_progress=seed_on_progress,
+            seed_on_cell_created=seed_on_cell_created,
+            owns_seed_runners=seed_runner_factory is None,
+        ).start()
         return self.app
 
     async def start_async(self, *args, **kwargs):
@@ -239,6 +252,112 @@ class DBOSExecutionBackend:
     def close(self):
         if self.app:
             self.app.close()
+
+    def _default_seed_runner(self, spec):
+        from petri.harness.legacy_bridge import HarnessInferenceProvider
+        from petri.harness.resolve import resolve_model
+
+        return HarnessInferenceProvider(resolve_model(self.config), config=self.config)
+
+    async def enqueue_seed(self, spec, *, resume=False):
+        from petri.execution.seed_workflow import seed_colony
+
+        if self.app is None or not self.app.started:
+            raise RuntimeError("Start the dish runtime before enqueueing a seed")
+        _bounded(spec)
+        if resume:
+            status = await DBOS.get_workflow_status_async(spec.workflow_id)
+            if status is not None and status.status == "ERROR":
+                steps = await DBOS.list_workflow_steps_async(spec.workflow_id)
+                failed = [step["function_id"] for step in steps if step["error"] is not None]
+                if failed:
+                    return await DBOS.rewind_workflow_async(
+                        spec.workflow_id, start_step=min(failed)
+                    )
+            if status is not None and status.status in {
+                "CANCELLED",
+                "MAX_RECOVERY_ATTEMPTS_EXCEEDED",
+            }:
+                return await DBOS.resume_workflow_async(spec.workflow_id)
+        with SetWorkflowID(spec.workflow_id), SetEnqueueOptions(priority=1):
+            return await DBOS.enqueue_workflow_async(QUEUE_NAME, seed_colony, spec)
+
+    def seed_colony(
+        self,
+        *,
+        petri_dir,
+        claim,
+        clarifications,
+        dish_id,
+        colony_name,
+        provider,
+        settings,
+        guidance="",
+        db_path=None,
+        on_progress=None,
+        on_cell_created=None,
+        center=None,
+        agent_runner=None,
+        resume=False,
+    ):
+        from petri.execution.seed_workflow import SeedRunSpec
+        from petri.reasoning.seed_events import current_attempt
+        from petri.storage.colonies import load_colony
+        from petri.models import DecompositionResult
+
+        path = db_path or dish_db_path(petri_dir, dish_id)
+        graph, colony = load_colony(path, f"{dish_id}-{colony_name}")
+        spec = SeedRunSpec(
+            colony.id,
+            dish_id,
+            colony_name,
+            settings,
+            current_attempt(path, colony.center_cell_id),
+            guidance,
+        )
+        runner = agent_runner or provider
+        if not hasattr(runner, "initial_decomposition"):
+            raise ValueError("DBOS seed requires the configured typed decomposition runner")
+
+        def cell_dependencies(spec):
+            raise RuntimeError("Cell validation is unavailable in a seed-only runtime")
+
+        def report_created(cell, edges):
+            if cell.colony_id == spec.colony_id and on_cell_created:
+                on_cell_created(cell, edges)
+
+        self.start(
+            petri_dir,
+            db_path=path,
+            dependencies=None if "agents" in self.config else cell_dependencies,
+            seed_runner_factory=lambda spec: runner,
+            seed_on_progress=on_progress,
+            seed_on_cell_created=report_created,
+        )
+        try:
+
+            async def run():
+                handle = await self.enqueue_seed(spec, resume=resume)
+                return await handle.get_result()
+
+            asyncio.run(run())
+        except KeyboardInterrupt:
+            self.app.closing = True
+            if hasattr(runner, "cancel_active_run"):
+                runner.cancel_active_run()
+            if hasattr(runner, "close"):
+                runner.close()
+            self.app.detach()
+            raise
+        finally:
+            self.close()
+        graph, colony = load_colony(path, colony.id)
+        return DecompositionResult(
+            cells=graph.get_all_cells(),
+            edges=graph.get_edges(),
+            colony_name=colony_name,
+            center_claim=colony.center_claim,
+        )
 
     def _services_factory(self, petri_dir: Path, db_path: Path):
         from petri.agents.config import AgentConfig

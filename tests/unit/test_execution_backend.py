@@ -29,6 +29,10 @@ class MemoryBackend:
             }
         }
 
+    def seed_colony(self, **kwargs):
+        self.calls.append("seed_colony")
+        return None
+
     def preflight(self):
         self.calls.append("preflight")
         return PreflightCheck("memory", True, "Ready")
