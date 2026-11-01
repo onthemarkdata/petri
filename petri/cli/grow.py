@@ -38,6 +38,7 @@ def register(app: typer.Typer) -> None:
         max_concurrent: int = typer.Option(
             MAX_CONCURRENT, "--max-concurrent", help="Max parallel cells"
         ),
+        export: bool = typer.Option(False, "--export", help="Export derived text after grow completes"),
         dry_run: bool = typer.Option(
             False, "--dry-run", help="Show what would process without running"
         ),
@@ -228,6 +229,13 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(code=1)
 
         assert outcome is not None  # set unless an exception bubbled up
+
+        from petri.config import load_dish_config
+        if export or load_dish_config(petri_dir).get("auto_export", False):
+            from petri.cli._bootstrap import get_dish_id
+            from petri.storage.export import export_incremental
+
+            export_incremental(petri_dir, get_dish_id(petri_dir))
 
         final_states = outcome.final_states
         last_result = outcome.last_result

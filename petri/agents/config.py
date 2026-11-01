@@ -141,6 +141,7 @@ class PrePipelineContent(StrictContent):
 
 
 class AgentConfig(StrictContent):
+    auto_export: bool = False
     schema_version: Literal[2]
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     name: Nonempty = "petri"
