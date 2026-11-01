@@ -1,4 +1,7 @@
-"""Append-only JSONL event log for Petri research cells.
+"""Append-only event logs for Petri research cells.
+
+``SQLiteEventLog`` targets opt into the v2 domain database. Plain ``Path``
+arguments retain the legacy JSONL behavior until callers migrate.
 
 Each cell stores its events in a dedicated ``events.jsonl`` file located at
 ``.petri/petri-dishes/{colony}/{level}-{seq}/events.jsonl``.  Events are
@@ -15,17 +18,18 @@ from __future__ import annotations
 import json
 import secrets
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from petri.models import Event, EventType, Verdict, build_event_key, validate_event_data
-
+from petri.storage import database
+from petri.storage.database import SQLiteEventLog
 
 # ── Core Write Operations ────────────────────────────────────────────────
 
 
 def append_event(
-    events_path: Path,
+    events_path: Path | SQLiteEventLog,
     cell_id: str,
     event_type: str,
     agent: str,
@@ -40,6 +44,21 @@ def append_event(
     4. Returns the created ``Event`` model instance.
     """
     validated_data = validate_event_data(event_type, data)
+    if isinstance(events_path, SQLiteEventLog):
+        if events_path.cell_id is not None and events_path.cell_id != cell_id:
+            raise ValueError("Event cell ID does not match the SQLite event-log scope")
+        event = Event(
+            id=database.stable_event_id(
+                cell_id, event_type, agent, iteration, json.dumps(validated_data, sort_keys=True)
+            ),
+            cell_id=cell_id,
+            timestamp=datetime.now(UTC).isoformat(),
+            type=EventType(event_type),
+            agent=agent,
+            iteration=iteration,
+            data=validated_data,
+        )
+        return database.append_event(events_path.db_path, event)[0]
 
     # Load existing IDs so we can detect the (very rare) collision.
     existing_ids: set[str] = set()
@@ -52,7 +71,7 @@ def append_event(
     while event_id in existing_ids:
         event_id = build_event_key(cell_id, secrets.token_hex(4))
 
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     event = Event(
         id=event_id,
@@ -76,12 +95,14 @@ def append_event(
 # ── Core Read Operations ─────────────────────────────────────────────────
 
 
-def load_events(events_path: Path) -> list[dict]:
+def load_events(events_path: Path | SQLiteEventLog) -> list[dict]:
     """Read all events from a JSONL file.
 
     Malformed lines are skipped with a warning so that a single corrupt line
     does not prevent the rest of the log from being read.
     """
+    if isinstance(events_path, SQLiteEventLog):
+        return database.read_events(events_path.db_path, cell_id=events_path.cell_id)
     if not events_path.exists():
         return []
 
@@ -101,7 +122,7 @@ def load_events(events_path: Path) -> list[dict]:
 
 
 def query_events(
-    events_path: Path,
+    events_path: Path | SQLiteEventLog,
     cell_id: str | None = None,
     iteration: int | None = None,
     event_type: str | None = None,
@@ -113,6 +134,21 @@ def query_events(
     All supplied filters are combined with AND logic.  *since* is an ISO 8601
     timestamp -- only events with ``timestamp >= since`` are returned.
     """
+    if isinstance(events_path, SQLiteEventLog):
+        if (
+            events_path.cell_id is not None
+            and cell_id is not None
+            and events_path.cell_id != cell_id
+        ):
+            return []
+        return database.read_events(
+            events_path.db_path,
+            cell_id=cell_id if cell_id is not None else events_path.cell_id,
+            iteration=iteration,
+            event_type=event_type,
+            agent=agent,
+            since=since,
+        )
     events = load_events(events_path)
     filtered: list[dict] = []
 
@@ -133,7 +169,7 @@ def query_events(
 
 
 def get_verdicts(
-    events_path: Path,
+    events_path: Path | SQLiteEventLog,
     cell_id: str | None = None,
     iteration: int | None = None,
     agent: str | None = None,
@@ -161,7 +197,7 @@ def get_verdicts(
     return verdicts
 
 
-def get_sources(events_path: Path) -> list[dict]:
+def get_sources(events_path: Path | SQLiteEventLog) -> list[dict]:
     """Return source_reviewed events, deduplicated by URL."""
     events = query_events(events_path, event_type="source_reviewed")
     seen_urls: set[str] = set()
@@ -176,7 +212,7 @@ def get_sources(events_path: Path) -> list[dict]:
     return sources
 
 
-def get_searches(events_path: Path) -> list[dict]:
+def get_searches(events_path: Path | SQLiteEventLog) -> list[dict]:
     """Return search_executed events."""
     return query_events(events_path, event_type="search_executed")
 
