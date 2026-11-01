@@ -9,7 +9,7 @@ description: "Data model rules — composite keys, event types, verdict vocabula
 - Dish: `{dish}`
 - Colony: `{dish}-{colony}`
 - Cell: `{dish}-{colony}-{level}-{seq}` (level/seq are 3-digit zero-padded)
-- Event: `{dish}-{colony}-{level}-{seq}-{8hex}`
+- Event: an opaque deterministic ID derived from the cell and execution coordinates
 
 ## Event Types
 
@@ -25,7 +25,7 @@ $pipeline_states
 
 ## Rules
 
-- NEVER write directly to `.jsonl` files. Use the event log skills instead.
+- Append validated events through the storage API. Never update or delete event rows.
 - Start and cancel durable runs through the execution backend.
 - Research data and events live in SQLite; text exports are derived views.
 - All verdicts MUST use the exact strings from the vocabulary above.
