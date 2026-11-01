@@ -38,10 +38,22 @@ components follow. Array boundaries prevent concatenation ambiguity; integers
 remain distinct from strings. The digest is prefixed by the cell ID. This
 algorithm does not use process-randomized Python hashes or a presence scan.
 
-For the initial schema seam, SQLite event-log wrappers use type, agent,
-iteration, and sorted validated payload JSON as identity components. Issue #51
-replaces that provisional wrapper identity with explicit execution coordinates,
-so repeated equal payloads at distinct workflow steps remain distinguishable.
+`event_log.derive_event_id` fixes the execution identity order to
+`(cell_id, round_number, node, agent, iteration, event_type, sequence)`, with an
+additional `"execution-v1"` namespace after the cell ID. Round, iteration, and
+sequence must be nonnegative integers; names must be nonempty strings. Timestamp
+and payload are excluded, so a retry returns the original row even if a fresh
+model call would produce different text. The caller must keep the coordinates
+stable on retry, increase `round_number` for a new research round, and increase
+`sequence` for distinct same-type events in one node/agent iteration.
+
+SQLite append defaults are round 0, node `"default"`, and sequence 0. They identify
+one event per cell/type/agent/iteration. A node that emits several sources or
+searches must supply sequence numbers; otherwise those events intentionally
+resolve to the same identity. Assign sequence numbers from stable workflow order,
+not from the current row count. No application presence scan or index participates
+in SQLite idempotency: the UNIQUE ID and INSERT OR IGNORE decide the winner. The
+append operation then selects that ID to return the stored envelope.
 
 ## Compatibility and callers
 
@@ -54,7 +66,8 @@ from petri.storage.event_log import append_event, load_events
 
 target = SQLiteEventLog(Path(".petri/petri.sqlite"), cell_id="dish-colony-1-1")
 append_event(target, "dish-colony-1-1", "search_executed", "researcher", 1,
-             {"query": "example", "sources_found": 0})
+             {"query": "example", "sources_found": 0},
+             round_number=0, node="research", sequence=0)
 events = load_events(target)
 ```
 
@@ -62,7 +75,10 @@ A scoped target filters reads to one cell and rejects writes for another cell.
 An unscoped `SQLiteEventLog(path)` reads across the dish. `query_events` applies
 its filters in SQL. Plain `Path` targets retain the JSONL implementation and
 existing event-ID format, allowing the old engine to run until its callers switch.
-No existing research files are imported or deleted by this change.
+Nondefault execution coordinates on a plain Path raise an error, so a legacy
+append cannot silently imply durable idempotency. The legacy collision scan remains
+only on the JSONL path until those callers migrate. No existing research files
+are imported or deleted by this change.
 
 `put_cell(path, mapping)` writes the schema columns directly, with defaults for
 status, relation, atomicity, and bedrock reason. Callers supply `id`, `colony`,
