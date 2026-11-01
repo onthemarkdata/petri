@@ -2,7 +2,15 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    create_model,
+    field_validator,
+)
 
 from petri.agents.config import AgentContent
 from petri.agents.contract import AgentName
@@ -11,7 +19,7 @@ from petri.agents.contract import AgentName
 class SourceCitation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    url: str = ""
+    url: str
     title: str = ""
     hierarchy_level: int = Field(default=6, ge=1, le=6)
     finding: str = ""
@@ -19,6 +27,12 @@ class SourceCitation(BaseModel):
     confidence: str | None = None
     pub_date: str = ""
     pub_year: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        TypeAdapter(AnyHttpUrl).validate_python(value)
+        return value
 
 
 class AgentAssessment(BaseModel):

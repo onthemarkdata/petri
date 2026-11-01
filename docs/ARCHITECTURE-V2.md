@@ -208,3 +208,24 @@ Fractional YAML rounds normalize through `DebateContent.protocol`: `1.5` becomes
 one whole exchange plus a final word from the first participant. Agent phases
 and blocking semantics come solely from `AgentSpec`; the v2 content loader
 rejects legacy numeric phase and structural fields instead of duplicating them.
+
+### Source validation and exhausted retries
+
+V2 citations require a syntactically valid HTTP(S) URL. This blocks missing or
+malformed URLs during typed output validation; syntax validation does not prove
+that a page exists or supports a claim. Retrieval and source verification remain
+separate research responsibilities.
+
+The evidence evaluator applies a pure source-hierarchy policy to
+`EVIDENCE_CONFIRMS` and `EVIDENCE_REFUTES`. Its strongest level is the smallest
+supplied level, and it must meet the configured `minimum_terminal_level`.
+`EVIDENCE_INCONCLUSIVE` may contain no sources. Invalid outputs produce model
+reflection and consume the configured output-retry allowance.
+
+The exhaustion policy is to fail the run, preserving the distinction between an
+inference failure and inconclusive evidence. The supported `run_agent` entrypoint
+raises `AgentRunError` with the agent identity, diagnostic detail and
+`EXECUTION_ERROR` marker; it never converts failure into a research verdict.
+Callers record that marker in the domain event log and treat it as nonconvergent.
+The output validator is attached to the agent itself; execution callers use
+`run_agent` to receive the typed failure and enforce configured usage limits.
