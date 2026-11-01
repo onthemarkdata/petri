@@ -24,7 +24,7 @@ from petri.execution.dbos_app import (
     active_app,
 )
 from petri.execution.decisions import build_pipeline_dependencies
-from petri.execution.models import CellPipelineState, GrowOutcome, PreflightCheck, ProgressEvent
+from petri.execution.models import CellPipelineState, GrowOutcome, PreflightCheck
 from petri.execution.phases import PhaseServices, build_socratic_agent
 from petri.execution.pipeline import (
     NeedsHuman,
@@ -250,6 +250,59 @@ class DBOSExecutionBackend:
             )
         return eligible
 
+    async def enqueue_colony(self, spec):
+        from petri.execution.scheduler import grow_colony
+
+        if self.app is None or not self.app.started:
+            raise RuntimeError("Start the dish runtime before enqueueing a colony")
+        _bounded(spec)
+        with SetWorkflowID(spec.workflow_id):
+            return await DBOS.start_workflow_async(grow_colony, spec)
+
+    async def grow_dish(
+        self, petri_dir, *, colony_filter=None, cell_ids=None, dry_run=False, round_number=1
+    ):
+        from petri.execution.scheduler import ColonyRunSpec
+        from petri.storage.colonies import list_colonies
+
+        if dry_run:
+            return [
+                cell.id
+                for cell in self.eligible_cells(
+                    petri_dir, cell_ids=cell_ids, colony_filter=colony_filter
+                )
+            ]
+        handles = []
+        for _, colony in list_colonies(dish_db_path(petri_dir)):
+            if colony_filter and colony_filter not in {
+                colony.id,
+                colony.id.removeprefix(f"{colony.dish}-"),
+            }:
+                continue
+            handles.append(
+                await self.enqueue_colony(
+                    ColonyRunSpec(
+                        colony.id,
+                        round_number,
+                        datetime.now(timezone.utc).date().isoformat(),
+                        max_iterations=self.config.get("max_iterations", 5),
+                        cell_ids=tuple(sorted(cell_ids or [])),
+                    )
+                )
+            )
+        return handles
+
+    async def reopen_cell(self, request):
+        from petri.execution.scheduler import revalidate_cell
+
+        if self.app is None or not self.app.started:
+            raise RuntimeError("Start the dish runtime before reopening a cell")
+        if not request.request_id:
+            raise ValueError("Provide a stable request ID to deduplicate revalidation")
+        _bounded(request)
+        with SetWorkflowID(request.workflow_id):
+            return await DBOS.start_workflow_async(revalidate_cell, request)
+
     def process_queue(
         self,
         *,
@@ -262,38 +315,40 @@ class DBOSExecutionBackend:
         dry_run=False,
         on_event=None,
     ):
-        cells = self.eligible_cells(petri_dir, cell_ids=cell_ids, colony_filter=colony_filter)
         if dry_run:
-            return QueueProcessingResult(dry_run=True, would_process=[cell.id for cell in cells])
-        if not cells:
+            return QueueProcessingResult(
+                dry_run=True,
+                would_process=[
+                    cell.id
+                    for cell in self.eligible_cells(
+                        petri_dir, cell_ids=cell_ids, colony_filter=colony_filter
+                    )
+                ],
+            )
+        path = dish_db_path(petri_dir)
+        if not path.is_file():
             return QueueProcessingResult()
-        self.start(petri_dir, db_path=dish_db_path(petri_dir))
+        self.start(petri_dir, db_path=path)
 
         async def run():
-            handles = []
-            for cell in cells:
-                if on_event:
-                    on_event(ProgressEvent(0, cell.id, "started"))
-                handles.append(
-                    await self.enqueue_cell(
-                        CellRunSpec(
-                            cell.id,
-                            1,
-                            datetime.now(timezone.utc).date().isoformat(),
-                            max_iterations=self.config.get("max_iterations", 5),
-                        ),
-                        level=cell.level,
-                    )
-                )
-            outcomes = await asyncio.gather(*(handle.get_result() for handle in handles))
+            handles = await self.grow_dish(
+                petri_dir, colony_filter=colony_filter, cell_ids=cell_ids
+            )
+            colonies = await asyncio.gather(*(handle.get_result() for handle in handles))
+            completed = sorted({cell for colony in colonies for cell in colony.completed})
             results = [
-                ProcessCellResult(cell_id=cell.id, final_state=result.status)
-                for cell, result in zip(cells, outcomes)
+                ProcessCellResult(cell_id=cell, final_state=database.get_cell(path, cell)["status"])
+                for cell in completed
             ]
             return QueueProcessingResult(
                 processed=len(results),
-                succeeded=sum(not isinstance(result, NeedsHuman) for result in outcomes),
-                stalled=sum(isinstance(result, NeedsHuman) for result in outcomes),
+                succeeded=sum(
+                    result.final_state in {"VALIDATED", "DISPROVEN", "DEFER_OPEN", "DEFER_CLOSED"}
+                    for result in results
+                ),
+                stalled=sum(
+                    result.final_state in {"STALLED", "NEEDS_EXPERIMENT"} for result in results
+                ),
                 results=results,
             )
 
@@ -304,7 +359,10 @@ class DBOSExecutionBackend:
 
     def grow_loop(self, *, run_one_pass, get_states, is_stopped):
         result = run_one_pass()
-        return GrowOutcome("all_terminal", get_states(), result, 1)
+        states = get_states()
+        return GrowOutcome(
+            "not_eligible" if states.get("queued") else "all_terminal", states, result, 1
+        )
 
     def entries(self, petri_dir: Path) -> dict[str, dict]:
         db_path = dish_db_path(petri_dir)
