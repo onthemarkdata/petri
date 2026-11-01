@@ -4,7 +4,8 @@
 for `run_pipeline`. Construct `PhaseServices` with a domain database path, round
 number, explicit date, validated `AgentConfig`, built roster, and Socratic agent.
 The roster and every debate pairing validate before dependencies are returned.
-Decision callables are separate dependencies until the decision-phase port lands.
+`petri.execution.decisions.build_pipeline_dependencies` supplies the complete
+research and decision pipeline, including terminal status persistence.
 
 Socratic questioning keeps the four v1 steps: clarify, challenge assumptions,
 map evidence, and verify. Research and critique use the code-owned roster phases.
@@ -31,3 +32,20 @@ research and critique formatters, including actual debate summaries. Exporters
 can add a document header around this body. The phase adapters write no
 `evidence.md` or `metadata.json` files. A progress callback receives typed phase
 start/end and agent signals without depending on the CLI spinner.
+
+The convergence check reads persisted verdicts and applies the v1 short-circuit,
+convergence, and circuit-breaker rules without a model call. On a circuit break,
+a separate decomposition audit records framing advice before the pipeline parks
+for human review. It does not restructure the colony. The engine advances the
+iteration counter and carries the weakest-link directive into each research retry.
+
+Evaluation checks the source hierarchy before inference. Without an eligible
+reviewed source, it records an inconclusive verdict and ends as `DEFER_OPEN`.
+Eligible evidence can produce `VALIDATED`, `DISPROVEN`, or `DEFER_OPEN`. A separate
+terminal callback updates only the SQLite status column; repeated writes are safe.
+Human-review outcomes preserve `NEEDS_EXPERIMENT` for the corresponding short
+circuit and use `STALLED` for exhausted iterations or sync conflicts.
+
+Red-team, evaluation, and decomposition-audit evidence sections also regenerate
+from events. The renderer does not infer a source-policy threshold from events
+that do not record one, so it omits the old optional source-policy summary line.
