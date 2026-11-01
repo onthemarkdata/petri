@@ -9,23 +9,24 @@ Query events from a cell's event log.
 ## Usage
 
 ```python
-from petri.storage.event_log import query_events, get_verdicts, load_events
 from pathlib import Path
+from petri.query import query_events, get_verdicts
+from petri.storage.paths import dish_db_path
 
-events_path = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}/events.jsonl")
+db_path = dish_db_path(Path("$petri_dir"), "{dish_id}")
 
-# Load all events
-events = load_events(events_path)
+# Read all events for the target cell.
+events = query_events(db_path, cell_id="{cell_id}", limit=None)
 
 # Query by filters
-results = query_events(events_path, cell_id="{cell_id}", event_type="{type}", iteration={n})
+results = query_events(db_path, cell_id="{cell_id}", event_type="{type}", iteration={n})
 
 # Get verdicts for a cell + iteration
-verdicts = get_verdicts(events_path, cell_id="{cell_id}", iteration={n})
+verdicts = get_verdicts(db_path, cell_id="{cell_id}", iteration={n})
 ```
 
 ## Important
 
-- Events are read from append-only JSONL files — the source of truth.
+- Events are read from the dish's append-only SQLite events table.
 - Use query parameters to filter efficiently.
-- NEVER parse `.jsonl` files manually — always use these functions.
+- Use `petri.query` for read-only access; exported text is a derived view.

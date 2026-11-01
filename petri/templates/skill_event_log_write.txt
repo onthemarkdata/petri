@@ -10,18 +10,22 @@ Append an event to a cell's event log. This is the ONLY way to write events.
 
 ```python
 from petri.storage.event_log import append_event
+from petri.storage.database import SQLiteEventLog
+from petri.storage.paths import dish_db_path
 from pathlib import Path
 
-# Construct the events path for the target cell
-events_path = Path("$petri_dir/petri-dishes/{colony}/{level}-{seq}/events.jsonl")
+db_path = dish_db_path(Path("$petri_dir"), "{dish_id}")
 
 append_event(
-    events_path=events_path,
+    events_path=SQLiteEventLog(db_path, "{cell_id}"),
     cell_id="{cell_id}",
     event_type="{event_type}",
     agent="{agent_name}",
     iteration={iteration},
     data={data_dict},
+    round_number={round_number},
+    node="{pipeline_node}",
+    sequence={sequence},
 )
 ```
 
@@ -32,5 +36,6 @@ $event_types
 ## Important
 
 - All data is validated against Pydantic models before writing.
-- Event IDs and timestamps are generated automatically.
-- NEVER write to `.jsonl` files directly — always use this skill.
+- Use the iteration, round, node, and sequence supplied by the execution context.
+- IDs are derived from those coordinates. Reuse them on retry; distinct logical events need distinct coordinates.
+- Do not update or delete stored events, or write directly to exported text files.
