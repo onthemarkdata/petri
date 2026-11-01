@@ -75,9 +75,9 @@ def export_dish(
         verdict = verdicts[-1]["data"] if verdicts else {}
         evidence = cell.get("evidence_md", "") or "\n\n".join(
             event["data"].get("summary", "") for event in events if event["type"] == "evidence_appended")
-        for event in events:
-            if event["type"] == "evidence_fed":
-                data = event["data"]
+        for fed_event in events:
+            if fed_event["type"] == "evidence_fed":
+                data = fed_event["data"]
                 quoted = "\n".join("> " + line for line in data["content"].splitlines())
                 evidence += f"\n\n### Fed evidence (round {data['generation']})\n\n{quoted}"
         summary = cell.get("summary_md", "") or verdict.get("summary", "")
