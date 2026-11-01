@@ -51,12 +51,12 @@ def derive_event_id(
     ):
         if not isinstance(value, str) or not value:
             raise ValueError(f"{name} must be a nonempty string")
-    for name, value in (
+    for name, coordinate in (
         ("round_number", round_number),
         ("iteration", iteration),
         ("sequence", sequence),
     ):
-        if type(value) is not int or value < 0:
+        if type(coordinate) is not int or coordinate < 0:
             raise ValueError(f"{name} must be a nonnegative integer")
     return database.stable_event_id(
         cell_id, "execution-v1", round_number, node, agent, iteration, event_type, sequence
