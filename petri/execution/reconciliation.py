@@ -30,6 +30,24 @@ def _digest(events):
     ).hexdigest()
 
 
+def _project_content(db_path: Path, cell_id: str, event_count: int) -> dict[str, str]:
+    """Rebuild the trigger-maintained fields at an append-order event boundary."""
+    with closing(database.connect(db_path)) as conn:
+        row = conn.execute(
+            "WITH prefix AS (SELECT rowid AS position,event_type,agent,"
+            "json_extract(payload,'$.summary') AS summary FROM events "
+            "WHERE cell_id=? ORDER BY rowid LIMIT ?) "
+            "SELECT COALESCE((SELECT group_concat(summary,char(10)||char(10)) "
+            "FROM (SELECT summary FROM prefix WHERE event_type='evidence_appended' "
+            "AND COALESCE(summary,'')<>'' ORDER BY position)),''), "
+            "COALESCE((SELECT CAST(summary AS TEXT) FROM prefix "
+            "WHERE event_type='verdict_issued' AND agent='cell_lead' "
+            "ORDER BY position DESC LIMIT 1),'')",
+            (cell_id, event_count),
+        ).fetchone()
+    return {"evidence_md": row[0], "summary_md": row[1]}
+
+
 def capture_receipt(db_path: Path, cell_id: str) -> DomainReceipt | None:
     row = database.get_cell(db_path, cell_id)
     if row is None:
@@ -108,11 +126,7 @@ def reconcile(db_path: Path, system_path: Path) -> dict[str, dict]:
                     receipt = max(receipts, key=lambda item: item.event_count)
                     events = database.read_events(db_path, cell_id=cell_id)
                     row_digest = getattr(receipt, "row_digest", "")
-                    if row_digest and row_digest != _digest(
-                        {key: value for key, value in row.items() if key != "status"}
-                    ):
-                        reason = "Domain cell fields differ from the checkpoint's committed cell"
-                    elif len(events) < receipt.event_count:
+                    if len(events) < receipt.event_count:
                         reason = (
                             f"Checkpoint requires {receipt.event_count} domain events; "
                             f"the domain database contains {len(events)}"
@@ -121,6 +135,21 @@ def reconcile(db_path: Path, system_path: Path) -> dict[str, dict]:
                         reason = (
                             "Domain events differ from the checkpoint's committed event history"
                         )
+                    elif row_digest:
+                        current_content = _project_content(db_path, cell_id, len(events))
+                        if any(row[key] != value for key, value in current_content.items()):
+                            reason = "Domain cell content differs from its committed event history"
+                        else:
+                            checkpoint_row = {
+                                key: value for key, value in row.items() if key != "status"
+                            }
+                            checkpoint_row.update(
+                                _project_content(db_path, cell_id, receipt.event_count)
+                            )
+                            if row_digest != _digest(checkpoint_row):
+                                reason = (
+                                    "Domain cell fields differ from the checkpoint's committed cell"
+                                )
                 with closing(database.connect(db_path)) as conn:
                     planned = conn.execute(
                         "SELECT MAX(round_number) FROM execution_round_requests WHERE cell_id = ?",
