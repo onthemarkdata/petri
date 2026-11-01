@@ -104,3 +104,27 @@ def test_cli_returns_zero_or_one(tmp_path, monkeypatch):
     broken = CliRunner().invoke(app, ["scan"])
     assert broken.exit_code == 1, broken.exception
     assert "phantom_edge" in broken.output and "event_payload" in broken.output
+
+
+def test_manual_scan_does_not_start_an_execution_runtime(tmp_path,monkeypatch):
+    path = seed(tmp_path)
+    monkeypatch.setattr('petri.cli.scan.find_petri_dir',lambda:tmp_path)
+    monkeypatch.setattr('petri.cli.scan.get_dish_id',lambda _: 'dish')
+    monkeypatch.setattr('petri.cli.scan.bootstrap_telemetry',lambda _:None)
+    def fail_start(*args):
+        raise AssertionError('Manual scan started execution recovery')
+    monkeypatch.setattr(DBOSApp,'start',fail_start)
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr('petri.analysis.scan_run.get_tracer',provider.get_tracer)
+    result = CliRunner().invoke(app,['scan'])
+    assert result.exit_code==0,result.exception
+    assert len(database.read_events(path,event_type='scan_completed'))==1
+    assert not (tmp_path/'dbos.sqlite').exists()
+    spans = exporter.get_finished_spans()
+    assert len(spans)==1 and spans[0].parent is None
+    assert spans[0].attributes['petri.dish_id']=='dish'
+    assert spans[0].attributes['petri.scan.trigger']=='manual'
+    assert spans[0].attributes['petri.scan.findings_count']==0
+    provider.shutdown()
