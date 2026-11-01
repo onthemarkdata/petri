@@ -230,3 +230,10 @@ limits:
 #     logs_endpoint: null
 #     headers: {}
 #     protocol: http/protobuf
+
+# Optional USD rates per million reported tokens, keyed by exact model ID.
+# Without a matching entry, telemetry omits cost_usd.
+# prices:
+#   provider:model:
+#     input_per_million: 1.0
+#     output_per_million: 2.0

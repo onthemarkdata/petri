@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 import typer
 
+from petri.telemetry.commands import traced_command
 
 from petri.cli._bootstrap import (
     find_petri_dir,
@@ -161,6 +162,7 @@ def _make_cell_created_callback(
 
 def register(app: typer.Typer) -> None:
     @app.command()
+    @traced_command("seed")
     def seed(
         source: str = typer.Argument(
             ..., help="Claim text, URL, or file path to decompose"

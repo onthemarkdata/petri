@@ -36,3 +36,12 @@ class TelemetryConfig(BaseModel):
     local: LocalTelemetryConfig = Field(default_factory=LocalTelemetryConfig)
     sample_ratio: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)] = 1.0
     service_name: Annotated[str, Field(min_length=1)] = "petri"
+
+
+class ModelPrice(BaseModel):
+    """Explicit USD rates per million reported input and output tokens."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    input_per_million: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+    output_per_million: Annotated[float, Field(ge=0, allow_inf_nan=False)]
