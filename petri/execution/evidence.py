@@ -6,13 +6,14 @@ import json
 from collections.abc import Iterable, Sequence
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from petri.agents.contract import AGENT_SPECS, AgentName, Phase
 from petri.agents.outputs import SourceCitation
+from petri.structured_output import NamedOutput
 
 
-class RecordedAssessment(BaseModel):
+class RecordedAssessment(NamedOutput):
     model_config = ConfigDict(extra="forbid")
     agent: str
     verdict: str

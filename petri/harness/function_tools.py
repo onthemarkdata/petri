@@ -36,9 +36,10 @@ def tool_instructions(parameters: ModelRequestParameters, *, required: bool = Fa
     completion = ""
     if completed and not required:
         completion = (
-            "\nThe required search has returned. Use the existing cell IDs in its tool results and "
-            "complete the original task. Do not repeat an identical search. Search again only for "
-            "a different specific premise. Return the final result in the required format:\n"
+            "\nHost tool results are available. Continue the original task using those results. "
+            "Call any further tools needed to meet its evidence requirements; a search result "
+            "does not substitute for fetching a cited source. Do not repeat an identical successful "
+            "call without a reason. When ready, return the final result in the required format:\n"
             + (parameters.prompted_output_instructions or "Return the final answer.")
         )
     return required_note + (

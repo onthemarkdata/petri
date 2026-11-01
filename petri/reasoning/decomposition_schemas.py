@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, StringConstraints, Tag, model_validator
 
+from petri.structured_output import NamedOutput
+
 ClaimText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -31,12 +33,12 @@ Premise = Annotated[
 ]
 
 
-class InitialDecomposition(BaseModel):
+class InitialDecomposition(NamedOutput):
     model_config = ConfigDict(extra="forbid")
     nodes: list[Premise] = Field(min_length=1)
 
 
-class WhyExpansion(BaseModel):
+class WhyExpansion(NamedOutput):
     model_config = ConfigDict(extra="forbid")
     is_atomic: bool = Field(strict=True)
     bedrock_reason: ClaimText | None = None
