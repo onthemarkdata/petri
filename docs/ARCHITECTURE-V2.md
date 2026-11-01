@@ -146,3 +146,37 @@ change in the convergence loader is necessary because its unchanged tests expect
 unchanged. Legacy test fixtures explicitly copy the legacy file to the dish's
 normal filename. The final v2 CLI switch must initialize from the current v2
 `petri.yaml` and use the selected v2 harness instead of this temporary path.
+
+## V2 agent-content schema
+
+The v2 loader is `petri.agents.config.load_agent_config(path)`. Callers must pass
+an explicit path and retain the returned `AgentConfig`; there is no fallback,
+module-level loaded config, or cache. Missing files raise `AgentConfigError`.
+The shipped file declares `schema_version: 2`. A v0.3.x dish configuration fails
+validation; v2 does not silently migrate it (D8).
+
+| Status | Configuration | V2 representation |
+| --- | --- | --- |
+| Stays in YAML | Instructions; pass/block verdict lists | `agents.<name>` content; verdicts must remain in the code-defined partition |
+| Stays in YAML | Default model, tools, iteration cap | `model` string, `agent_tools`, `max_iterations` |
+| Stays in YAML | Source hierarchy | Six typed levels and the terminal eligibility threshold |
+| Stays in YAML | Debate participants and purpose | Typed roster references; whole/half rounds accepted at the boundary |
+| Moves to code | Agent membership, display name, lead flag, phase, blocking, scope, redirect | `AgentName` and frozen `AgentSpec`; these keys are rejected in content |
+| Moves to code | Meaning of fractional debate rounds | Programmatic debate protocol; YAML supplies the configured value |
+| New in YAML | Per-agent model override | Optional `agents.<name>.model` |
+| New in YAML | Usage caps | `limits.run` and `limits.debate`, convertible with `usage_kwargs()` |
+| New in YAML | Harness selection | `harness` mapping with backend, optional model/provider, and tools |
+| Relocated | Socratic utility content | `pre_pipeline.socratic_questioner`, outside the roster |
+
+The default cell-run caps are 25 requests, 200,000 tokens and 10 tool calls.
+Debates have caps of 6 requests and 50,000 tokens. These are configuration values
+for the execution layer to enforce; loading a configuration does not itself
+limit inference. Defaults use the pi harness. No inference occurs during loading.
+
+Users can select a subset of an agent's existing verdict vocabulary, but cannot
+invent verdict strings or move a verdict between pass and block partitions.
+Blocking and conditional agents must retain a nonempty block vocabulary.
+Duplicate YAML keys, duplicate verdicts, unknown roster names, missing agents,
+unknown content fields and invalid debate participants are errors. Importing agent modules
+loads no YAML configuration and creates no inference models. Decomposer-specific settings
+remain outside this schema until the decomposer milestone adds them explicitly.

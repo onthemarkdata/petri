@@ -71,4 +71,6 @@ def test_utility_content_is_preserved_outside_roster():
     current = yaml.safe_load((defaults / "petri.yaml").read_text())
     legacy = yaml.safe_load((defaults / "legacy-petri.yaml").read_text())
     assert set(current["agents"]) == set(AgentName)
-    assert current["pre_pipeline"]["socratic_questioner"] == legacy["agents"]["socratic_questioner"]
+    utility = current["pre_pipeline"]["socratic_questioner"]
+    for key in ("instruction", "verdicts_pass", "verdicts_block"):
+        assert utility[key] == legacy["agents"]["socratic_questioner"][key]
