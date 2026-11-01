@@ -237,7 +237,23 @@ def test_regeneration_snapshots_before_replacement_and_keeps_history(tmp_path, m
         return result
 
     monkeypatch.setattr(dashboard_runs, "snapshot_before_destructive", snapshot)
-    _prepare_dashboard_seed(app, seed_spec("Replacement unit claim", regenerate=True, attempt=2))
+    backend = FakeBackend()
+    client = TestClient(create_app(tmp_path, execution_backend=backend))
+    response = client.post(
+        "/api/seed",
+        json={
+            "claim": "Replacement unit claim",
+            "colony": "units",
+            "regenerate": True,
+        },
+    )
+    assert response.status_code == 202
+    assert snapshots == []
+    assert database.get_cell(path, "dish-units-000-000")["claim_text"] == "Original unit claim"
+    queued = DashboardSeedSpec(
+        backend.requests[0], seed_spec("Replacement unit claim", attempt=2).seed
+    )
+    _prepare_dashboard_seed(app, queued)
     assert len(snapshots) == 1
     assert database.get_cell(path, "dish-units-000-000")["claim_text"] == "Replacement unit claim"
     assert len(database.read_events(path, event_type="seed_started")) == 2
@@ -301,11 +317,36 @@ async def test_real_backend_runs_prepared_seed_and_returns_saved_status(tmp_path
 def test_seed_submission_does_not_bootstrap_the_owner_in_request(tmp_path):
     class UnstartedBackend(FakeBackend):
         async def start_owner(self, *args, **kwargs):
-            raise AssertionError('Owner startup belongs to lifespan or initialization.')
+            raise AssertionError("Owner startup belongs to lifespan or initialization.")
 
         async def submit_seed(self, request):
-            raise RuntimeError('Start the dashboard execution owner before submitting a run.')
+            raise RuntimeError("Start the dashboard execution owner before submitting a run.")
 
     client = TestClient(create_app(tmp_path, execution_backend=UnstartedBackend()))
-    assert client.post('/api/seed',json={'claim':'Physical units'}).status_code == 503
-    assert not list(tmp_path.rglob('*'))
+    assert client.post("/api/seed", json={"claim": "Physical units"}).status_code == 503
+    assert not list(tmp_path.rglob("*"))
+
+
+def test_owner_contention_keeps_reads_available_but_other_startup_errors_escape(tmp_path):
+    from petri.execution.dbos_app import ExecutionOwnerError
+
+    (tmp_path / "petri.yaml").write_text("name: dish\n")
+
+    class OccupiedBackend(FakeBackend):
+        async def start_owner(self, *args, **kwargs):
+            raise ExecutionOwnerError("Another process owns this dish.")
+
+    with TestClient(create_app(tmp_path, execution_backend=OccupiedBackend())) as client:
+        assert client.get("/api/ping").status_code == 200
+        assert client.get("/api/cells").json() == []
+        response = client.post("/api/seed", json={"claim": "A claim"})
+        assert response.status_code == 503
+        assert "restart the dashboard" in response.json()["detail"]
+
+    class BrokenBackend(FakeBackend):
+        async def start_owner(self, *args, **kwargs):
+            raise RuntimeError("Invalid runtime configuration")
+
+    with pytest.raises(RuntimeError, match="Invalid runtime configuration"):
+        with TestClient(create_app(tmp_path, execution_backend=BrokenBackend())):
+            pass

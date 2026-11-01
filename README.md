@@ -182,6 +182,10 @@ The API allows browser origins `http://127.0.0.1:8090` and
 `http://localhost:8090` by default. Set `dashboard.allowed_origins` in the dish
 configuration to an explicit list of HTTP or HTTPS origins when needed.
 
+If a detached CLI run already owns execution, the dashboard opens with reads and
+domain events available. New run submissions return 503 with recovery instructions.
+After the CLI owner exits, restart the dashboard to acquire run controls.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
 
 Seed foundation colonies before claims that depend on them. With the typed

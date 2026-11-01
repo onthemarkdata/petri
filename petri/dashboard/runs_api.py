@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Response
 
 from petri.dashboard.broker import AgentProgress, publish
 from petri.engine.streaming import progress_handler
-from petri.execution.backend import ExecutionBackend
+from petri.execution.backend import ExecutionBackend, ExecutionOwnerError
 from petri.execution.run_controls import RunReceipt, RunRequest, RunStatus, SeedRequest
 
 
@@ -19,6 +19,7 @@ class DashboardOwner:
         self.petri_dir = petri_dir
         self.backend = backend
         self.started = False
+        self.unavailable_reason: str | None = None
         self.lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -40,11 +41,19 @@ class DashboardOwner:
             def stream_factory(cell_id, agent):
                 return progress_handler(cell_id=cell_id, agent=agent)
 
-            await self.backend.start_owner(
-                self.petri_dir,
-                on_phase_progress=phase_progress,
-                event_stream_handler_factory=stream_factory,
-            )
+            try:
+                await self.backend.start_owner(
+                    self.petri_dir,
+                    on_phase_progress=phase_progress,
+                    event_stream_handler_factory=stream_factory,
+                )
+            except ExecutionOwnerError:
+                self.unavailable_reason = (
+                    "Another process owns this dish's execution. Dashboard reads and events remain available. "
+                    "Wait for or stop the CLI run, then restart the dashboard to enable run controls."
+                )
+                return
+            self.unavailable_reason = None
             self.started = True
 
     async def close(self) -> None:
@@ -65,8 +74,13 @@ def create_runs_router(
             id=run.id, workflow_id=run.id, status=run.status, status_url=url, colony_id=colony_id
         )
 
+    def require_controls() -> None:
+        if owner.unavailable_reason is not None:
+            raise HTTPException(503, owner.unavailable_reason)
+
     @router.post("/api/seed", status_code=202, response_model=RunReceipt)
     async def post_seed(body: SeedRequest, response: Response):
+        require_controls()
         try:
             run = await backend.submit_seed(body)
         except ValueError as error:
@@ -78,6 +92,7 @@ def create_runs_router(
 
     @router.post("/api/runs", status_code=202, response_model=RunReceipt)
     async def post_run(body: RunRequest, response: Response):
+        require_controls()
         try:
             run = await backend.submit_run(body)
         except KeyError as error:
