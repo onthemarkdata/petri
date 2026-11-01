@@ -1809,6 +1809,11 @@ var State = {
 
 // ── Utility ─────────────────────────────────────────────────────────────
 
+function colonyDisplayName(colonyId, cell) {
+  var prefix = cell && cell.dish_id ? cell.dish_id + '-' : '';
+  return prefix && colonyId.indexOf(prefix) === 0 ? colonyId.slice(prefix.length) : colonyId;
+}
+
 function escapeHtml(str) {
   var el = document.createElement('span');
   el.textContent = str || '';
@@ -2131,7 +2136,7 @@ function renderLab() {
         statusCounts[cell.status] = (statusCounts[cell.status] || 0) + 1;
       });
 
-      var displayName = colonyId.split('-').slice(1).join('-') || colonyId;
+      var displayName = colonyDisplayName(colonyId, colonyCells[0]);
 
       var card = buildEl('div', { className: 'hud-panel', onclick: function() { navigate('colony', colonyId); } });
 
@@ -2194,7 +2199,7 @@ function loadColonyDAG(colonyId) {
       }
     });
 
-    var displayName = (colonyId.split('-').slice(1).join('-') || colonyId).toUpperCase();
+    var displayName = colonyDisplayName(colonyId, colonyCells[0]).toUpperCase();
     var maxLevel = 0;
     colonyCells.forEach(function(cell) { if (cell.level > maxLevel) maxLevel = cell.level; });
     var activeCount = colonyCells.filter(function(cell) { return activeSet[cell.cell_id]; }).length;
@@ -2422,7 +2427,7 @@ function renderDAG(colonyCells, allCells, colonyId, activeSet, edges) {
     var levelSeq = parts.length >= 2
       ? 'L' + parts[0] + '.' + parts[1]
       : (suffix || ('L' + simCell.level));
-    var slug = colonyId.split('-').slice(1).join('-') || colonyId;
+    var slug = colonyDisplayName(colonyId, simCell.data);
     return (slug ? slug + ' · ' : '') + levelSeq;
   }
 

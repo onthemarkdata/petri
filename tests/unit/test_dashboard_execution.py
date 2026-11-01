@@ -37,3 +37,14 @@ def test_dashboard_has_no_queue_store_imports():
                     assert all(alias.name != "queue" for alias in node.names), path
             elif isinstance(node, ast.Import):
                 assert all(alias.name != "petri.storage.queue" for alias in node.names), path
+
+
+def test_cell_reads_include_explicit_dish_identity(seeded_petri_dir):
+    petri_dir = seeded_petri_dir['petri_dir']
+    client = TestClient(create_app(petri_dir,execution_backend=DBOSExecutionBackend()))
+    cells = client.get('/api/cells').json()
+    assert cells and all(cell['dish_id'] == seeded_petri_dir['dish_id'] for cell in cells)
+    detail = client.get('/api/cell/'+cells[0]['cell_id']).json()
+    assert detail['dish_id'] == seeded_petri_dir['dish_id']
+    assert detail['colony_id'] == cells[0]['colony_id']
+    assert not (petri_dir/'dbos.sqlite').exists()

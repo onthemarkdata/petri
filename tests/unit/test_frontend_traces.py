@@ -82,3 +82,21 @@ def test_frontend_loads_no_remote_scripts_fonts_or_images():
     for url in re.findall(r'url\([\'\"]?([^\)\'\"]+)', html):
         assert not re.match(r'^(https?:)?//', url)
     assert all('data-vendor="' + filename + '"' in html for filename in ['xterm.css', 'xterm.js', 'fit.js', 'marked.js', 'purify.js'])
+
+
+def test_colony_labels_use_the_complete_dish_prefix():
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js is required for the frontend label contract.')
+    html = build_frontend_html()
+    code = re.search(r'function colonyDisplayName\(.*?\n\}',html,re.S)[0]
+    cases = [
+        ['grow-live-isolated',{'dish_id':'grow-live'}],
+        ['grow-live-long-colony-name',{'dish_id':'grow-live'}],
+        ['dish-alpha',{'dish_id':'dish'}],
+        ['other-colony',{'dish_id':'grow-live'}],
+        ['unknown-prefix-colony',None],
+    ]
+    script = code+'\nconsole.log(JSON.stringify('+json.dumps(cases)+'.map(args=>colonyDisplayName(...args))));'
+    result = subprocess.run([node,'-e',script],check=True,capture_output=True,text=True)
+    assert json.loads(result.stdout) == ['isolated','long-colony-name','alpha','other-colony','unknown-prefix-colony']

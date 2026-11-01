@@ -155,7 +155,7 @@ def create_app(
     def get_cells():
         """Read cell metadata and relationships from each v2 dish database."""
         return [
-            {key: cell[key] for key in ('cell_id', 'colony_id', 'claim_text', 'level', 'status', 'dependencies', 'dependents')}
+            {'dish_id': dish.dish_id, **{key: cell[key] for key in ('cell_id', 'colony_id', 'claim_text', 'level', 'status', 'dependencies', 'dependents')}}
             for dish in query.enumerate_dishes(petri_dir) for cell in query.list_cells(dish.db_path)
         ]
 
@@ -203,6 +203,7 @@ def create_app(
             cell = query.get_cell(dish.db_path, cell_id)
             if cell is not None:
                 result: dict[str, Any] = {key: cell[key] for key in ('cell_id', 'colony_id', 'claim_text', 'level', 'status', 'dependencies', 'dependents', 'evidence_md', 'summary_md')}
+                result['dish_id'] = dish.dish_id
                 result['events'] = query.query_events(dish.db_path, cell_id=cell_id, limit=None)
                 return result
         raise HTTPException(404, 'Cell %s not found' % cell_id)
