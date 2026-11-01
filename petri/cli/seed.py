@@ -214,6 +214,9 @@ def register(app: typer.Typer) -> None:
         """Seed a new colony from a claim, URL, or file. Requires Claude Code CLI."""
         petri_dir = find_petri_dir()
         dish_id = get_dish_id(petri_dir)
+        from petri.reasoning.decomposition_settings import DecompositionSettings
+
+        settings = DecompositionSettings.from_dish(petri_dir)
 
         from petri.cli_ui import Spinner
         from petri.graph.colony import ColonyGraph, serialize_colony
@@ -459,6 +462,7 @@ def register(app: typer.Typer) -> None:
                         on_progress=spinner.update,
                         on_cell_created=on_cell_created,
                         center=center_cell,
+                        settings=settings,
                     )
             except Exception as exc:
                 log_for_this_run(
