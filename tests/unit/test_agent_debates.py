@@ -117,3 +117,43 @@ async def test_history_survives_next_iteration_and_event_append(tmp_path):
     assert len(summary["exchanges"]) == 2
     with connect(target.db_path) as conn:
         assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 2
+
+
+@pytest.mark.asyncio
+async def test_pairing_and_round_identify_distinct_replayable_events(tmp_path):
+    config, agents, _ = setup_debate()
+    target = SQLiteEventLog(tmp_path / "petri.sqlite")
+    first = await run_debate(config.debates[0].protocol, agents, "Claim.", config.limits.debate)
+    second = await run_debate(config.debates[1].protocol, agents, "Claim.", config.limits.debate)
+    event = log_debate(target, "test-colony-0-1", 1, first, round_number=1)
+    replay = log_debate(target, "test-colony-0-1", 1, first, round_number=1)
+    other_pair = log_debate(target, "test-colony-0-1", 1, second, round_number=1)
+    other_round = log_debate(target, "test-colony-0-1", 1, first, round_number=2)
+    assert replay == event
+    assert len({event.id, other_pair.id, other_round.id}) == 3
+    assert len(load_events(target)) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_name", ["TransientHarnessError", "AuthExpiredError"])
+async def test_harness_failure_preserves_completed_turns(error_name):
+    from petri.harness import errors
+
+    config, agents, _ = setup_debate()
+
+    def fail(messages, info):
+        raise getattr(errors, error_name)("Local backend unavailable.")
+
+    failed_agents = build_agents(
+        config,
+        constitution="Use only supplied evidence.",
+        model=FunctionModel(fail),
+        output_mode="tool",
+    )
+    agents[AgentName.CHAMPION] = failed_agents[AgentName.CHAMPION]
+    result = await run_debate(config.debates[0].protocol, agents, "Claim.", config.limits.debate)
+    assert result.status == DebateStatus.EXECUTION_ERROR
+    assert len(result.exchanges) == 1
+    assert result.exchanges[0].speaker == AgentName.SKEPTIC
+    assert "skeptic argument 1" in str(result.message_history)
+    assert result.detail == "Local backend unavailable."
