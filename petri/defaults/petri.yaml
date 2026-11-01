@@ -4,6 +4,9 @@ name: petri
 model: anthropic:claude-sonnet-4-6
 harness:
   backend: pi
+  model: claude-sonnet-4-6
+  provider: anthropic
+  tools: []
 max_iterations: 3
 agent_tools:
 - WebSearch

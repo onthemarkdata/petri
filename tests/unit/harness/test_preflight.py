@@ -93,3 +93,33 @@ def test_inspect_missing_pi_is_actionable(monkeypatch, tmp_path, versions):
     result = CliRunner().invoke(app, [])
     assert result.exit_code == 1
     assert "README.md#install-pi-and-nodejs" in result.stdout
+
+
+def test_init_selects_pi_and_checks_created_dish(monkeypatch, tmp_path, versions):
+    from petri.cli.init import register as register_init
+    from petri.config import load_dish_config
+    from petri.harness.pi.model import PiModel
+    from petri.harness.resolve import resolve_model
+
+    app = typer.Typer()
+    register_init(app)
+    versions["node"] = (0, "v22.18.0")
+    result = CliRunner().invoke(app, [str(tmp_path), "--no-questions"])
+    assert result.exit_code == 0, result.output
+    assert "requires Node.js 22.19.0+" in result.output
+    config = load_dish_config(tmp_path / ".petri")
+    assert config["harness"]["backend"] == "pi"
+    assert isinstance(resolve_model(config), PiModel)
+
+
+def test_repair_preserves_existing_harness(tmp_path):
+    from petri.cli.init import create_petri_dish
+    from petri.config import load_dish_config
+
+    defaults = tmp_path / "defaults"
+    defaults.mkdir()
+    original = "name: existing\nharness:\n  backend: provider\n  model: test\n"
+    (defaults / "petri.yaml").write_text(original)
+    create_petri_dish(tmp_path, dish_name="replacement")
+    assert (defaults / "petri.yaml").read_text() == original
+    assert load_dish_config(tmp_path)["harness"]["backend"] == "provider"
