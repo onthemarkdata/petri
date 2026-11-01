@@ -170,7 +170,7 @@ def evaluate_short_circuits(
     if convergence.missing_blocking:
         return None
 
-    rules = []
+    rules: list[dict[str, str]] = []
     for name, spec in AGENT_SPECS.items():
         if spec.redirect_on_block:
             rules.extend({"agent": name.value, "verdict": verdict, "type": spec.redirect_on_block.lower()}
