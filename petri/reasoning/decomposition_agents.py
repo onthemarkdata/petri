@@ -83,6 +83,7 @@ class DecompositionInput:
     colony_id: str = ""
     search_results: set[str] = field(default_factory=set)
     search_performed: bool = False
+    require_counterargument: bool = False
 
 
 def initial_instructions(request: DecompositionInput) -> str:
@@ -92,7 +93,8 @@ def initial_instructions(request: DecompositionInput) -> str:
 
 
 def why_instructions(request: DecompositionInput) -> str:
-    return BEDROCK_TEST + SEARCH_INSTRUCTIONS + FLAT_RESULT + build_decompose_why_prompt(
+    context = f"Guidance and trigger context:\n{request.guidance}\n\n" if request.guidance else ""
+    return BEDROCK_TEST + context + SEARCH_INSTRUCTIONS + FLAT_RESULT + build_decompose_why_prompt(
         request.claim, request.parent_level, request.parent_seq,
     ) + (
         COUNTERARGUMENT + "If the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), "
@@ -238,6 +240,11 @@ def parent_overlap(parent: str, child: str) -> float:
 @five_whys.output_validator
 def validate_expansion(context: RunContext[DecompositionInput], output: WhyExpansion) -> WhyExpansion:
     validate_references(context, output.sub_premises)
+    if context.deps.require_counterargument and not any(
+        isinstance(child, PremiseCandidate) and child.relation in ("limits", "rebuts")
+        for child in output.sub_premises
+    ):
+        raise ModelRetry("Critical-flaw re-decomposition requires a limits or rebuts premise, even for a singleton or atomic response.")
     if output.is_atomic:
         return output
     duplicates = [child for child in output.sub_premises
@@ -261,6 +268,11 @@ def validate_expansion(context: RunContext[DecompositionInput], output: WhyExpan
         output = output.model_copy(update={"sub_premises": [
             child for child in output.sub_premises if child not in duplicates
         ]})
+    if context.deps.require_counterargument and not any(
+        isinstance(child, PremiseCandidate) and child.relation in ("limits", "rebuts")
+        for child in output.sub_premises
+    ):
+        raise ModelRetry("Retain a distinct limits or rebuts premise for this critical-flaw re-decomposition.")
     if len(output.sub_premises) >= 2 and all(
         not isinstance(child, PremiseCandidate) or child.relation == "supports" for child in output.sub_premises
     ):

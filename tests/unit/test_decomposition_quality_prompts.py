@@ -161,3 +161,28 @@ def test_flat_premise_errors_do_not_suggest_an_unrelated_reference_shape():
     assert len(errors) == 1 and errors[0]["type"] == "extra_forbidden"
     assert "existing_cell_id" not in str(caught.value)
     assert "Never put sub_premises" in why_instructions(DecompositionInput("claim"))
+
+
+def test_why_guidance_is_explicit_and_empty_guidance_adds_no_section():
+    assert "Guidance and trigger context:" not in why_instructions(DecompositionInput("claim"))
+    assert "Guidance and trigger context:\nCRITICAL_FLAW_FOUND: revisit the causal assumption" in why_instructions(
+        DecompositionInput("claim", guidance="CRITICAL_FLAW_FOUND: revisit the causal assumption"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", [
+    {"is_atomic": True, "bedrock_reason": "An asserted definition", "sub_premises": []},
+    expansion(child("A supporting mechanism")),
+])
+async def test_critical_flaw_requires_counterargument_even_for_singleton_or_atomic(first):
+    model, calls = scripted_model([first, expansion(child("The mechanism can fail under overload", "limits"))])
+    result = await run_decomposition_agent(five_whys, DecompositionInput("A causal claim", require_counterargument=True), model=model)
+    assert len(calls) == 2 and result.sub_premises[0].relation == "limits"
+
+
+@pytest.mark.asyncio
+async def test_critical_flaw_counterargument_requirement_exhausts_loudly():
+    model, calls = scripted_model([{"is_atomic": True, "bedrock_reason": "An asserted definition", "sub_premises": []}])
+    with pytest.raises(DecompositionError, match="five_whys failed"):
+        await run_decomposition_agent(five_whys, DecompositionInput("A causal claim", require_counterargument=True), model=model)
+    assert len(calls) == 2
