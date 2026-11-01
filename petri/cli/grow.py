@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import typer
 
 from petri.telemetry.commands import traced_command
 
-from petri.cli._bootstrap import find_petri_dir, resolve_provider
+from petri.cli._bootstrap import find_petri_dir, get_dish_id, resolve_provider
 from petri.cli_ui import (
     MultiSpinner,
     grow_status_loop,
@@ -139,6 +141,13 @@ def register(app: typer.Typer) -> None:
         # ── live path: loop until terminal/stopped/no-progress ──
         def _get_states() -> dict[str, int]:
             try:
+                if selected_cells or colony_name:
+                    colonies = {colony_name, f"{get_dish_id(petri_dir)}-{colony_name}"}
+                    return dict(Counter(
+                        entry["queue_state"] for entry in backend.entries(petri_dir).values()
+                        if (not selected_cells or entry["cell_id"] in selected_cells)
+                        and (not colony_name or entry["colony_id"] in colonies)
+                    ))
                 return backend.state_summary(petri_dir)
             except Exception:
                 return {}
@@ -254,7 +263,6 @@ def register(app: typer.Typer) -> None:
 
         from petri.config import load_dish_config
         if export or load_dish_config(petri_dir).auto_export:
-            from petri.cli._bootstrap import get_dish_id
             from petri.storage.export import export_incremental
 
             export_incremental(petri_dir, get_dish_id(petri_dir))

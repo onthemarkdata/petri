@@ -82,7 +82,8 @@ def test_cli_scoped_resume_preserves_unselected_cancellation(tmp_path, monkeypat
     if scope in {"cell", "both"}:
         arguments += ["--cell", ids[0]]
     result = CliRunner().invoke(app, arguments)
-    assert result.exit_code in {0, 1}, (result.output, result.exception)
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert "Grow loop finished: all_terminal" in result.output
     selected = set(ids[:2] if scope == "colony" else ids[:1])
     client = DBOSClient(system_database_url=f"sqlite:///{directory / 'dbos.sqlite'}")
     try:
