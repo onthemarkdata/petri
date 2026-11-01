@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/ef47dc07-741d-4ac5-9f35-2afb12fc9046
 
 **Hosted inference costs money regardless of the selected backend.** Each cell goes through 13 agents across multiple iterations. A colony with 10+ cells can generate thousands of calls across decomposition, research, critique, debate, red team, and evaluation.
 
-With **pi**, charges follow its configured provider or subscription. **Claude Code** follows your Claude Code account and plan. A direct **provider** backend uses that provider's API credentials and billing. Local models avoid hosted API charges but still require suitable hardware and runtime resources. Start with a small claim and monitor usage before running a large colony.
+With **pi**, charges follow its configured provider or subscription. **Claude Code** follows your Claude Code account and plan. A direct **provider** backend uses that provider's API credentials and billing. Local models avoid hosted API charges but still require suitable hardware and runtime resources. Start with a small claim and monitor usage before running a large colony. The dashboard shows measured token and cost totals; missing usage or prices appear as n/a. See [Observability](docs/observability.md).
 
 ## Choosing an inference backend
 
@@ -222,6 +222,11 @@ Each cell in the colony goes through:
 **Citation-first evidence model:** Every agent must back claims with URL-linked sources ranked by a 6-level hierarchy (direct measurement → community report). Summaries are kept terse to prevent context rot across iterations.
 
 Every action is logged as an immutable event in the cell's JSONL file, identified by a composite key (`{dish}-{colony}-{level}-{seq}-{8hex}`).
+
+## Observability
+
+Traces and measured token and cost totals are available locally in `petri launch`.
+No external service is required. See the [configuration and optional OTLP recipes](docs/observability.md).
 
 ## Architecture
 
