@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 from petri.storage import database
+from petri.reasoning.seed_graph import SeedState
 
 
 def current_attempt(db_path: Path, center_id: str) -> int:
@@ -25,4 +26,27 @@ def classify_cells(
             result[event["cell_id"]] = "expanded"
         elif event["type"] == "cell_marked_atomic":
             result[event["cell_id"]] = "atomic"
+    center = next(
+        (cell for cell in database.list_cells(db_path, colony=colony_id) if cell["level"] == 0),
+        None,
+    )
+    edited = latest_edited_state(db_path, center["id"], attempt) if center else None
+    if edited is not None:
+        return {cell.id: "atomic" if cell.is_atomic else "expanded" for cell in edited.cells}
     return result
+
+
+def latest_edited_state(db_path: Path, center_id: str, attempt: int) -> SeedState | None:
+    """A committed human edit supersedes earlier model-output events."""
+    events = database.read_events(db_path, cell_id=center_id, event_type="decomposition_edited")
+    for event in reversed(events):
+        if event["data"].get("attempt") == attempt:
+            state = SeedState.model_validate(event["data"]["state"])
+            if (
+                not state.complete
+                or state.attempt != attempt
+                or not any(cell.id == center_id for cell in state.cells)
+            ):
+                raise ValueError("Recorded seed edit has an invalid completed state")
+            return state
+    return None

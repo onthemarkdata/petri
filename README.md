@@ -175,6 +175,16 @@ specific existing premise instead of creating a duplicate. Existing colonies
 are not retroactively linked. Search uses deterministic word overlap; it does
 not establish that two claims are logically equivalent.
 
+At seed approval, choose **Edit** to change the unapproved draft without another
+model call. Petri opens YAML in `$EDITOR` (or `$VISUAL`); keep premise IDs, edit
+text or relations, remove rows to drop premises, or set `is_atomic: true` with a
+`bedrock_reason`. Without an editor, use `edit N <text>`, `drop N`,
+`relation N <supports|limits|rebuts>`, or `atomic N <reason>`, then `done`.
+Dropping a parent or marking it atomic also removes its descendants. Invalid
+edits return to the editor before any draft rows change. Petri backs up the dish
+and records the validated edit before applying it; `seed --resume --colony NAME`
+recovers an interrupted edit. Approved colonies cannot be edited through seed.
+
 ## CLI Reference
 
 ```

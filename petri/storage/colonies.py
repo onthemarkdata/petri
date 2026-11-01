@@ -112,9 +112,9 @@ def list_colonies(db_path: Path) -> list[tuple[ColonyGraph, Colony]]:
     return result
 
 
-def clear_unapproved_colony(db_path: Path, colony_id: str) -> None:
+def clear_unapproved_colony(db_path: Path, colony_id: str, *, connection: sqlite3.Connection | None = None) -> None:
     """Discard this seed's draft rows while retaining its event history."""
-    with database._write(db_path) as conn:
+    with database.write_connection(db_path, connection) as conn:
         approved = conn.execute(
             "SELECT 1 FROM events WHERE event_type='colony_approved' AND cell_id IN "
             "(SELECT id FROM cells WHERE colony=?) LIMIT 1", (colony_id,),
