@@ -13,16 +13,25 @@ class PremiseCandidate(BaseModel):
     relation: Literal["supports", "limits", "rebuts"] = "supports"
 
 
+class ReferencePremise(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    existing_cell_id: ClaimText
+    reason: ClaimText
+
+
+Premise = PremiseCandidate | ReferencePremise
+
+
 class InitialDecomposition(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    nodes: list[PremiseCandidate] = Field(min_length=1)
+    nodes: list[Premise] = Field(min_length=1)
 
 
 class WhyExpansion(BaseModel):
     model_config = ConfigDict(extra="forbid")
     is_atomic: bool = Field(strict=True)
     bedrock_reason: ClaimText | None = None
-    sub_premises: list[PremiseCandidate]
+    sub_premises: list[Premise]
 
     @model_validator(mode="after")
     def require_bedrock_reason(self):

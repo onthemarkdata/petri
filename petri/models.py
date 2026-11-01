@@ -295,6 +295,7 @@ class Edge(BaseModel):
     from_cell: str  # composite cell key (the cell that depends)
     to_cell: str  # composite cell key (the dependency)
     edge_type: str = "intra_colony"  # "intra_colony" or "cross_colony"
+    reason: str = ""
 
 
 class Colony(BaseModel):

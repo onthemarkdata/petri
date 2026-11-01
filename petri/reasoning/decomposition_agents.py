@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 import logging
 import re
@@ -12,7 +13,9 @@ from pydantic_ai.messages import AgentStreamEvent, PartDeltaEvent, PartStartEven
 from pydantic_ai.models import Model
 
 from petri.harness.errors import FailureDetail, HarnessError
-from petri.reasoning.decomposition_schemas import InitialDecomposition, WhyExpansion
+from petri.reasoning.decomposition_schemas import InitialDecomposition, PremiseCandidate, WhyExpansion
+from petri.reasoning.cell_search import CellSearchCandidate, search
+from petri.storage import database
 from petri.reasoning.prompts import build_decompose_claim_prompt, build_decompose_why_prompt
 
 Progress = Callable[[str], None] | None
@@ -34,6 +37,14 @@ COUNTERARGUMENT = (
     "For a non-atomic expansion, include the strongest counterargument as a sub-claim "
     "with relation limits or rebuts; other premises may support the parent. "
     "A single indispensable sub-premise is exempt from this requirement.\n\n"
+)
+
+SEARCH_INSTRUCTIONS = (
+    "Before proposing each premise, call search_cells with the specific claim you intend to add. "
+    "When a matching existing cell already represents that premise, return a ReferencePremise "
+    "with existing_cell_id and a reason instead of creating a duplicate. Prefer the specific "
+    "matching non-root cell over its colony root. Search across earlier colonies only; "
+    "seed foundation colonies before dependent colonies.\n\n"
 )
 
 OUTPUT_TEMPLATE = (
@@ -59,16 +70,20 @@ class DecompositionInput:
     parent_level: int = 0
     parent_seq: int = 0
     on_warning: Callable[[str, str, float], None] | None = None
+    db_path: Path | None = None
+    colony_id: str = ""
+    search_results: set[str] = field(default_factory=set)
+    search_performed: bool = False
 
 
 def initial_instructions(request: DecompositionInput) -> str:
-    return QUALITY_BAR + build_decompose_claim_prompt(
+    return SEARCH_INSTRUCTIONS + QUALITY_BAR + build_decompose_claim_prompt(
         request.claim, request.clarifications, request.guidance,
     ) + "STEP 4 — EMIT JSON.\nReturn the selected premises using the supplied output schema."
 
 
 def why_instructions(request: DecompositionInput) -> str:
-    return BEDROCK_TEST + build_decompose_why_prompt(
+    return BEDROCK_TEST + SEARCH_INSTRUCTIONS + build_decompose_why_prompt(
         request.claim, request.parent_level, request.parent_seq,
     ) + (
         COUNTERARGUMENT + "If the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), "
@@ -97,6 +112,51 @@ def initial_prompt(context: RunContext[DecompositionInput]) -> str:
 @five_whys.instructions
 def why_prompt(context: RunContext[DecompositionInput]) -> str:
     return why_instructions(context.deps)
+
+
+@initial_decomposer.tool
+@five_whys.tool
+def search_cells(context: RunContext[DecompositionInput], query: str, top_k: int = 5) -> list[CellSearchCandidate]:
+    """Find existing premises in earlier colonies of this dish by word overlap."""
+    context.deps.search_performed = True
+    if context.deps.db_path is None:
+        return []
+    # Exclude this draft's cells so references cannot point back into its ancestors.
+    if type(top_k) is not int or top_k <= 0:
+        raise ModelRetry("top_k must be a positive integer")
+    results = search(context.deps.db_path, query, top_k, exclude_colony=context.deps.colony_id)
+    context.deps.search_results.update(cell.id for cell in results)
+    return results
+
+
+def validate_references(context: RunContext[DecompositionInput], candidates) -> None:
+    if candidates and context.deps.db_path is not None and context.deps.db_path.is_file():
+        has_earlier_cells = any(row["colony"] != context.deps.colony_id
+                                for row in database.list_cells(context.deps.db_path))
+        if has_earlier_cells and not context.deps.search_performed:
+            raise ModelRetry("Call search_cells before proposing premises, including paraphrases. Search for each specific premise.")
+    for candidate in candidates:
+        if isinstance(candidate, PremiseCandidate):
+            if context.deps.db_path is not None:
+                matches = search(context.deps.db_path, candidate.claim_text, exclude_colony=context.deps.colony_id)
+                words = re.findall(r"\w+", candidate.claim_text.casefold())
+                if any(re.findall(r"\w+", match.claim_text.casefold()) == words for match in matches):
+                    raise ModelRetry(
+                        "This premise already exists in an earlier colony. Call search_cells for "
+                        f"{candidate.claim_text!r} and return a ReferencePremise instead of duplicating it."
+                    )
+            continue
+        row = (database.get_cell(context.deps.db_path, candidate.existing_cell_id)
+               if context.deps.db_path is not None else None)
+        if (row is None or row["colony"] == context.deps.colony_id
+                or candidate.existing_cell_id not in context.deps.search_results):
+            raise ModelRetry("Reference an existing cell returned by search_cells from an earlier colony.")
+
+
+@initial_decomposer.output_validator
+def validate_initial_references(context: RunContext[DecompositionInput], output: InitialDecomposition) -> InitialDecomposition:
+    validate_references(context, output.nodes)
+    return output
 
 
 async def run_decomposition_agent(
@@ -140,12 +200,13 @@ def parent_overlap(parent: str, child: str) -> float:
 
 @five_whys.output_validator
 def validate_expansion(context: RunContext[DecompositionInput], output: WhyExpansion) -> WhyExpansion:
+    validate_references(context, output.sub_premises)
     if output.is_atomic:
         return output
     duplicates = [child for child in output.sub_premises
-                  if parent_overlap(context.deps.claim, child.claim_text) >= DUPLICATE_THRESHOLD]
+                  if isinstance(child, PremiseCandidate) and parent_overlap(context.deps.claim, child.claim_text) >= DUPLICATE_THRESHOLD]
     missing_counterargument = len(output.sub_premises) >= 2 and all(
-        child.relation == "supports" for child in output.sub_premises
+        not isinstance(child, PremiseCandidate) or child.relation == "supports" for child in output.sub_premises
     )
     if context.retry == 0 and (duplicates or missing_counterargument):
         problems = []
@@ -164,7 +225,7 @@ def validate_expansion(context: RunContext[DecompositionInput], output: WhyExpan
             child for child in output.sub_premises if child not in duplicates
         ]})
     if len(output.sub_premises) >= 2 and all(
-        child.relation == "supports" for child in output.sub_premises
+        not isinstance(child, PremiseCandidate) or child.relation == "supports" for child in output.sub_premises
     ):
         raise DecompositionError("five_whys failed: the retry still lacks a counterargument.")
     return output

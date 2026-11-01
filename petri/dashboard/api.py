@@ -465,6 +465,7 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
                 colony_name=colony_name,
                 provider=provider,
                 agent_runner=provider if isinstance(provider, HarnessInferenceProvider) else None,
+                search_db_path=dish_db_path(petri_dir),
                 settings=DecompositionSettings.from_dish(petri_dir),
             )
         except Exception as exc:

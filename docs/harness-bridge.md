@@ -140,3 +140,41 @@ checks, but the model still expanded the triangle definition and called a
 mechanical claim atomic. The check demonstrates the typed stop path and
 relation persistence; it does not establish reliable semantic bedrock judgment.
 The local pi and direct-provider seed/grow-dry-run checks also passed.
+
+
+### Dish search and reference premises
+
+Both named decomposition agents expose `search_cells`. The tool reads typed cell
+candidates from SQLite, ranks positive word-token Jaccard overlap, and breaks ties
+by exact phrase and cell ID. It excludes the colony currently being seeded.
+Agents must search before proposing each premise. When earlier colonies exist,
+validation rejects an output that never called the search tool, including
+paraphrased candidates. A `ReferencePremise` contains
+an `existing_cell_id` and a nonempty `reason`; unknown IDs or IDs in the current
+draft receive validation feedback. Reference IDs must also have appeared in the
+current call's search results. New premises exactly matching an earlier claim
+(case and punctuation ignored) receive a retry requesting a reference. Valid
+references append a `cross_colony` edge
+to the existing cell, without cloning or expanding it.
+
+`edge_registry` owns edge inserts and exposes append/read operations. Replaying
+an edge keeps its original reason and creation time. It does not perform
+dish-wide cycle detection; lifecycle work owns that check and future tombstones.
+No dish-level edge side file is written. Legacy draft cancellation still clears
+unapproved draft rows through the colony storage layer.
+
+Pi and Claude Code carry host function calls in complete JSON envelopes. Pydantic
+AI validates the arguments, executes registered tools, and returns results to
+the model. These host tools are separate from each CLI's built-in tool allowlist.
+Malformed envelopes remain text and receive normal structured-output validation;
+no parser extracts a call from surrounding prose.
+
+
+The November 1 local two-colony smoke did not satisfy the live reference gate.
+Pi first duplicated an existing premise without searching. With duplicate
+validation enabled, it exhausted retries after inventing a reference ID. The
+direct local Gemma run paraphrased premises and returned no cross-colony edge.
+Offline scripted tool calls verify the search/reference/storage path, including
+a real fake-pi subprocess tool round trip; they do not establish that this local
+model reliably chooses the tool. The live reference acceptance check remains
+open.

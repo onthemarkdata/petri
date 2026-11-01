@@ -157,3 +157,24 @@ async def test_history_and_validation_feedback_reach_pi(fake_pi):
     assert "json" in transport.payloads[1]["message"].lower()
     assert "verdict" in transport.payloads[-1]["message"]
     assert "required" in transport.payloads[-1]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_host_function_tool_executes_and_result_returns_to_pi(fake_pi):
+    fake_pi.scenario(
+        {"text": '{"tool_calls": [{"name": "lookup", "arguments": {"query": "solar"}}]}'},
+        {"text": "Existing premise found"},
+    )
+    calls = []
+    async with model_for(fake_pi) as model:
+        agent = Agent(model)
+
+        @agent.tool_plain
+        def lookup(query: str) -> str:
+            calls.append(query)
+            return "dish-foundation-001-001"
+
+        result = await agent.run("Find the solar premise")
+    assert calls == ["solar"]
+    assert result.output == "Existing premise found"
+    assert model.round_trips == 2

@@ -169,6 +169,12 @@ petri stop
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
 
+Seed foundation colonies before claims that depend on them. With the typed
+harness, decomposition searches earlier colonies in the dish and can reference a
+specific existing premise instead of creating a duplicate. Existing colonies
+are not retroactively linked. Search uses deterministic word overlap; it does
+not establish that two claims are logically equivalent.
+
 ## CLI Reference
 
 ```
