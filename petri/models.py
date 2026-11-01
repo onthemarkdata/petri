@@ -53,6 +53,8 @@ class QueueState(str, Enum):
 
 class EventType(str, Enum):
     scan_completed = "scan_completed"
+    redecomposition_proposed = "redecomposition_proposed"
+    redecomposition_halted = "redecomposition_halted"
     search_executed = "search_executed"
     source_reviewed = "source_reviewed"
     freshness_checked = "freshness_checked"
@@ -204,6 +206,21 @@ class AgentStepData(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class RedecompositionProposedData(BaseModel):
+    proposal_id: str
+    parent_cell_id: str
+    generation: int = Field(ge=1)
+    trigger_verdict: str
+    child_cell_ids: list[str]
+    guard_status: str
+
+
+class RedecompositionHaltedData(BaseModel):
+    proposal_id: str
+    generation: int = Field(ge=1)
+    reason: str
+
+
 class ScanCompletedData(BaseModel):
     findings: list[dict]
     findings_count: int = Field(ge=0)
@@ -215,6 +232,8 @@ class ScanCompletedData(BaseModel):
 
 EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
     "scan_completed": ScanCompletedData,
+    "redecomposition_proposed": RedecompositionProposedData,
+    "redecomposition_halted": RedecompositionHaltedData,
     "search_executed": SearchExecutedData,
     "source_reviewed": SourceReviewedData,
     "freshness_checked": FreshnessCheckedData,
