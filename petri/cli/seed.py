@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 import typer
 
+from petri.models import parse_key
+
 from petri.cli._bootstrap import (
     find_petri_dir,
     get_dish_id,
@@ -19,7 +21,6 @@ from petri.storage.seed_guard import ColonyExistsError, require_empty_colony
 from petri.storage.paths import (
     cell_dir as cell_dir_for,
     events_path as events_file_path,
-    parse_cell_id,
 )
 
 if TYPE_CHECKING:
@@ -120,7 +121,8 @@ def _events_path_for(colony_path: Path, colony_model, cell_id: str) -> Path:
     relative_path = colony_model.cell_paths.get(cell_id)
     if relative_path:
         return colony_path / relative_path / "events.jsonl"
-    _, _, level, seq = parse_cell_id(cell_id)
+    parsed = parse_key(cell_id, strict=True)
+    level, seq = parsed["level"], parsed["seq"]
     return events_file_path(cell_dir_for(colony_path, level, seq))
 
 

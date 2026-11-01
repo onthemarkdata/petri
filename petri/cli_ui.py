@@ -564,10 +564,12 @@ def short_cell_id(cell_id: str) -> str:
     ``"petri-ai-considered-commodity-12-001-002"`` -> ``"001-002"``.
     Falls back to the original string if it has fewer than 2 hyphens.
     """
-    parts = cell_id.rsplit("-", 2)
-    if len(parts) < 3:
+    from petri.models import parse_key
+
+    parsed = parse_key(cell_id)
+    if "level" not in parsed:
         return cell_id
-    return f"{parts[-2]}-{parts[-1]}"
+    return f"{parsed['level']:03d}-{parsed['seq']:03d}"
 
 
 def _truncate_summary(summary_text: str, max_chars: int = _STATUS_SUMMARY_MAX_CHARS) -> str:

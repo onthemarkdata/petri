@@ -9,8 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from petri.storage.dish import resolve_dish_id
+
 from petri.cli_ui import print_error_and_exit
 from petri.config import get_agent_tools, load_dish_config
+
+get_dish_id = resolve_dish_id
 
 
 def resolve_provider(petri_dir: Path):
@@ -46,12 +50,6 @@ def find_petri_dir(start: Path | None = None) -> Path:
             "No petri dish found. Run `petri init` to create one.", code=3
         )
     return petri_dir
-
-
-def get_dish_id(petri_dir: Path) -> str:
-    """Get the dish ID from config or derive from directory name."""
-    config = load_dish_config(petri_dir)
-    return config.get("name", petri_dir.parent.name)
 
 
 def load_colonies(petri_dir: Path, dish_id: str) -> list[tuple]:

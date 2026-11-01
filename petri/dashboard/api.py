@@ -27,6 +27,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+from petri.storage.dish import resolve_dish_id as _get_dish_id
 from petri.dashboard.frontend import build_frontend_html
 from petri.dashboard.migrate import incremental_sync
 from petri.storage.event_log import rollup_to_combined
@@ -821,17 +822,6 @@ def create_app(petri_dir: Path, db_path: Path) -> FastAPI:
 
 # ── Internal helpers ──────────────────────────────────────────────────────
 
-
-def _get_dish_id(petri_dir: Path) -> str:
-    """Get the dish ID from petri.yaml or derive from parent directory."""
-    config_path = petri_dir / "petri.yaml"
-    if config_path.exists():
-        # Simple line parser (no yaml dependency required)
-        for line in config_path.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("name:") and not line.startswith(" "):
-                return line.split(":", 1)[1].strip()
-    return petri_dir.parent.name
 
 
 async def _tail_loop(

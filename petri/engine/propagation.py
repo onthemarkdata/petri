@@ -11,9 +11,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from petri.storage.dish import resolve_dish_id as _get_dish_id
 from petri.graph.colony import ColonyGraph
 from petri.storage.event_log import append_event
-from petri.models import CellStatus
+from petri.models import CellStatus, parse_key
 from petri.storage.queue import add_to_queue, load_queue
 
 
@@ -35,13 +36,8 @@ def _cell_dir_for(petri_dir: Path, cell_id: str, dish_id: str) -> Path:
     Uses the ``cell_paths`` mapping stored in ``colony.json`` when available.
     Falls back to scanning for the cell's ``metadata.json`` via rglob.
     """
-    parts = cell_id.split("-")
-    # Colony slug is everything between dish_id and the level-seq suffix.
-    prefix = "-".join(parts[:-2])  # "mydish-mycolony"
-    if prefix.startswith(dish_id + "-"):
-        colony_slug = prefix[len(dish_id) + 1:]
-    else:
-        colony_slug = prefix
+    parsed = parse_key(cell_id, dish_id, strict=True)
+    colony_slug = parsed["colony"]
     colony_dir = petri_dir / "petri-dishes" / colony_slug
 
     # Try cell_paths from colony.json first
@@ -59,8 +55,8 @@ def _cell_dir_for(petri_dir: Path, cell_id: str, dish_id: str) -> Path:
             return metadata_path.parent
 
     # Last resort: old flat layout
-    seq_str = parts[-1]
-    level_str = parts[-2]
+    seq_str = f"{parsed['seq']:03d}"
+    level_str = f"{parsed['level']:03d}"
     return colony_dir / f"{level_str}-{seq_str}"
 
 
@@ -80,16 +76,6 @@ def _save_cell_metadata(cell_dir: Path, metadata: dict) -> None:
         encoding="utf-8",
     )
 
-
-def _get_dish_id(petri_dir: Path) -> str:
-    """Get the dish ID from config or derive from directory name."""
-    config_path = petri_dir / "petri.yaml"
-    if config_path.exists():
-        for line in config_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith("name:"):
-                return line.split(":", 1)[1].strip()
-    return petri_dir.parent.name
 
 
 # ── Core Functions ──────────────────────────────────────────────────────
