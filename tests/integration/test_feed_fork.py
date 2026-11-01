@@ -32,6 +32,30 @@ async def test_feed_copies_socratic_and_repeats_research_once(
     (directory / "petri.yaml").write_text("name: test-dish\n")
     services = replace(services, db_path=dish_db_path(directory))
     save_colony(services.db_path, canonical_colony["graph"], canonical_colony["colony_model"])
+    from petri.graph.colony import ColonyGraph
+    from petri.lifecycle.propagation import get_impact_report
+    from petri.models import CellStatus, Colony
+    from petri.storage.edge_registry import EdgeRecord, append
+    from tests.conftest import make_cell
+
+    foreign_cells = [
+        make_cell("test-dish", name, 0, 0, name, status=CellStatus.VALIDATED)
+        for name in ("beta", "gamma")
+    ]
+    for cell in foreign_cells:
+        graph = ColonyGraph(cell.colony_id)
+        graph.add_cell(cell)
+        save_colony(services.db_path, graph, Colony(
+            id=cell.colony_id, dish="test-dish", center_claim=cell.claim_text,
+            center_cell_id=cell.id, created_at="2026-01-01T00:00:00Z",
+        ))
+    premise = canonical_colony["cell1"].id
+    for cell in foreign_cells:
+        append(services.db_path, EdgeRecord(
+            from_cell=cell.id, to_cell=premise, edge_type="cross_colony",
+            created_at="2026-01-01T00:00:00Z",
+        ))
+        premise = cell.id
     research_messages = []
 
     class RecordingTestModel(TestModel):
@@ -65,6 +89,10 @@ async def test_feed_copies_socratic_and_repeats_research_once(
         steps = await DBOS.list_workflow_steps_async(original.workflow_id)
         boundary = research_boundary(steps)
         assert boundary is not None
+        before_status = {row["id"]: row["status"] for row in database.list_cells(services.db_path)}
+        report = get_impact_report(directory, cell_id, canonical_colony["graph"], "test-dish")
+        foreign_ids = {cell.id for cell in foreign_cells}
+        assert foreign_ids <= {cell["cell_id"] for cell in report["affected_cells"]}
         source = tmp_path / "evidence.txt"
         source.write_text("A new measurement supports the claim.")
         if legacy:
@@ -112,10 +140,10 @@ async def test_feed_copies_socratic_and_repeats_research_once(
         assert fed[0]["data"]["generation"] == 2
         assert len(list((services.db_path.parent / "evidence").glob("*.json"))) == 1
         propagated = database.read_events(services.db_path, event_type="propagation_triggered")
-        expected_dependents = set(canonical_colony["graph"].get_dependents(cell_id))
+        expected_dependents = set(canonical_colony["graph"].get_dependents(cell_id)) | foreign_ids
         assert expected_dependents <= {event["cell_id"] for event in propagated}
         assert all(
-            database.get_cell(services.db_path, event["cell_id"])["status"] == "NEW"
+            database.get_cell(services.db_path, event["cell_id"])["status"] == before_status[event["cell_id"]]
             for event in propagated
         )
         assert all(run.workflow_id.startswith(cell_id + ":r") for run in runs)

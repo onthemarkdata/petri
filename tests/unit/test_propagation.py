@@ -193,3 +193,49 @@ class TestGetImpactReport:
         assert get_cell(cell_path.db_path, cell_path.cell_id) == metadata_before
         assert load_events(cell_path) == events_before
         assert database.list_cells(dish_db_path(env["petri_dir"])) == cells_before
+
+
+def test_feed_impact_and_flags_cross_three_colonies(tmp_path):
+    from petri.storage.colonies import load_colony
+    from petri.storage.edge_registry import EdgeRecord, append
+
+    (tmp_path / "petri.yaml").write_text("name: dish\n")
+    path = dish_db_path(tmp_path)
+    cells = [
+        make_cell("dish", name, 0, 0, name, status=CellStatus.VALIDATED)
+        for name in ("alpha", "beta", "gamma")
+    ]
+    for cell in cells:
+        graph = ColonyGraph(cell.colony_id)
+        graph.add_cell(cell)
+        save_colony(path, graph, Colony(
+            id=cell.colony_id, dish="dish", center_claim=cell.claim_text,
+            center_cell_id=cell.id, created_at="2026-01-01T00:00:00Z",
+        ))
+    a, b, c = cells
+    for dependent, premise in ((b, a), (c, b)):
+        append(path, EdgeRecord(
+            from_cell=dependent.id, to_cell=premise.id, edge_type="cross_colony",
+            created_at="2026-01-01T00:00:00Z",
+        ))
+    graph, _ = load_colony(path, a.colony_id)
+    before = database.list_cells(path), database.read_edges(path), database.read_events(path)
+
+    report = get_impact_report(tmp_path, a.id, graph, "dish")
+    assert report["affected_cells"] == [
+        {"cell_id": cell.id, "level": cell.level, "status": "VALIDATED",
+         "claim_text": cell.claim_text}
+        for cell in (b, c)
+    ]
+    assert report["total_affected"] == 2
+    assert before == (database.list_cells(path), database.read_edges(path), database.read_events(path))
+
+    for _ in range(2):
+        assert propagate_upward(tmp_path, a.id, graph, "dish", "same-feed") == [b.id, c.id]
+    flags = database.read_events(path)
+    assert len(flags) == 2
+    assert {event["cell_id"] for event in flags} == {b.id, c.id}
+    assert all(event["type"] == "propagation_triggered" for event in flags)
+    assert all(event["data"]["reopened_cell_id"] == a.id for event in flags)
+    assert (database.list_cells(path), database.read_edges(path)) == before[:2]
+    assert not (tmp_path / "dbos.sqlite").exists()
