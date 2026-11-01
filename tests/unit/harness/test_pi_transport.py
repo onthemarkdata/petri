@@ -142,3 +142,20 @@ async def test_invalid_payload_does_not_leak_process(fake_pi):
     with pytest.raises(TypeError):
         await transport.request({"type": "prompt", "message": object()})
     assert transport.process.returncode is not None
+
+
+@pytest.mark.asyncio
+async def test_numeric_rpc_id_is_not_an_http_failure(fake_pi):
+    fake_pi.scenario({"kind": "death", "stderr": "network lost"})
+    async with PiRpcTransport(binary=str(fake_pi.path)) as transport:
+        with pytest.raises(TransientHarnessError) as error:
+            await transport.request({"type": "prompt", "id": "403", "message": "hello"})
+    assert '"id":"403"' in error.value.detail.stdout_tail
+
+
+@pytest.mark.asyncio
+async def test_uuid_in_diagnostic_is_not_an_http_status(fake_pi):
+    fake_pi.scenario({"kind": "death", "stderr": "network request a403f-404-e failed"})
+    async with PiRpcTransport(binary=str(fake_pi.path)) as transport:
+        with pytest.raises(TransientHarnessError):
+            await transport.request({"type": "prompt", "message": "hello"})

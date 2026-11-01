@@ -140,7 +140,7 @@ class ClaudeCodeModel(Model):
         return [*command, prompt]
 
     def _failure(self, result: CompletedProcess[str], detail: FailureDetail | None = None):
-        status = re.search(r"(?<!\d)(401|403|404|429|500|502|503|504)(?!\d)", f"{result.stderr}\n{result.stdout}")
+        status = re.search(r"(?<![\w-])(401|403|404|429|500|502|503|504)(?![\w-])", f"{result.stderr}\n{result.stdout}")
         error = self.classifier.classify(
             result.returncode, result.stderr, result.stdout,
             code=int(status[1]) if status else None, detail=detail, clock=self.clock,

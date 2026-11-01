@@ -82,7 +82,7 @@ class PiRpcTransport:
         )
 
     def _failure(self, stdout: str):
-        status = re.search(r"(?<!\d)(401|403|404|429|500|502|503|504)(?!\d)", f"{self._stderr}\n{stdout}")
+        status = re.search(r"(?<![\w-])(401|403|404|429|500|502|503|504)(?![\w-])", f"{self._stderr}\n{stdout}")
         return self.classifier.classify(
             self.process.returncode if self.process else None,
             self._stderr, stdout, code=int(status[1]) if status else None, detail=self._detail(),
@@ -151,7 +151,9 @@ class PiRpcTransport:
             await self.process.wait()
             if self._stderr_task:
                 await self._stderr_task
-            raise self._failure(self._stdout)
+            # Successful RPC frames may contain numeric IDs or token counts.
+            # Keep them in diagnostics, but classify process death from stderr.
+            raise self._failure("")
         self._stdout = (self._stdout + raw.decode("utf-8", errors="replace"))[-4096:]
         try:
             if not raw.endswith(b"\n"):

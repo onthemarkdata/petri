@@ -15,6 +15,7 @@ from petri.config import (
     LLM_INFERENCE_MODEL,
     MAX_CONCURRENT,
     MAX_ITERATIONS,
+    load_dish_config,
 )
 
 DEFAULTS_DIR = Path(__file__).parent.parent / "defaults"
@@ -121,6 +122,12 @@ def create_petri_dish(
                     config = yaml.safe_load(f) or {}
                 config["name"] = dish_name
                 config.setdefault("model", {})["name"] = model_name
+                config["harness"] = {
+                    "backend": "pi",
+                    "model": model_name,
+                    "provider": "anthropic",
+                    "tools": [],
+                }
                 config["max_concurrent"] = max_concurrent
                 config["max_iterations"] = max_iterations
                 with open(config_path, "w") as f:
@@ -131,6 +138,8 @@ def create_petri_dish(
                 config_path.write_text(
                     f"name: {dish_name}\n"
                     f"model:\n  name: {model_name}\n"
+                    f"harness:\n  backend: pi\n  model: {model_name}\n"
+                    "  provider: anthropic\n  tools: []\n"
                     f"max_concurrent: {max_concurrent}\n"
                     f"max_iterations: {max_iterations}\n",
                     encoding="utf-8",
@@ -139,6 +148,8 @@ def create_petri_dish(
             config_path.write_text(
                 f"name: {dish_name}\n"
                 f"model:\n  name: {model_name}\n"
+                f"harness:\n  backend: pi\n  model: {model_name}\n"
+                "  provider: anthropic\n  tools: []\n"
                 f"max_concurrent: {max_concurrent}\n"
                 f"max_iterations: {max_iterations}\n",
                 encoding="utf-8",
@@ -239,7 +250,7 @@ def register(app: typer.Typer) -> None:
 
             if model_choice == "_custom":
                 model_name = questionary.text(
-                    "Model name (as recognized by Claude Code):",
+                    "Model name (as recognized by pi):",
                     default=LLM_INFERENCE_MODEL,
                 ).ask()
                 if model_name is None:
@@ -294,7 +305,7 @@ def register(app: typer.Typer) -> None:
             # Non-blocking preflight warnings
             from petri.engine.preflight import run_preflight
 
-            results = run_preflight()
+            results = run_preflight(load_dish_config(petri_dir))
             warnings = [result for result in results if not result.passed]
             if warnings:
                 typer.echo("\n  Prerequisites:")
