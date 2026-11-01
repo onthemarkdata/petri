@@ -100,8 +100,10 @@ authentication header. Open `http://127.0.0.1:16686`, choose service **petri**, 
 search for the command trace. Dry runs exercise command tracing without model
 inference. An actual grow run also records instrumented agent activity.
 
-End-to-end verification is pending: a release reviewer must record the traced-run
-result and Jaeger UI screenshot before treating this recipe as verified.
+Verified on November 1, 2026: an actual `petri grow --dry-run` selected one seeded
+cell, exported its `petri.grow` span, and the matching trace ID was read back from
+Jaeger 2.22.0 through `/api/v3/traces/<trace_id>`. The Jaeger UI screenshot remains
+pending; API verification does not complete that visual check.
 
 ## Optional external backend: SigNoz
 
