@@ -28,7 +28,7 @@ DEFAULTS = Path(__file__).parents[2] / "petri/defaults/petri.yaml"
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["provider", "pi"])
 @pytest.mark.parametrize("enabled", [False, True])
-async def test_investigator_attempts_retrieval_before_honest_inconclusive_output(fake_pi, backend, enabled):
+async def test_investigator_attempts_retrieval_before_honest_inconclusive_output(fake_pi, backend, enabled, monkeypatch):
     raw = load_agent_config(DEFAULTS).model_dump(mode="json")
     raw["research"] = {"public_web": enabled}
     raw["harness"] = {"backend": backend, "model": "local-test", "output_mode": "prompted"}
@@ -57,8 +57,16 @@ async def test_investigator_attempts_retrieval_before_honest_inconclusive_output
             fake_pi.scenario({"text": json.dumps(final)},
                              {"text": json.dumps({"web_search": [{"query": "fixture evidence"}]})},
                              {"text": json.dumps(final)})
-            model = await stack.enter_async_context(PiModel("local-test",
-                transport=PiRpcTransport(binary=str(fake_pi.path))))
+            transport = PiRpcTransport(binary=str(fake_pi.path))
+            original = transport.request
+
+            async def record(request):
+                if request["type"] == "prompt":
+                    model_requests.append(request)
+                return await original(request)
+
+            monkeypatch.setattr(transport, "request", record)
+            model = await stack.enter_async_context(PiModel("local-test", transport=transport))
         else:
             http = await stack.enter_async_context(httpx.AsyncClient(transport=httpx.MockTransport(respond)))
             model = OpenAIChatModel("local-test", provider=OpenAIProvider(
@@ -69,6 +77,19 @@ async def test_investigator_attempts_retrieval_before_honest_inconclusive_output
         assert (model.round_trips if backend == "pi" else len(model_requests)) == (3 if enabled else 1)
     assert len(attempts) == (1 if enabled else 0)
     assert result.output.verdict == "NEEDS_MORE_EVIDENCE" and not result.output.sources_cited
+    if enabled and backend == "provider":
+        assert all(request.get("tool_choice") == "required" and "response_format" not in request
+                   for request in model_requests[:2])
+        assert model_requests[2].get("tool_choice") != "required"
+        assert model_requests[2]["response_format"] == {"type": "json_object"}
+    elif enabled:
+        for request in model_requests[:2]:
+            prompt = request["message"]
+            assert "The next response must be a host function-call envelope" in prompt
+            assert '"name": "web_search"' in prompt and '"name": "web_fetch"' in prompt
+            assert '"required": ["verdict"]' not in prompt
+        assert "The next response must be a host function-call envelope" not in model_requests[2]["message"]
+        assert '"required": ["verdict"]' in model_requests[2]["message"]
 
 
 async def public(host):

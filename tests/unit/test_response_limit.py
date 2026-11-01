@@ -71,6 +71,7 @@ async def test_prompted_final_output_keeps_native_host_retrieval(socratic):
     raw = load_agent_config(Path(__file__).parents[2] / "petri/defaults/petri.yaml").model_dump(mode="json")
     raw["harness"] = {"backend": "provider", "model": "openai-chat:local-test", "output_mode": "prompted"}
     raw["research"] = {"public_web": True}
+    raw["model_settings"] = {"max_tokens": 321}
     config = AgentConfig.model_validate(raw)
     requests = []
     fetched = []
@@ -108,7 +109,14 @@ async def test_prompted_final_output_keeps_native_host_retrieval(socratic):
                          research_client=Sources())[AgentName.INVESTIGATOR])
         result = await agent.run("Assess the supplied claim.")
     assert result.output.verdict == ("CLARIFIED" if socratic else "EVIDENCE_SUFFICIENT")
-    assert all(request.get("response_format") == {"type": "json_object"} for request in requests)
+    assert all(request["max_completion_tokens"] == 321 for request in requests)
+    if socratic:
+        assert requests[0].get("response_format") == {"type": "json_object"}
+    else:
+        assert requests[0].get("tool_choice") == "required"
+        assert "response_format" not in requests[0]
+        assert requests[1].get("response_format") == {"type": "json_object"}
+        assert requests[1].get("tool_choice") != "required"
     if not socratic:
         assert fetched == ["https://example.org/source"]
         assert {tool["function"]["name"] for tool in requests[0]["tools"]} == {"web_search", "web_fetch"}
