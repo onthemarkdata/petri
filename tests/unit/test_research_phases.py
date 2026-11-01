@@ -49,6 +49,28 @@ SOURCE = {
 
 
 @pytest.mark.asyncio
+async def test_citation_confidence_is_retried_before_persistence(phase_services):
+    services, signals = phase_services
+    calls = []
+
+    def respond(messages, info):
+        name = next(name for name in AgentName if f"Act as {name.value}." in info.instructions)
+        calls.append(str(messages))
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+            "verdict": services.config.agents[name].verdicts_pass[0],
+            "sources_cited": [{**SOURCE, "confidence": "null" if len(calls) == 1 else None}],
+        })])
+
+    services.agents = build_agents(services.config, constitution="Preserve source attribution.",
+                                  model=FunctionModel(respond), output_mode="tool")
+    await run_research(inputs(database.list_cells(services.db_path)[0]["id"]), services)
+    assert len(calls) == 4 and "confidence" in calls[1] and "enum" in calls[1]
+    verdicts = database.read_events(services.db_path, event_type="verdict_issued")
+    assert len(verdicts) == 3
+    assert all(event["data"]["sources_cited"][0]["confidence"] is None for event in verdicts)
+
+
+@pytest.mark.asyncio
 async def test_failed_model_output_is_durable_without_a_verdict(phase_services):
     services, signals = phase_services
     cell_id = database.list_cells(services.db_path)[0]["id"]

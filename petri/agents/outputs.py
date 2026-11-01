@@ -14,6 +14,7 @@ from pydantic import (
 
 from petri.agents.config import AgentContent
 from petri.agents.contract import AgentName
+from petri.models import Confidence
 from petri.structured_output import NamedOutput
 
 
@@ -36,7 +37,7 @@ class SourceCitation(BaseModel):
     hierarchy_level: int = Field(default=6, ge=1, le=6)
     finding: str = ""
     supports_or_contradicts: Literal["supports", "contradicts"] = "supports"
-    confidence: str | None = None
+    confidence: Confidence | None = None
     pub_date: str = ""
     pub_year: str = ""
 
