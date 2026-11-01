@@ -28,6 +28,41 @@ from petri.storage.database import SQLiteEventLog
 # ── Core Write Operations ────────────────────────────────────────────────
 
 
+def derive_event_id(
+    cell_id: str,
+    *,
+    round_number: int,
+    node: str,
+    agent: str,
+    iteration: int,
+    event_type: str,
+    sequence: int = 0,
+) -> str:
+    """Identify one logical event independently of payload, time, and process.
+
+    Callers reuse these coordinates on retry and increment ``sequence`` for
+    distinct events of the same type emitted by one node/agent iteration.
+    """
+    for name, value in (
+        ("cell_id", cell_id),
+        ("node", node),
+        ("agent", agent),
+        ("event_type", event_type),
+    ):
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{name} must be a nonempty string")
+    for name, coordinate in (
+        ("round_number", round_number),
+        ("iteration", iteration),
+        ("sequence", sequence),
+    ):
+        if type(coordinate) is not int or coordinate < 0:
+            raise ValueError(f"{name} must be a nonnegative integer")
+    return database.stable_event_id(
+        cell_id, "execution-v1", round_number, node, agent, iteration, event_type, sequence
+    )
+
+
 def append_event(
     events_path: Path | SQLiteEventLog,
     cell_id: str,
@@ -35,21 +70,30 @@ def append_event(
     agent: str,
     iteration: int,
     data: dict,
+    *,
+    round_number: int = 0,
+    node: str = "default",
+    sequence: int = 0,
 ) -> Event:
-    """Append a validated event to a cell's JSONL file.
+    """Append a validated event and return its stored envelope.
 
-    1. Validates *data* against the Pydantic model for *event_type*.
-    2. Generates a collision-free event ID.
-    3. Serialises the event as compact JSON and appends one line.
-    4. Returns the created ``Event`` model instance.
+    SQLite targets use deterministic execution coordinates; duplicate IDs
+    return the original event. Plain Path targets retain legacy JSONL IDs.
+    ``round_number``, ``node``, and ``sequence`` apply only to SQLite targets.
     """
     validated_data = validate_event_data(event_type, data)
     if isinstance(events_path, SQLiteEventLog):
         if events_path.cell_id is not None and events_path.cell_id != cell_id:
             raise ValueError("Event cell ID does not match the SQLite event-log scope")
         event = Event(
-            id=database.stable_event_id(
-                cell_id, event_type, agent, iteration, json.dumps(validated_data, sort_keys=True)
+            id=derive_event_id(
+                cell_id,
+                round_number=round_number,
+                node=node,
+                agent=agent,
+                iteration=iteration,
+                event_type=event_type,
+                sequence=sequence,
             ),
             cell_id=cell_id,
             timestamp=datetime.now(UTC).isoformat(),
@@ -60,6 +104,10 @@ def append_event(
         )
         return database.append_event(events_path.db_path, event)[0]
 
+    if round_number != 0 or node != "default" or sequence != 0:
+        raise ValueError("Execution coordinates require a SQLiteEventLog target")
+
+    # Legacy JSONL collision handling remains until its callers migrate.
     # Load existing IDs so we can detect the (very rare) collision.
     existing_ids: set[str] = set()
     if events_path.exists():
