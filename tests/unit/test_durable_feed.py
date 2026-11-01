@@ -1,4 +1,4 @@
-"""Feed uses the round seam and flags dependents without reopening them."""
+"""Feed reports impact before submitting evidence through the durable seam."""
 
 from types import SimpleNamespace
 import importlib
@@ -19,7 +19,7 @@ def test_feed_delegates_and_flags_idempotently(petri_env_with_colony, monkeypatc
     requests = []
     monkeypatch.setattr(module, "find_petri_dir", lambda: directory)
     monkeypatch.setattr(module, "resolve_backend", lambda _: SimpleNamespace(
-        reopen_cell=lambda request, **options: requests.append(request)
+        feed_evidence=lambda request, **options: requests.append(request)
     ))
     before = database.list_cells(path)
     for _ in range(2):
@@ -28,9 +28,7 @@ def test_feed_delegates_and_flags_idempotently(petri_env_with_colony, monkeypatc
         assert "Impact:" in result.output
     assert requests
     midpoint = len(requests) // 2
-    assert requests[:midpoint] == requests[midpoint:]
+    assert [r.cell_id for r in requests[:midpoint]] == [r.cell_id for r in requests[midpoint:]]
+    assert all(r.source == "New local evidence" for r in requests)
     assert database.list_cells(path) == before
-    events = database.read_events(path, event_type="propagation_triggered")
-    assert events
-    assert len({event["id"] for event in events}) == len(events)
     assert not (directory / "queue.json").exists()

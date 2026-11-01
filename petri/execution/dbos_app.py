@@ -117,7 +117,7 @@ class DBOSApp:
 
         # Importing registers the fixed workflow and step definitions before launch.
         from petri.execution import analyst_schedule, dashboard_runs, dbos_backend, scan_workflow, scheduler, seed_workflow  # noqa: F401
-        from petri.lifecycle import redecompose  # noqa: F401
+        from petri.lifecycle import redecompose, revalidate  # noqa: F401
 
         self.petri_dir.mkdir(parents=True, exist_ok=True)
         try:

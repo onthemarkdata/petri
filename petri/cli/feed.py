@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from datetime import datetime, timezone
 import hashlib
+from uuid import uuid4
 from typing import Optional
 
 import typer
@@ -13,7 +13,7 @@ from petri.telemetry.commands import traced_command
 
 from petri.cli._bootstrap import find_petri_dir, load_colonies
 from petri.execution import resolve_backend
-from petri.execution.models import ReopenRequest
+from petri.execution.models import FeedRequest
 from petri.storage.dish import resolve_dish_id
 from petri.cli_ui import print_error_and_exit
 
@@ -40,19 +40,11 @@ def register(app: typer.Typer) -> None:
         if not colonies:
             print_error_and_exit("No colonies found.")
 
-        # Read source content
         if source == "-":
             import sys
+            source = sys.stdin.read()
+        request_id = hashlib.sha256(uuid4().bytes).hexdigest()
 
-            content = sys.stdin.read()
-        elif Path(source).exists():
-            content = Path(source).read_text()
-        else:
-            # Assume URL or text -- store as-is
-            content = source
-
-        # Without a InferenceProvider, we can't do intelligent matching.
-        # Instead, show all cells and let the user choose which to re-open.
         all_cells = []
         for colony_graph, colony in colonies:
             if colony_name and colony.id.removeprefix(f"{dish_id}-") != colony_name:
@@ -62,10 +54,15 @@ def register(app: typer.Typer) -> None:
 
         # Display cells that could be affected
         typer.echo(f"\nSource: {source}")
-        typer.echo(f"Content length: {len(content)} characters\n")
 
         from petri.models import CellStatus
+        from petri.storage import database
+        from petri.storage.paths import dish_db_path
 
+        path = dish_db_path(petri_dir, dish_id)
+        fed_cells = {
+            event["cell_id"] for event in database.read_events(path, event_type="evidence_fed")
+        } if path.is_file() else set()
         reopenable = [
             (colony_graph, colony, cell)
             for colony_graph, colony, cell in all_cells
@@ -77,6 +74,7 @@ def register(app: typer.Typer) -> None:
             )
             or cell.status.value
             in ("VALIDATED", "DISPROVEN", "DEFER_OPEN")
+            or (cell.status == CellStatus.NEW and cell.id in fed_cells)
         ]
 
         if not reopenable:
@@ -86,7 +84,7 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(code=1)
 
-        typer.echo(f"Re-openable cells ({len(reopenable)}):")
+        typer.echo(f"Cells available for feed ({len(reopenable)}):")
         for index, (colony_graph, colony, cell) in enumerate(reopenable, 1):
             status_val = (
                 cell.status.value
@@ -96,22 +94,21 @@ def register(app: typer.Typer) -> None:
             typer.echo(f"  {index}. [{status_val}] {cell.id}: {cell.claim_text}")
 
         # Re-open cells
-        from petri.lifecycle.propagation import get_impact_report, propagate_upward
+        from petri.lifecycle.propagation import get_impact_report
 
         def reopen(colony_graph, colony, cell):
-            request_id = hashlib.sha256(
-                f"{cell.id}\0{source}\0{content}".encode()
-            ).hexdigest()
             report = get_impact_report(petri_dir, cell.id, colony_graph, dish_id)
             typer.echo(f"  Impact: {report['total_affected']} dependent cells")
-            backend.reopen_cell(ReopenRequest(
-                cell.id, request_id, datetime.now(timezone.utc).date().isoformat(),
-                trigger=f"New evidence from: {source}",
-            ), petri_dir=petri_dir)
-            flagged = propagate_upward(
-                petri_dir, cell.id, colony_graph, dish_id, request_id=request_id
-            )
-            typer.echo(f"  Re-opened {cell.id}, flagged {len(flagged)} dependents")
+            from petri.reasoning.ingest import IngestError
+            try:
+                result = backend.feed_evidence(FeedRequest(
+                    cell.id, request_id, source, datetime.now(timezone.utc).date().isoformat(),
+                ), petri_dir=petri_dir)
+                if getattr(result, "status", None) == "sync_conflict":
+                    print_error_and_exit(result.reason)
+            except IngestError as error:
+                print_error_and_exit(str(error))
+            typer.echo(f"  Revalidation finished for {cell.id}; dependents remain flagged")
 
         if auto_reopen:
             # Re-open all

@@ -8,6 +8,7 @@ commit can still repeat an external model request.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import closing
@@ -337,7 +338,22 @@ def _finish(services: PhaseServices, value: PipelineInput, phase: str) -> PhaseR
 
 
 def _prior_evidence(services: PhaseServices, value: PipelineInput) -> str:
-    return render_agent_context(database.read_events(services.db_path, cell_id=value.cell_id))
+    events = database.read_events(services.db_path, cell_id=value.cell_id)
+    for event in events:
+        if event["type"] != "evidence_fed":
+            continue
+        data = event["data"]
+        root = services.db_path.parent.resolve()
+        path = (root / data["evidence_path"]).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError("Fed evidence must stay inside the dish directory")
+        if not path.exists():
+            from petri.storage.evidence_files import write_once
+            write_once(path, json.dumps({"content": data["content"]}))
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if hashlib.sha256(document["content"].encode()).hexdigest() != data["content_sha256"]:
+            raise ValueError("Fed evidence differs from its committed content hash")
+    return render_agent_context(events)
 
 
 async def run_socratic(value: PipelineInput, services: PhaseServices) -> PhaseRunResult:

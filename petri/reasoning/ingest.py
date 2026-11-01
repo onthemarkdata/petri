@@ -6,14 +6,11 @@ extracting readable content for use as seed claims or evidence.
 
 from __future__ import annotations
 
-import logging
 import re
 from pathlib import Path
 from urllib.parse import urlparse
 
 from petri.models import IngestionResult
-
-logger = logging.getLogger(__name__)
 
 # File extensions we handle directly as text
 _TEXT_EXTENSIONS = {
@@ -24,23 +21,27 @@ _TEXT_EXTENSIONS = {
 }
 
 
-def ingest(source: str) -> IngestionResult:
-    """Ingest content from a URL, file path, or raw text.
+class IngestError(RuntimeError):
+    """A source could not be fetched, read, or decoded into evidence."""
 
-    Returns a dict with:
-        - ``source_type``: "url", "file", "pdf", or "text"
-        - ``source``: the original source string
-        - ``title``: extracted title (if available)
-        - ``content``: the extracted text content
-        - ``metadata``: additional info (url, file path, page count, etc.)
-    """
+    def __init__(self, source_kind: str, source: str, cause: str | Exception):
+        self.source_kind = source_kind
+        self.source = source
+        self.cause = str(cause)
+        super().__init__(source_kind, source, self.cause)
+
+    def __str__(self):
+        return f"Could not ingest {self.source_kind} {self.source!r}: {self.cause}"
+
+
+def ingest(source: str) -> IngestionResult:
+    """Extract typed content, raising IngestError for a failed source."""
     # Check if it's a URL
-    if _is_url(source):
+    if _is_url(source) or source.startswith(("http://", "https://")):
         return _ingest_url(source)
 
-    # Check if it's a file path
-    path = Path(source).expanduser()
-    if path.exists() and path.is_file():
+    if is_file_source(source):
+        path = Path(source).expanduser()
         if path.suffix.lower() == ".pdf":
             return _ingest_pdf(path)
         return _ingest_file(path)
@@ -53,6 +54,19 @@ def ingest(source: str) -> IngestionResult:
         content=source,
         metadata={},
     )
+
+
+def is_file_source(source: str) -> bool:
+    """Recognize explicit paths without treating multiline prose as a filename."""
+    if "\n" in source or len(source) > 4096:
+        return False
+    path = Path(source).expanduser()
+    if source.startswith(("/", "./", "../", "~/")) or path.suffix.lower() in _TEXT_EXTENSIONS | {".pdf"}:
+        return True
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def _is_url(source: str) -> bool:
@@ -76,15 +90,8 @@ def _ingest_url(url: str) -> IngestionResult:
             headers={"User-Agent": "Petri/0.1 (research-tool)"},
         )
         response.raise_for_status()
-    except httpx.HTTPError as exc:
-        logger.warning("Failed to fetch URL %s: %s", url, exc)
-        return IngestionResult(
-            source_type="url",
-            source=url,
-            title="",
-            content=f"[Failed to fetch: {exc}]",
-            metadata={"url": url, "error": str(exc)},
-        )
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        raise IngestError("url", url, exc) from exc
 
     content_type = response.headers.get("content-type", "")
 
@@ -119,15 +126,9 @@ def _ingest_file(path: Path) -> IngestionResult:
     """Read a local text file."""
     try:
         content = path.read_text(errors="replace")
+        size = path.stat().st_size
     except Exception as exc:
-        logger.warning("Failed to read file %s: %s", path, exc)
-        return IngestionResult(
-            source_type="file",
-            source=str(path),
-            title=path.name,
-            content=f"[Failed to read: {exc}]",
-            metadata={"path": str(path), "error": str(exc)},
-        )
+        raise IngestError("file", str(path), exc) from exc
 
     # If HTML file, extract text
     if path.suffix.lower() in (".html", ".htm"):
@@ -141,7 +142,7 @@ def _ingest_file(path: Path) -> IngestionResult:
         source=str(path),
         title=title,
         content=content,
-        metadata={"path": str(path), "size": path.stat().st_size},
+        metadata={"path": str(path), "size": size},
     )
 
 
@@ -151,21 +152,13 @@ def _ingest_pdf(path: Path) -> IngestionResult:
         raw = path.read_bytes()
         return _ingest_pdf_bytes(raw, source=str(path))
     except Exception as exc:
-        logger.warning("Failed to read PDF %s: %s", path, exc)
-        return IngestionResult(
-            source_type="pdf",
-            source=str(path),
-            title=path.stem,
-            content=f"[Failed to read PDF: {exc}]",
-            metadata={"path": str(path), "error": str(exc)},
-        )
+        if isinstance(exc, IngestError):
+            raise
+        raise IngestError("pdf", str(path), exc) from exc
 
 
 def _ingest_pdf_bytes(data: bytes, source: str = "") -> IngestionResult:
-    """Extract text from PDF bytes.
-
-    Tries pypdf first, falls back to a basic binary text extraction.
-    """
+    """Extract PDF text, raising a typed error when decoding is unavailable."""
     title = ""
     pages: list[str] = []
     page_count = 0
@@ -187,22 +180,11 @@ def _ingest_pdf_bytes(data: bytes, source: str = "") -> IngestionResult:
             if text:
                 pages.append(text.strip())
 
-    except ImportError:
-        logger.info("pypdf not installed, attempting basic PDF text extraction")
-        # Basic fallback: extract readable strings from binary
-        text = _extract_text_from_binary(data)
-        if text:
-            pages.append(text)
+    except ImportError as exc:
+        raise IngestError("pdf", source, "Install petri[pdf] to read PDF evidence") from exc
 
     except Exception as exc:
-        logger.warning("PDF extraction failed: %s", exc)
-        return IngestionResult(
-            source_type="pdf",
-            source=source,
-            title=title or Path(source).stem if source else "",
-            content=f"[PDF extraction failed: {exc}]",
-            metadata={"source": source, "error": str(exc)},
-        )
+        raise IngestError("pdf", source, exc) from exc
 
     content = "\n\n".join(pages)
     if not title and source:
@@ -219,18 +201,6 @@ def _ingest_pdf_bytes(data: bytes, source: str = "") -> IngestionResult:
             "extracted_pages": len(pages),
         },
     )
-
-
-def _extract_text_from_binary(data: bytes) -> str:
-    """Last-resort: pull printable ASCII/UTF-8 runs from binary data."""
-    try:
-        text = data.decode("utf-8", errors="ignore")
-    except Exception:
-        text = data.decode("latin-1", errors="ignore")
-
-    # Keep runs of printable characters (min 20 chars to filter noise)
-    runs = re.findall(r"[\x20-\x7E]{20,}", text)
-    return "\n".join(runs)
 
 
 # ── HTML helpers ─────────────────────────────────────────────────────────

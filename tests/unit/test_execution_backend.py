@@ -85,6 +85,9 @@ class MemoryBackend:
     def reopen_cell(self, request, *, petri_dir):
         self.calls.append("reopen_cell")
 
+    def feed_evidence(self, request, *, petri_dir):
+        self.calls.append("feed_evidence")
+
     def entries(self, petri_dir):
         self.calls.append("entries")
         return self.data
@@ -106,6 +109,7 @@ class MemoryBackend:
         ("grow", [], "grow_loop"),
         ("check", ["--json"], "entries"),
         ("stop", [], "request_stop"),
+        ("feed", ["New measured evidence", "--auto-reopen"], "feed_evidence"),
     ],
 )
 def test_cli_uses_memory_backend(
@@ -118,8 +122,12 @@ def test_cli_uses_memory_backend(
     monkeypatch.setattr(module, "resolve_backend", lambda path: backend)
     if command == "grow":
         monkeypatch.setattr(module, "resolve_provider", lambda path: None)
-    elif command == "check":
-        monkeypatch.setattr(module, "get_dish_id", lambda path: "dish")
+    elif command in {"check", "feed"}:
+        if command == "check":
+            monkeypatch.setattr(module, "get_dish_id", lambda path: "dish")
+        else:
+            from petri.models import CellStatus
+            canonical_colony["cell1"].status = CellStatus.VALIDATED
         monkeypatch.setattr(
             module,
             "load_colonies",
@@ -171,7 +179,7 @@ def test_config_and_state_round_trip(tmp_path):
 
 def test_cli_and_protocol_import_boundaries():
     root = Path(__file__).resolve().parents[2]
-    for filename in ["cli/grow.py", "cli/check.py", "cli/stop.py", "execution/backend.py"]:
+    for filename in ["cli/grow.py", "cli/check.py", "cli/stop.py", "cli/feed.py", "execution/backend.py"]:
         tree = ast.parse((root / "petri" / filename).read_text())
         for node in ast.walk(tree):
             modules = (
