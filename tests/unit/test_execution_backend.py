@@ -199,13 +199,13 @@ def test_v1_adapter_delegations(monkeypatch, tmp_path):
         ("get_state_summary", {"done": 1}),
         ("load_queue", {"entries": {"c": {}}}),
         ("list_queue", [{"cell_id": "c"}]),
-        ("update_state", {"queue_state": "stalled"}),
+        ("update_state", None),
     ]:
         monkeypatch.setattr(adapter.queue, name, record(name, value))
     assert backend.state_summary(tmp_path) == {"done": 1}
     assert backend.entries(tmp_path) == {"c": {}}
     assert backend.list_entries(tmp_path) == [{"cell_id": "c"}]
-    assert backend.update_state(tmp_path, "c", "stalled") == {"queue_state": "stalled"}
+    assert backend.update_state(tmp_path, "c", "stalled") is None
     assert calls == [
         ("preflight", (), {}),
         ("process_queue", (), {"petri_dir": tmp_path}),

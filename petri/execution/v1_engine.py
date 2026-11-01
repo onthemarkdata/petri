@@ -58,5 +58,5 @@ class V1ExecutionBackend:
     def list_entries(self, petri_dir: Path) -> list[dict]:
         return queue.list_queue(petri_dir / "queue.json")
 
-    def update_state(self, petri_dir: Path, cell_id: str, state: str) -> dict:
-        return queue.update_state(petri_dir / "queue.json", cell_id, state)
+    def update_state(self, petri_dir: Path, cell_id: str, state: str) -> None:
+        queue.update_state(petri_dir / "queue.json", cell_id, state)
