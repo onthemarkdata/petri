@@ -1638,7 +1638,6 @@ function renderTraceWaterfall(spans) {
       <input type="text" class="crt-cmd" id="term-cmd"
              placeholder='type: petri check  ·  petri seed "claim"  ·  petri grow'
              autocomplete="off" spellcheck="false" />
-      <button id="term-detach-btn" title="Run detached (don't stream output)">DETACH</button>
       <button id="term-stop-btn" class="stop" disabled>STOP</button>
     </div>
     <div class="crt-scanlines"></div>
@@ -1997,9 +1996,8 @@ function connectSSE() {
     if (State.currentView === 'lab') loadLabData();
     if (State.currentView === 'colony' && State.currentColony) loadColonyDAG(State.currentColony);
     if (State.currentView === 'cell' && State.currentCell === data.cell_id) loadCellDetail(State.currentCell);
-    // Interleave live events as dim lines in the Computer terminal when
-    // it's idle — same vibe as a background `tail -f` next to your shell.
-    if (State.currentView === 'computer' && TerminalState.mode === 'idle' && XTERM) {
+    // Show committed domain events alongside the active run's progress.
+    if (State.currentView === 'computer' && (TerminalState.mode === 'idle' || TerminalState.mode === 'running') && XTERM) {
       var line = '[' + (data.type || '?') + '] ' + (data.cell_id || '') + ' · ' + (data.agent || '');
       XTERM.writeln(ANSI.grey + ANSI.dim + line + ANSI.reset);
     }
@@ -2012,6 +2010,10 @@ function connectSSE() {
     State.events.unshift(row);
     if (State.events.length > 500) State.events.length = 500;
     if (State.currentView === 'logs') appendLogRow(row);
+    if (State.currentView === 'computer' && XTERM) {
+      if (progress.kind === 'text_delta') XTERM.write(progress.text_delta || '');
+      else termEcho('dim', '[' + progress.agent + ' · ' + progress.kind + '] ' + (progress.text_delta || ''));
+    }
   });
 
   eventSource.onerror = function() {
@@ -3269,8 +3271,7 @@ function startOnboarding() {
     // already driving, so the handoff is invisible.
     termEnterCommandMode();
 
-    // Kick off seed as a real subprocess via the PTY path that also
-    // powers `petri grow` in command mode.
+    // Submit a durable seed run and follow its saved status.
     setTimeout(function() {
       var escapedClaim = starterClaim.replace(/"/g, '\\"');
       termRun('petri seed "' + escapedClaim + '"');
@@ -3282,11 +3283,10 @@ function startOnboarding() {
 
 var TerminalState = {
   mode: null,       // null | 'onboarding' | 'idle' | 'running'
-  sessionId: null,
-  eventSource: null,
+  runId: null,
+  pollTimer: null,
   history: [],
   historyIndex: -1,
-  detachNext: false,
   inputHandlerBound: false,
   // Wizard dispatch slots — set by xtermPromptText / xtermPromptSelect
   // so the shared bottom input can hand user input back to the
@@ -3297,11 +3297,9 @@ var TerminalState = {
 
 var XTERM = null;
 var XTERM_FIT = null;
-var XTERM_DECODER = null;
 
 var PETRI_SUBCOMMANDS = [
-  'init', 'seed', 'grow', 'check', 'feed', 'stop',
-  'scan', 'graph', 'connect', 'inspect', 'launch',
+  'seed', 'grow', 'check', 'revalidate', 'stop',
 ];
 
 // ANSI SGR color helpers for system/banner/event lines written to xterm.
@@ -3393,25 +3391,7 @@ function termInitXterm() {
     if (input) input.focus();
   });
 
-  XTERM_DECODER = (typeof TextDecoder !== 'undefined')
-    ? new TextDecoder('utf-8', { fatal: false })
-    : null;
-
   return XTERM;
-}
-
-// Decode a base64-encoded byte chunk from the backend PTY into a form
-// xterm.write can consume. Prefer Uint8Array so escape bytes survive
-// untouched; fall back to a string if TextDecoder is unavailable.
-function termDecodeB64Chunk(b64) {
-  var bin = atob(b64);
-  var arr = new Uint8Array(bin.length);
-  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return arr;
-}
-
-function xtermWriteRaw(chunkBytes) {
-  if (XTERM) XTERM.write(chunkBytes);
 }
 
 function xtermWriteLine(text, color) {
@@ -3447,7 +3427,6 @@ function termTokenize(raw) {
 function termBindInputHandlers() {
   var input = document.getElementById('term-cmd');
   var stopBtn = document.getElementById('term-stop-btn');
-  var detachBtn = document.getElementById('term-detach-btn');
   if (!input || TerminalState.inputHandlerBound) return;
   TerminalState.inputHandlerBound = true;
 
@@ -3514,10 +3493,6 @@ function termBindInputHandlers() {
   });
 
   stopBtn.addEventListener('click', termStop);
-  detachBtn.addEventListener('click', function() {
-    TerminalState.detachNext = !TerminalState.detachNext;
-    detachBtn.classList.toggle('active', TerminalState.detachNext);
-  });
 }
 
 function termEnterCommandMode() {
@@ -3533,7 +3508,7 @@ function termEnterCommandMode() {
     XTERM.writeln(ANSI.grey + 'type full commands:  ' + ANSI.yellow + 'petri check' + ANSI.grey +
                   '   ·   ' + ANSI.yellow + 'petri seed "your claim"' + ANSI.reset);
     XTERM.writeln(ANSI.grey + 'subcommands: ' + PETRI_SUBCOMMANDS.join(' ') + ANSI.reset);
-    XTERM.writeln(ANSI.grey + 'up/down = history · enter = run · ctrl+c = stop · detach toggle bottom-right' + ANSI.reset);
+    XTERM.writeln(ANSI.grey + 'up/down = history · enter = run · ctrl+c = cancel · runs survive closing this tab' + ANSI.reset);
     XTERM.writeln('');
     if (XTERM_FIT) { try { XTERM_FIT.fit(); } catch (e) {} }
   }
@@ -3557,107 +3532,93 @@ function termEcho(kind, text) {
 }
 
 function termRun(raw) {
-  if (TerminalState.mode === 'running') {
-    termEcho('system', '(a command is already running — press STOP first)');
-    return;
-  }
   var tokens = termTokenize(raw);
   if (tokens.length === 0) return;
-
-  // Enforce `petri <subcommand> [args]` so the UX matches the real CLI.
-  if (tokens[0] !== 'petri') {
-    termEcho('stderr', 'Commands must start with "petri". Try: petri ' + (tokens[0] || 'check'));
-    return;
-  }
-  if (tokens.length < 2) {
-    termEcho('stderr', 'Missing subcommand. Try: petri check');
+  if (tokens[0] !== 'petri' || PETRI_SUBCOMMANDS.indexOf(tokens[1]) === -1) {
+    termEcho('stderr', 'Use: petri ' + PETRI_SUBCOMMANDS.join(' | '));
     return;
   }
   var command = tokens[1];
   var args = tokens.slice(2);
-
-  if (PETRI_SUBCOMMANDS.indexOf(command) === -1) {
-    termEcho('stderr', 'Unknown petri subcommand: ' + command);
-    termEcho('dim', 'Allowed: ' + PETRI_SUBCOMMANDS.join(', '));
+  termEcho('cmd', '$ ' + raw);
+  if (command === 'stop') { termStop(); return; }
+  if (command === 'check') {
+    fetch(API + '/api/stats').then(function(res) { return res.json(); })
+      .then(function(data) { termEcho('stdout', JSON.stringify(data)); })
+      .catch(function(err) { termEcho('stderr', err.message); });
     return;
   }
-
-  termEcho('cmd', '$ ' + raw);
-  var detach = !!TerminalState.detachNext;
-
-  fetch(API + '/api/proc/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: command, args: args, detach: detach }),
+  if (TerminalState.mode === 'running') {
+    termEcho('system', 'A run is active. Cancel it before submitting another here.');
+    return;
+  }
+  var endpoint = '/api/runs';
+  var body = { command: command };
+  if (command === 'seed') {
+    var regenerate = args.indexOf('--regenerate') !== -1;
+    args = args.filter(function(arg) { return arg !== '--regenerate'; });
+    if (!args.length) { termEcho('stderr', 'Use: petri seed "your claim" [--regenerate]'); return; }
+    endpoint = '/api/seed';
+    body = { claim: args.join(' '), regenerate: regenerate };
+  } else if (command === 'revalidate') {
+    if (args.length !== 1) { termEcho('stderr', 'Use: petri revalidate CELL_ID'); return; }
+    body.cell_id = args[0];
+  } else if (args.length) {
+    if (args.length !== 1) { termEcho('stderr', 'Use: petri grow [COLONY]'); return; }
+    body.colony = args[0];
+  }
+  termSetRunning(true);
+  fetch(API + endpoint, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }).then(function(res) {
     return res.json().then(function(data) { return { ok: res.ok, data: data }; });
   }).then(function(wrap) {
     if (!wrap.ok) {
-      termEcho('stderr', 'start failed: ' + ((wrap.data && wrap.data.detail) || 'unknown'));
-      return;
-    }
-    TerminalState.sessionId = wrap.data.stream_id;
-    termSetRunning(true);
-
-    if (detach) {
-      termEcho('dim', '[detached; running in background as PID ' + wrap.data.pid + ']');
-      TerminalState.sessionId = null;
       termSetRunning(false);
+      termEcho('stderr', 'Submission failed: ' + JSON.stringify(wrap.data.detail || wrap.data));
       return;
     }
-    termStreamOutput(wrap.data.stream_id);
+    TerminalState.runId = wrap.data.id;
+    try { localStorage.setItem('petri.activeRun', wrap.data.id); } catch (e) {}
+    termEcho('system', 'Run ' + wrap.data.id + ' · ' + wrap.data.status);
+    termPollRun(wrap.data.id);
   }).catch(function(err) {
-    termEcho('stderr', 'start failed: ' + err.message);
+    termSetRunning(false);
+    termEcho('stderr', 'Submission failed: ' + err.message);
   });
 }
 
-function termStreamOutput(streamId) {
-  if (TerminalState.eventSource) TerminalState.eventSource.close();
-  var source = new EventSource(API + '/api/proc/stream/' + encodeURIComponent(streamId));
-  TerminalState.eventSource = source;
-
-  // The backend wraps every PTY chunk as {"line": "<base64>"}. Decode
-  // into raw bytes and hand them straight to xterm.write so ANSI
-  // escapes, carriage-return animations, and the multi-spinner all
-  // pass through untouched.
-  function onChunk(evt) {
-    var payload;
-    try { payload = JSON.parse(evt.data); } catch (e) { return; }
-    var raw = payload.line || '';
-    if (XTERM) xtermWriteRaw(termDecodeB64Chunk(raw));
-  }
-  source.addEventListener('stdout', onChunk);
-  source.addEventListener('stderr', onChunk);
-  source.addEventListener('system', function(evt) {
-    try { termEcho('system', JSON.parse(evt.data).line); } catch (e) {}
-  });
-
-  source.addEventListener('done', function(evt) {
-    var payload = {};
-    try { payload = JSON.parse(evt.data); } catch (e) {}
-    var code = payload.code;
-    if (XTERM) {
-      var color = code === 0 ? ANSI.green : ANSI.red;
-      XTERM.writeln('\r\n' + color + '[done ' + code + ']' + ANSI.reset);
-    }
-    source.close();
-    TerminalState.eventSource = null;
-    TerminalState.sessionId = null;
-    termSetRunning(false);
-  });
-  source.onerror = function() {
-    source.close();
-    if (TerminalState.eventSource === source) {
-      TerminalState.eventSource = null;
+function termPollRun(runId) {
+  if (TerminalState.pollTimer) clearTimeout(TerminalState.pollTimer);
+  fetch(API + '/api/runs/' + encodeURIComponent(runId)).then(function(res) {
+    if (!res.ok) throw new Error('Status request failed (' + res.status + ')');
+    return res.json();
+  }).then(function(run) {
+    if (TerminalState.runId !== runId) return;
+    if (['SUCCESS', 'ERROR', 'CANCELLED', 'MAX_RECOVERY_ATTEMPTS_EXCEEDED'].indexOf(run.status) !== -1) {
+      termEcho(run.status === 'SUCCESS' ? 'bright' : 'stderr', run.id + ' · ' + run.status);
+      if (run.error) termEcho('stderr', run.error);
+      TerminalState.runId = null;
+      try { localStorage.removeItem('petri.activeRun'); } catch (e) {}
       termSetRunning(false);
+      loadLabData();
+      return;
     }
-  };
+    TerminalState.pollTimer = setTimeout(function() { termPollRun(runId); }, 1000);
+  }).catch(function(err) {
+    if (TerminalState.runId !== runId) return;
+    termEcho('dim', err.message + '; retrying.');
+    TerminalState.pollTimer = setTimeout(function() { termPollRun(runId); }, 3000);
+  });
 }
 
 function termStop() {
-  if (!TerminalState.sessionId) return;
-  fetch(API + '/api/proc/stop/' + encodeURIComponent(TerminalState.sessionId), { method: 'POST' })
-    .catch(function() {});  // done event will fire regardless
+  if (!TerminalState.runId) { termEcho('system', 'No run is active in this tab.'); return; }
+  fetch(API + '/api/runs/' + encodeURIComponent(TerminalState.runId) + '/cancel', { method: 'POST' })
+    .then(function(res) {
+      if (!res.ok) throw new Error('Cancellation failed (' + res.status + ')');
+      termEcho('system', 'Cancellation requested.');
+    }).catch(function(err) { termEcho('stderr', err.message); });
 }
 
 function loadComputer() {
@@ -3687,6 +3648,14 @@ function loadComputer() {
   fetch(API + '/api/dishes').then(function(res) { return res.json(); }).then(function(dishes) {
     if (Array.isArray(dishes) && dishes.length > 0) {
       termEnterCommandMode();
+      var savedRun;
+      try { savedRun = localStorage.getItem('petri.activeRun'); } catch (e) {}
+      if (savedRun) {
+        TerminalState.runId = savedRun;
+        termSetRunning(true);
+        termEcho('system', 'Following saved run ' + savedRun);
+        termPollRun(savedRun);
+      }
       if (XTERM) {
         XTERM.writeln(ANSI.green + 'PETRI COMPUTER · localhost' + ANSI.reset);
         XTERM.writeln(ANSI.grey + 'Dishes: ' + dishes.map(function(d) { return d.id; }).join(', ') + ANSI.reset);

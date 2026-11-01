@@ -55,6 +55,7 @@ async def run_debate(
     message_history: Sequence[ModelMessage] = (),
     prior_evidence: str = "",
     deps_factory: Callable[[AgentName], Any] | None = None,
+    event_stream_handler_factory: Callable[[AgentName], Any] | None = None,
 ) -> DebateResult:
     """Retain actual messages between turns and return partial progress on failure."""
     if any(name not in agents for name in protocol.pairing):
@@ -85,6 +86,8 @@ async def run_debate(
             try:
                 response = await agents[name].run(
                     prompt,
+                    event_stream_handler=(event_stream_handler_factory(name)
+                                          if event_stream_handler_factory else None),
                     message_history=result.message_history,
                     deps=deps_factory(name) if deps_factory else None,
                     usage=result.usage,

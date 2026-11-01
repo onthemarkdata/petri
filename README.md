@@ -167,6 +167,21 @@ petri stop
 # → Gracefully halts any active processing
 ```
 
+The Computer tab submits seed, grow, and revalidation runs to the dashboard's
+long-lived execution owner. It follows saved workflow status after a tab refresh;
+STOP requests cancellation. Regenerating a draft with
+`petri seed "claim" --regenerate` takes a snapshot before replacement. The Computer
+tab supports these run commands; it does not provide an interactive shell.
+
+Dashboard-owned direct API agents stream text and tool progress. Request-only CLI
+adapters report agent start and completion without token deltas. A separate CLI
+process does not publish live agent progress to this dashboard; its committed
+domain events still appear through the event stream.
+
+The API allows browser origins `http://127.0.0.1:8090` and
+`http://localhost:8090` by default. Set `dashboard.allowed_origins` in the dish
+configuration to an explicit list of HTTP or HTTPS origins when needed.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
 
 Seed foundation colonies before claims that depend on them. With the typed
@@ -245,7 +260,7 @@ No external service is required. See the [configuration and optional OTLP recipe
 - **Event sourcing**: append-only SQLite events, with derived text exports
 - **Durable execution**: typed pipeline transitions and DBOS SQLite checkpoints
 - **Typed inference**: first-party pi and Claude Code models, plus configured Pydantic AI providers
-- **Live dashboard**: single-file SPA with PTY-backed terminal, interactive colony DAG, and per-cell detail pages
+- **Live dashboard**: single-file SPA with durable run controls, live agent progress, an interactive colony DAG, and per-cell detail pages
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design, pipeline, and agent details.
 

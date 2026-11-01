@@ -149,3 +149,52 @@ async def test_only_dependent_of_validated_external_premise_runs(tmp_path):
         assert database.get_cell(path, unresolved)["status"] == "NEW"
     finally:
         await backend.close_async()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_dashboard_grow_rechecks_dependents_after_external_colony_finishes(tmp_path):
+    import asyncio
+    from httpx import ASGITransport, AsyncClient
+    from petri.dashboard.api import create_app
+
+    (tmp_path/'petri.yaml').write_text('name: dish\n')
+    path = dish_db_path(tmp_path)
+    dependent, premise = 'dish-alpha-000-001', 'dish-beta-000-001'
+    for colony_id, cell_id in [('dish-alpha',dependent),('dish-beta',premise)]:
+        graph = ColonyGraph(colony_id)
+        graph.add_cell(Cell(id=cell_id,colony_id=colony_id,claim_text='Public fixture claim',level=0))
+        save_colony(path,graph,Colony(id=colony_id,dish='dish',
+            center_claim='Public fixture claim',center_cell_id=cell_id))
+    append(path,EdgeRecord(from_cell=dependent,to_cell=premise,edge_type='cross_colony',created_at='2026-11-01'))
+    phases = StubPhases()
+    starts = []
+
+    async def research(value):
+        if value.cell_id == dependent:
+            assert database.get_cell(path,premise)['status'] == 'VALIDATED'
+        starts.append(value.cell_id)
+        return await phases.research(value)
+
+    async def finish(value,result):
+        with database.write_connection(path) as connection:
+            connection.execute('UPDATE cells SET status=? WHERE id=?',(result.status.upper(),value.cell_id))
+
+    deps = replace(phases.dependencies(),research=research,finish=finish)
+    backend = DBOSExecutionBackend(config={'execution':{'backend':'dbos','worker_concurrency':1}})
+    await backend.start_async(tmp_path,db_path=path,dependencies=lambda spec: deps)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=create_app(tmp_path,execution_backend=backend)),
+                               base_url='http://localhost:8090') as client:
+            response = await client.post('/api/runs',json={'command':'grow'})
+            assert response.status_code == 202,response.text
+            for _ in range(200):
+                status = await client.get(response.json()['status_url'])
+                if status.json()['status'] not in {'PENDING','ENQUEUED'}:
+                    break
+                await asyncio.sleep(0.05)
+            assert status.json()['status'] == 'SUCCESS',status.text
+            assert starts == [premise,dependent]
+            assert database.get_cell(path,dependent)['status'] == 'VALIDATED'
+    finally:
+        await backend.close_async()

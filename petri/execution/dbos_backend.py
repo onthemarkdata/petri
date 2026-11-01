@@ -9,10 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from datetime import datetime, timezone
 from collections.abc import Callable, Awaitable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace, asdict, is_dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from dbos import DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID
 from dbos._error import DBOSWorkflowCancelledError, DBOSAwaitedWorkflowCancelledError
@@ -28,6 +29,7 @@ from petri.execution.dbos_app import (
 )
 from petri.execution.decisions import build_pipeline_dependencies
 from petri.execution.models import CellPipelineState, GrowOutcome, PreflightCheck, ProgressEvent
+from petri.execution.run_controls import RunRequest, RunStatus, SeedRequest
 from petri.execution.phases import PhaseServices, build_socratic_agent
 from petri.execution.pipeline import (
     NeedsHuman,
@@ -213,6 +215,170 @@ class DBOSExecutionBackend:
         self.app: DBOSApp | None = None
         self._stopped = False
 
+    async def start_owner(
+        self, petri_dir: Path, *, on_phase_progress=None, event_stream_handler_factory=None
+    ) -> None:
+        if self.app is not None and self.app.started:
+            return
+        await self.start_async(
+            petri_dir,
+            db_path=dish_db_path(petri_dir),
+            on_phase_progress=on_phase_progress,
+            event_stream_handler_factory=event_stream_handler_factory,
+        )
+
+    async def shutdown_owner(self) -> None:
+        if self.app is None or not self.app.started:
+            return
+        app = self.app
+        if app._active_steps or await DBOS.list_workflows_async(status=["PENDING", "ENQUEUED"], limit=1):
+            await asyncio.to_thread(app.detach)
+        else:
+            await self.close_async()
+
+    def _run_status(self, status) -> RunStatus:
+        result = status.output
+        if is_dataclass(result) and not isinstance(result, type):
+            result = asdict(result)
+        elif isinstance(result, list):
+            result = [
+                asdict(item) if is_dataclass(item) and not isinstance(item, type) else item
+                for item in result
+            ]
+        return RunStatus(
+            id=status.workflow_id,
+            command=status.name,
+            status=status.status,
+            created_at=status.created_at,
+            updated_at=status.updated_at,
+            result=result,
+            error=str(status.error)[-4096:] if status.error is not None else None,
+        )
+
+    async def get_run(self, petri_dir: Path, run_id: str) -> RunStatus | None:
+        system = petri_dir / "dbos.sqlite"
+        if not system.is_file():
+            return None
+        client = DBOSClient(system_database_url=f"sqlite:///{system.resolve()}")
+        try:
+            rows = await client.list_workflows_async(workflow_ids=[run_id])
+            return self._run_status(rows[0]) if rows else None
+        finally:
+            client.destroy()
+
+    async def cancel_run(self, petri_dir: Path, run_id: str) -> RunStatus | None:
+        current = await self.get_run(petri_dir, run_id)
+        if current is None:
+            return None
+        client = DBOSClient(
+            system_database_url=f"sqlite:///{(petri_dir / 'dbos.sqlite').resolve()}"
+        )
+        try:
+            await client.cancel_workflow_async(run_id, cancel_children=True)
+        finally:
+            client.destroy()
+        return await self.get_run(petri_dir, run_id)
+
+    async def submit_seed(self, request: SeedRequest) -> RunStatus:
+        from petri.execution.dashboard_runs import DashboardSeedSpec, dashboard_seed
+        from petri.execution.seed_workflow import SeedRunSpec
+        from petri.query.cells import list_colonies
+        from petri.reasoning.decomposition_settings import DecompositionSettings
+
+        if self.app is None or not self.app.started:
+            raise RuntimeError("Start the dashboard execution owner before submitting a run.")
+        dish_id = self.app.db_path.parent.name
+        colony_id = f"{dish_id}-{request.colony}"
+        existing = next(
+            (row for row in list_colonies(self.app.db_path) if row["id"] == colony_id), None
+        )
+        initial = await DBOS.get_workflow_status_async(colony_id)
+        if not request.regenerate:
+            if initial is not None:
+                if existing is not None and existing["center_claim"] != request.claim:
+                    raise ValueError(
+                        "This colony contains a different claim; request regeneration explicitly."
+                    )
+                return self._run_status(initial)
+            if existing is not None:
+                raise ValueError(
+                    "This colony already exists; request regeneration to replace its draft."
+                )
+        elif initial is not None and initial.status in {"PENDING", "ENQUEUED"}:
+            raise ValueError("Wait for or cancel the existing seed run before regenerating it.")
+        attempt = 1
+        settings = DecompositionSettings.from_dish(self.app.petri_dir)
+        while True:
+            seed = SeedRunSpec(
+                colony_id, dish_id, str(request.colony), settings, attempt, request.guidance
+            )
+            previous = await DBOS.get_workflow_status_async(seed.workflow_id)
+            if previous is None:
+                break
+            if previous.status in {"PENDING", "ENQUEUED"}:
+                raise ValueError("Wait for or cancel the existing seed run before regenerating it.")
+            attempt += 1
+        spec = DashboardSeedSpec(request, seed)
+        with SetWorkflowID(spec.workflow_id):
+            handle = await DBOS.start_workflow_async(dashboard_seed, spec)
+        status = await DBOS.get_workflow_status_async(handle.workflow_id)
+        return self._run_status(status)
+
+    async def submit_run(self, request: RunRequest) -> RunStatus:
+        from petri.execution.dashboard_runs import DashboardGrowSpec, dashboard_grow
+        from petri.execution.scheduler import ColonyRunSpec, ReopenRequest
+        from petri.query.cells import get_cell, list_colonies
+
+        if self.app is None or not self.app.started:
+            raise RuntimeError("Start the dashboard execution owner before submitting a run.")
+        if request.command == "cell":
+            cell = get_cell(self.app.db_path, str(request.cell_id))
+            if cell is None:
+                raise KeyError("Cell not found.")
+            handle = await self.enqueue_cell(
+                CellRunSpec(
+                    str(request.cell_id),
+                    request.round_number,
+                    request.today.isoformat(),
+                    self.config.get("max_iterations", 3),
+                ),
+                level=cell["level"],
+            )
+        elif request.command == "revalidate":
+            handle = await self.reopen_cell(
+                ReopenRequest(
+                    str(request.cell_id),
+                    request.request_id or str(uuid4()),
+                    request.today.isoformat(),
+                    max_iterations=self.config.get("max_iterations", 3),
+                )
+            )
+        else:
+            colonies = list_colonies(self.app.db_path)
+            if request.colony is not None:
+                colonies = [
+                    row
+                    for row in colonies
+                    if request.colony in {row["id"], row["id"].removeprefix(row["dish"] + "-")}
+                ]
+            if not colonies:
+                raise KeyError("Colony not found.")
+            specs = tuple(
+                ColonyRunSpec(
+                    row["id"],
+                    request.round_number,
+                    request.today.isoformat(),
+                    self.config.get("max_iterations", 3),
+                    tuple(request.cell_ids),
+                )
+                for row in colonies
+            )
+            spec = DashboardGrowSpec("grow:" + str(uuid4()), specs)
+            with SetWorkflowID(spec.id):
+                handle = await DBOS.start_workflow_async(dashboard_grow, spec)
+        status = await DBOS.get_workflow_status_async(handle.workflow_id)
+        return self._run_status(status)
+
     def preflight(self) -> PreflightCheck:
         settings = self.settings
         rate = (
@@ -236,13 +402,26 @@ class DBOSExecutionBackend:
         seed_runner_factory=None,
         seed_on_progress=None,
         seed_on_cell_created=None,
+        on_phase_progress=None,
+        event_stream_handler_factory=None,
     ) -> DBOSApp:
         if dependencies is None:
             if self.services_factory is None:
                 self.services_factory = self._services_factory(petri_dir, db_path)
 
             def dependencies(spec):
-                return build_pipeline_dependencies(self.services_factory(spec))
+                services = self.services_factory(spec)
+                previous = services.on_progress
+                def progress(event):
+                    if previous is not None:
+                        previous(event)
+                    if on_phase_progress is not None:
+                        on_phase_progress(event)
+                services = replace(services,
+                    on_progress=progress if on_phase_progress is not None else previous,
+                    event_stream_handler_factory=(event_stream_handler_factory
+                                                  or services.event_stream_handler_factory))
+                return build_pipeline_dependencies(services)
 
         self.app = DBOSApp(
             petri_dir,
@@ -397,10 +576,14 @@ class DBOSExecutionBackend:
 
         config = AgentConfig.model_validate(self.config)
         constitution = (petri_dir / "defaults" / "constitution.md").read_text()
-        agents = build_agents(config, constitution=constitution)
-        questioner = build_socratic_agent(config, constitution=constitution)
+        agents = None
+        questioner = None
 
         def create(spec):
+            nonlocal agents, questioner
+            if agents is None:
+                agents = build_agents(config, constitution=constitution)
+                questioner = build_socratic_agent(config, constitution=constitution)
             return PhaseServices(
                 db_path,
                 spec.round_number,

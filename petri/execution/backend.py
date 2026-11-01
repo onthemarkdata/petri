@@ -7,11 +7,25 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from petri.execution.models import GrowOutcome, PreflightCheck, ProgressEvent
+from petri.execution.run_controls import RunRequest, RunStatus, SeedRequest
 from petri.models import InferenceProvider, QueueProcessingResult
 
 
 @runtime_checkable
 class ExecutionBackend(Protocol):
+    async def start_owner(self, petri_dir: Path, *, on_phase_progress=None,
+                          event_stream_handler_factory=None) -> None: ...
+
+    async def shutdown_owner(self) -> None: ...
+
+    async def submit_seed(self, request: SeedRequest) -> RunStatus: ...
+
+    async def submit_run(self, request: RunRequest) -> RunStatus: ...
+
+    async def get_run(self, petri_dir: Path, run_id: str) -> RunStatus | None: ...
+
+    async def cancel_run(self, petri_dir: Path, run_id: str) -> RunStatus | None: ...
+
     @property
     def status_interval(self) -> float: ...
 
