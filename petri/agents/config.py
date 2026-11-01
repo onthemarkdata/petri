@@ -149,6 +149,10 @@ class AgentConfig(StrictContent):
     source_hierarchy: SourceHierarchy
     agent_tools: list[Nonempty]
     max_iterations: PositiveInt
+    max_decomposition_depth: PositiveInt = 3
+    max_nodes_per_layer: PositiveInt = 5
+    per_parent_cap: PositiveInt = 4
+    level_one_cap: PositiveInt = 10
     limits: LimitsConfig
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     prices: dict[str, ModelPrice] = Field(default_factory=dict)

@@ -9,9 +9,10 @@ import pytest
 from petri.reasoning import claude_code_provider as legacy
 from petri.reasoning import prompts
 
-SNAPSHOTS = json.loads(
+SNAPSHOTS = [case for case in json.loads(
     (Path(__file__).parents[1] / "fixtures" / "prompts" / "legacy.json").read_text()
-)
+) if case["method"] not in {"decompose_claim", "decompose_why"}]
+# Decomposition intentionally uses quota-free prompts, covered by test_decomposer_caps.
 
 
 @pytest.mark.parametrize("case", SNAPSHOTS, ids=lambda case: case["method"])

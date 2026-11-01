@@ -153,13 +153,7 @@ def get_agent_tools(config: dict | None = None) -> list[str]:
 
 
 def get_max_nodes_per_layer(config: dict | None = None) -> int:
-    """Per-layer cap on nodes created during seed-time decomposition.
-
-    The decomposer asks the LLM to brainstorm broadly, prioritise, then
-    return the top N most important premises at each level. This bound
-    keeps the seed minimal so growth happens later via feed/grow rather
-    than producing 100+ nodes up front.
-    """
+    """Return the per-layer safety ceiling; prompts never use it as a target."""
     cfg = config or load_config()
     value = cfg.get("max_nodes_per_layer")
     if value is None:

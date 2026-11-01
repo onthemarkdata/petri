@@ -47,7 +47,7 @@ def test_provider_uses_injected_depth_and_layer_cap(depth, cap):
     assert sum(cell.level == 1 for cell in result.cells) == cap
     assert all(sum(cell.level == level for cell in result.cells) <= cap
                for level in range(1, depth + 1))
-    assert provider.decompose_calls[0]["max_premises"] == cap
+    assert provider.decompose_calls[0]["max_premises"] == 5
     assert bool(provider.why_calls) == (depth > 1)
 
 

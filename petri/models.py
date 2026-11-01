@@ -677,9 +677,9 @@ class InferenceProvider(Protocol):
         when non-empty it should be threaded into the model context so the
         next decomposition reflects the user's refinement.
 
-        ``max_premises`` is the per-layer cap. The provider should ask the
-        model to brainstorm broadly and then return only the top N most
-        important premises so it doesn't bias toward whatever's salient.
+        ``max_premises`` remains a compatibility argument. Decomposition
+        counts follow the claim's structure; the decomposer enforces caps
+        in code without exposing numeric quotas to the model.
         """
         ...
 
@@ -693,9 +693,8 @@ class InferenceProvider(Protocol):
     ) -> list[dict]:
         """Five Whys: ask 'why is this true?' for a single premise.
 
-        ``max_premises`` caps how many sub-premises the model should
-        return. As with ``decompose_claim`` the provider should ask the
-        model to brainstorm and prioritise before selecting the top N.
+        ``max_premises`` remains a compatibility argument. The decomposer
+        enforces parent and layer caps after the model selects premises.
         """
         ...
 

@@ -36,8 +36,10 @@ agent_tools:
 
 max_iterations: 3
 max_concurrent: 4
-max_decomposition_depth: 3  # Five Whys: how many levels deep to decompose
-max_nodes_per_layer: 5      # Cap on nodes created at each level during seed-time
+max_decomposition_depth: 3  # Safety ceiling, never a model target.
+max_nodes_per_layer: 5      # Safety ceiling, never a model target.
+per_parent_cap: 4
+level_one_cap: 10
                             # decomposition. The model is asked to brainstorm
                             # broadly, then pick the top N most important. More
                             # nodes can be added later by feed/grow processes.

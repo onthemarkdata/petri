@@ -74,9 +74,9 @@ def decompose_typed(
     persist(center)
     initial = runner.initial_decomposition(DecompositionInput(
         claim=claim, clarifications=[question.model_dump() for question in clarifications],
-        guidance=guidance, max_premises=settings.per_layer,
+        guidance=guidance,
     ), on_progress)
-    queue = deque(add_children(center, initial.nodes))
+    queue = deque(add_children(center, initial.nodes[:settings.level_one_cap]))
     while queue:
         parent = queue.popleft()
         next_level = parent.level + 1
@@ -95,11 +95,19 @@ def decompose_typed(
         warning_count = [0]
         expansion = runner.expand_why(DecompositionInput(
             claim=parent.claim_text, parent_level=parent.level, parent_seq=parse_key(parent.id)["seq"],
-            max_premises=settings.per_layer - counts.get(next_level, 0), on_warning=warn,
+            on_warning=warn,
         ), on_progress)
         parent.is_atomic = expansion.is_atomic
         parent.bedrock_reason = expansion.bedrock_reason
         persist(parent)
         if not expansion.is_atomic:
-            queue.extend(add_children(parent, expansion.sub_premises))
+            limit = min(settings.per_parent_cap, settings.per_layer - counts.get(next_level, 0))
+            candidates = expansion.sub_premises[:limit]
+            # Keep a counterargument when truncation would otherwise remove it.
+            if len(candidates) >= 2 and all(child.relation == "supports" for child in candidates):
+                counterargument = next((child for child in expansion.sub_premises[limit:]
+                                        if child.relation != "supports"), None)
+                if counterargument is not None:
+                    candidates[-1] = counterargument
+            queue.extend(add_children(parent, candidates))
     return DecompositionResult(cells=cells, edges=edges, colony_name=colony_name, center_claim=claim)
