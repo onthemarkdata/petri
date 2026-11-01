@@ -60,7 +60,7 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#44](https://github.com/onthemarkdata/petri/issues/44) | Add search_cells tool for cross-colony edges | Integrated in [PR #178](https://github.com/onthemarkdata/petri/pull/178); final v2 acceptance pending |
 | [#45](https://github.com/onthemarkdata/petri/issues/45) | Refuse to overwrite an existing colony in seed | Integrated in [PR #126](https://github.com/onthemarkdata/petri/pull/126); final v2 acceptance pending |
 | [#46](https://github.com/onthemarkdata/petri/issues/46) | Checkpoint seed state and add petri seed --resume | Integrated in [PR #174](https://github.com/onthemarkdata/petri/pull/174); final v2 acceptance pending |
-| [#47](https://github.com/onthemarkdata/petri/issues/47) | Add an edit option to seed approval | Pending |
+| [#47](https://github.com/onthemarkdata/petri/issues/47) | Add an edit option to seed approval | Integrated in [PR #207](https://github.com/onthemarkdata/petri/pull/207); final v2 acceptance pending |
 | [#48](https://github.com/onthemarkdata/petri/issues/48) | Add pydantic_evals suite for decomposition quality | Integrated in [PR #190](https://github.com/onthemarkdata/petri/pull/190); final v2 acceptance pending |
 | [#49](https://github.com/onthemarkdata/petri/issues/49) | Spike: validate DBOS-on-SQLite for durable execution | Integrated in [PR #138](https://github.com/onthemarkdata/petri/pull/138); final v2 acceptance pending |
 | [#50](https://github.com/onthemarkdata/petri/issues/50) | Add an ExecutionBackend seam in front of the v1 engine | Integrated in [PR #151](https://github.com/onthemarkdata/petri/pull/151); final v2 acceptance pending |
@@ -75,8 +75,8 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#59](https://github.com/onthemarkdata/petri/issues/59) | Re-platform petri seed onto the DBOS backend | Integrated in [PR #196](https://github.com/onthemarkdata/petri/pull/196); final v2 acceptance pending |
 | [#60](https://github.com/onthemarkdata/petri/issues/60) | Port sync-check as a startup reconciliation step | Integrated in [PR #187](https://github.com/onthemarkdata/petri/pull/187); final v2 acceptance pending |
 | [#61](https://github.com/onthemarkdata/petri/issues/61) | Repoint dashboard /api/queue onto the backend seam | Integrated in [PR #202](https://github.com/onthemarkdata/petri/pull/202); final v2 acceptance pending |
-| [#62](https://github.com/onthemarkdata/petri/issues/62) | Rewire grow/stop/feed onto the durable backend | Pending |
-| [#63](https://github.com/onthemarkdata/petri/issues/63) | Retire the v1 engine and fcntl queue | Pending |
+| [#62](https://github.com/onthemarkdata/petri/issues/62) | Rewire grow/stop/feed onto the durable backend | Integrated in [PR #206](https://github.com/onthemarkdata/petri/pull/206); final v2 acceptance pending |
+| [#63](https://github.com/onthemarkdata/petri/issues/63) | Retire the v1 engine and fcntl queue | Integrated in [PR #218](https://github.com/onthemarkdata/petri/pull/218); final v2 acceptance pending |
 | [#64](https://github.com/onthemarkdata/petri/issues/64) | Add OTel bootstrap and petri.yaml telemetry section | Integrated in [PR #162](https://github.com/onthemarkdata/petri/pull/162); final v2 acceptance pending |
 | [#65](https://github.com/onthemarkdata/petri/issues/65) | Spike: choose the pydantic-ai OTel instrumentation path | Integrated in [PR #163](https://github.com/onthemarkdata/petri/pull/163); final v2 acceptance pending |
 | [#66](https://github.com/onthemarkdata/petri/issues/66) | Enable DBOS OTel spans behind the durability seam | Pending |
@@ -100,15 +100,15 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#84](https://github.com/onthemarkdata/petri/issues/84) | Write the verdict-driven re-decomposition RFC | Integrated in [PR #185](https://github.com/onthemarkdata/petri/pull/185); final v2 acceptance pending |
 | [#85](https://github.com/onthemarkdata/petri/issues/85) | Detect re-decomposition triggers from verdict history | Integrated in [PR #186](https://github.com/onthemarkdata/petri/pull/186); final v2 acceptance pending |
 | [#86](https://github.com/onthemarkdata/petri/issues/86) | Build the re-decomposition proposal workflow | Integrated in [PR #199](https://github.com/onthemarkdata/petri/pull/199); final v2 acceptance pending |
-| [#87](https://github.com/onthemarkdata/petri/issues/87) | Add the re-decomposition approval gate to petri grow | Pending |
+| [#87](https://github.com/onthemarkdata/petri/issues/87) | Add the re-decomposition approval gate to petri grow | Integrated in [PR #208](https://github.com/onthemarkdata/petri/pull/208); final v2 acceptance pending |
 | [#88](https://github.com/onthemarkdata/petri/issues/88) | Re-validate fed evidence by forking workflows | Pending |
 | [#89](https://github.com/onthemarkdata/petri/issues/89) | Re-scope the contradiction scanner and schedule it | Integrated in [PR #189](https://github.com/onthemarkdata/petri/pull/189); final v2 acceptance pending |
 | [#90](https://github.com/onthemarkdata/petri/issues/90) | Extend the edge registry with dish-level graph queries | Integrated in [PR #191](https://github.com/onthemarkdata/petri/pull/191); final v2 acceptance pending |
 | [#91](https://github.com/onthemarkdata/petri/issues/91) | Compute edge-intelligence metrics from the dish graph | Integrated in [PR #193](https://github.com/onthemarkdata/petri/pull/193); final v2 acceptance pending |
 | [#92](https://github.com/onthemarkdata/petri/issues/92) | Surface edge intelligence in CLI and dashboard | Integrated in [PR #197](https://github.com/onthemarkdata/petri/pull/197); final v2 acceptance pending |
-| [#93](https://github.com/onthemarkdata/petri/issues/93) | Add opt-in convergence-point priority to grow scheduling | Pending |
-| [#94](https://github.com/onthemarkdata/petri/issues/94) | Add a read-only Analyst for research-health flags | Pending |
-| [#95](https://github.com/onthemarkdata/petri/issues/95) | Write the GitHub feedback re-entry RFC | Pending |
+| [#93](https://github.com/onthemarkdata/petri/issues/93) | Add opt-in convergence-point priority to grow scheduling | Integrated in [PR #205](https://github.com/onthemarkdata/petri/pull/205); final v2 acceptance pending |
+| [#94](https://github.com/onthemarkdata/petri/issues/94) | Add a read-only Analyst for research-health flags | Integrated in [PR #204](https://github.com/onthemarkdata/petri/pull/204); final v2 acceptance pending |
+| [#95](https://github.com/onthemarkdata/petri/issues/95) | Write the GitHub feedback re-entry RFC | Integrated in [PR #209](https://github.com/onthemarkdata/petri/pull/209); final v2 acceptance pending |
 | [#96](https://github.com/onthemarkdata/petri/issues/96) | Archive merged worktrees and record corpus provenance | Pending |
 | [#100](https://github.com/onthemarkdata/petri/issues/100) | Petri v2 migration — master tracker | In progress; see child PRs and validation notes |
 | [#117](https://github.com/onthemarkdata/petri/issues/117) | Wire `petri --version` into the CLI | Already shipped in PR #118; version CLI regression tests pass |
@@ -160,3 +160,27 @@ No private research document or local corpus manifest is included in this stack.
 Additional fixes in this stack: PR #194 makes graph writes transactional,
 PR #198 separates required search from final JSON output, PR #200 corrects the
 seed-retirement test baseline, and PR #203 handles complete fenced Pi tool calls.
+
+## Integration checks through PR #218
+
+The v1 retirement stack passed 1,272 offline tests, with one skip and 24
+integration or live tests deselected. Mypy checked 139 source files; Ruff and
+whitespace checks passed. Tests tied to the removed v1 implementation were
+retired with it; [the retirement guide](RETIRE_V1.md) maps their v2 replacements.
+
+PRs #204–209 add the Analyst, opt-in priority scheduling, durable CLI controls,
+seed editing, the re-decomposition approval gate, and the feedback RFC.
+PRs #210–217 correct decomposition output instructions, add opt-in public-web
+retrieval with citation provenance, make defaults restoration exact, resume
+failed proposals, isolate manual scans from workflow recovery, retain inference
+failure diagnostics, resolve cross-colony premises, and attribute real phase
+usage to cells.
+
+The exact local Gemma completed shallow two-colony reference runs through both
+Pi and the direct API, including real search and a link to an existing non-root
+cell. Full quality acceptance remains open: broader decomposition cases and
+continuous seed-to-grow runs still produce validation failures. These failures
+are retained for diagnosis; no fallback verdict counts as a pass.
+
+Private archive tests remain opt-in, and worktree housekeeping remains pending.
+No private audit or source manifest is included in this public tracker.
