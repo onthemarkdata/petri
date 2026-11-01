@@ -14,7 +14,7 @@ from pydantic_ai.usage import RunUsage
 from petri.agents.config import AgentConfig
 from petri.agents.contract import AgentName
 from petri.agents.factory import AgentRunError, build_agents, run_agent
-from petri.cli._bootstrap import load_colonies
+from petri.cli._bootstrap import bootstrap_telemetry, load_colonies
 from petri.harness.errors import HarnessError
 
 
@@ -147,6 +147,7 @@ def register(agents: typer.Typer) -> None:
                     f"{cfg.limits.run.total_tokens_limit} tokens. Continue?",
                     abort=True,
                 )
+            bootstrap_telemetry(petri_dir)
             code = asyncio.run(
                 execute_agent(
                     name,

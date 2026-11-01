@@ -24,6 +24,7 @@ def resolve_provider(petri_dir: Path):
     mapping retain the legacy Claude Code path and agent_tools grants.
     """
     config = load_dish_config(petri_dir)
+    bootstrap_telemetry(petri_dir, config=config)
     if isinstance(config.get("harness"), dict):
         from click import get_current_context
         from petri.harness.legacy_bridge import HarnessInferenceProvider
@@ -48,6 +49,20 @@ def resolve_provider(petri_dir: Path):
 
     from petri.reasoning.claude_code_provider import ClaudeCodeProvider
     return ClaudeCodeProvider(model=model_name, allowed_tools=allowed_tools)
+
+
+def bootstrap_telemetry(petri_dir: Path, *, config: dict | None = None):
+    """Initialize local tracing and agent instrumentation for the current dish."""
+    from petri.config import get_telemetry_config
+    from petri.telemetry import init_telemetry
+    from petri.telemetry.instrument_agents import instrument_agents
+
+    dish = config if config is not None else load_dish_config(petri_dir)
+    provider = init_telemetry(
+        get_telemetry_config(petri_dir), dish_id=dish.get("name", petri_dir.parent.name)
+    )
+    instrument_agents(provider)
+    return provider
 
 
 def find_petri_dir(start: Path | None = None) -> Path:
