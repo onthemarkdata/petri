@@ -1,0 +1,11 @@
+{
+  "provenance": "Synthetic regression inspired by public issue #48; not a captured model response.",
+  "claim": "A hot dog is a sandwich.",
+  "children": [
+    "Bread surrounds a filling.",
+    "The filling is edible.",
+    "The food can be held in a hand.",
+    "The category is defined by convention.",
+    "The ingredients can be served together."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "provenance": "Public tag v0.1.0, petri/decomposer.py, _default_decompose; synthetic root claim.",
+  "claim": "A research workflow reduces repeated manual review work.",
+  "children": [
+    "The key terms and definitions in this claim are well-defined and agreed upon: A research workflow reduces repeated manual review work.",
+    "The causal mechanism or logical reasoning underlying this claim is sound: A research workflow reduces repeated manual review work.",
+    "The scope, boundary conditions, and constraints of this claim are valid: A research workflow reduces repeated manual review work."
+  ],
+  "grandchildren": [
+    "Empirical observations or measurements support the mechanism: A research workflow reduces repeated manual review work.",
+    "The claim is logically consistent with established knowledge and does not contradict known facts: A research workflow reduces repeated manual review work."
+  ]
+}
