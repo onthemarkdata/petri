@@ -1,0 +1,38 @@
+stateDiagram-v2
+  start
+  DispatchNode
+  state decision <<choice>>
+  SocraticNode
+  state decision_2 <<choice>>
+  ResearchNode
+  state decision_3 <<choice>>
+  CritiqueNode
+  state decision_4 <<choice>>
+  ConvergenceCheckNode
+  state decision_5 <<choice>>
+  RedTeamNode
+  state decision_6 <<choice>>
+  EvaluateNode
+
+  [*] --> start
+  start --> DispatchNode
+  DispatchNode --> decision
+  decision --> SocraticNode
+  decision --> [*]
+  SocraticNode --> decision_2
+  decision_2 --> [*]
+  decision_2 --> ResearchNode
+  ResearchNode --> decision_3
+  decision_3 --> [*]
+  decision_3 --> CritiqueNode
+  CritiqueNode --> decision_4
+  decision_4 --> [*]
+  decision_4 --> ConvergenceCheckNode
+  ConvergenceCheckNode --> decision_5
+  decision_5 --> [*]
+  decision_5 --> ResearchNode
+  decision_5 --> RedTeamNode
+  RedTeamNode --> decision_6
+  decision_6 --> [*]
+  decision_6 --> EvaluateNode
+  EvaluateNode --> [*]
