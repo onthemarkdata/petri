@@ -1,16 +1,18 @@
 """Named decomposition agents with explicit models and validated output retries."""
 
 from collections.abc import AsyncIterable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 import logging
 import re
 
 from pydantic_ai import Agent, ModelRetry, PromptedOutput, RunContext
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import AgentRunError
-from pydantic_ai.messages import AgentStreamEvent, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta
-from pydantic_ai.models import Model
+from pydantic_ai.messages import InstructionPart, AgentStreamEvent, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta
+from pydantic_ai.models import Model, ModelRequestContext
+from pydantic_ai.settings import ModelSettings
 
 from petri.harness.errors import FailureDetail, HarnessError
 from petri.reasoning.decomposition_schemas import InitialDecomposition, PremiseCandidate, WhyExpansion
@@ -47,6 +49,13 @@ SEARCH_INSTRUCTIONS = (
     "seed foundation colonies before dependent colonies.\n\n"
 )
 
+FLAT_RESULT = (
+    "Return only the current expansion level. Each new premise has only claim_text and relation. "
+    "Each reference has only existing_cell_id and reason. Never put sub_premises, nodes, "
+    "is_atomic, or bedrock_reason inside a child premise; the runtime expands children separately. "
+    "The final-result schema does not replace tool calls: call search_cells before the final result.\n\n"
+)
+
 OUTPUT_TEMPLATE = (
     "Return one JSON value containing the requested result data. "
     "The following JSON schema defines its shape. Do not copy schema keywords "
@@ -77,13 +86,13 @@ class DecompositionInput:
 
 
 def initial_instructions(request: DecompositionInput) -> str:
-    return SEARCH_INSTRUCTIONS + QUALITY_BAR + build_decompose_claim_prompt(
+    return SEARCH_INSTRUCTIONS + FLAT_RESULT + QUALITY_BAR + build_decompose_claim_prompt(
         request.claim, request.clarifications, request.guidance,
     ) + "STEP 4 — EMIT JSON.\nReturn the selected premises using the supplied output schema."
 
 
 def why_instructions(request: DecompositionInput) -> str:
-    return BEDROCK_TEST + SEARCH_INSTRUCTIONS + build_decompose_why_prompt(
+    return BEDROCK_TEST + SEARCH_INSTRUCTIONS + FLAT_RESULT + build_decompose_why_prompt(
         request.claim, request.parent_level, request.parent_seq,
     ) + (
         COUNTERARGUMENT + "If the parent is already ATOMIC (a directly verifiable fact, definition, or measurement), "
@@ -92,15 +101,46 @@ def why_instructions(request: DecompositionInput) -> str:
     )
 
 
+def has_earlier_cells(request: DecompositionInput) -> bool:
+    return bool(request.db_path is not None and request.db_path.is_file()
+                and any(row["colony"] != request.colony_id for row in database.list_cells(request.db_path)))
+
+
+def search_model_settings(context: RunContext[DecompositionInput]) -> ModelSettings:
+    if not context.deps.search_performed and has_earlier_cells(context.deps):
+        return {"tool_choice": "required"}
+    return {}
+
+
+class RequiredSearchOutput(AbstractCapability[DecompositionInput]):
+    """Keep final-result JSON mode out of a required function-call step."""
+
+    async def prepare_model_request(
+        self, context: RunContext[DecompositionInput], request: ModelRequestContext,
+    ) -> ModelRequestContext:
+        parameters = request.model_request_parameters
+        if (request.model_settings or {}).get("tool_choice") == "required" and parameters.output_mode == "prompted":
+            instructions = list(parameters.instruction_parts or [])
+            instructions.append(InstructionPart(
+                "This request is the required dish-search stage. Call search_cells for a specific premise. "
+                "Do not return the final decomposition result before the tool result arrives."
+            ))
+            request.model_request_parameters = replace(
+                parameters, output_mode="text", output_object=None, prompted_output_template=None,
+                instruction_parts=instructions,
+            )
+        return request
+
+
 initial_decomposer = Agent(
     name="initial_decomposer", deps_type=DecompositionInput,
     output_type=PromptedOutput(InitialDecomposition, template=OUTPUT_TEMPLATE),
-    retries={"output": 2}, defer_model_check=True,
+    retries={"output": 2}, defer_model_check=True, model_settings=search_model_settings, capabilities=[RequiredSearchOutput()],
 )
 five_whys = Agent(
     name="five_whys", deps_type=DecompositionInput,
     output_type=PromptedOutput(WhyExpansion, template=OUTPUT_TEMPLATE),
-    retries={"output": 1}, defer_model_check=True,
+    retries={"output": 1}, defer_model_check=True, model_settings=search_model_settings, capabilities=[RequiredSearchOutput()],
 )
 
 
@@ -130,11 +170,8 @@ def search_cells(context: RunContext[DecompositionInput], query: str, top_k: int
 
 
 def validate_references(context: RunContext[DecompositionInput], candidates) -> None:
-    if candidates and context.deps.db_path is not None and context.deps.db_path.is_file():
-        has_earlier_cells = any(row["colony"] != context.deps.colony_id
-                                for row in database.list_cells(context.deps.db_path))
-        if has_earlier_cells and not context.deps.search_performed:
-            raise ModelRetry("Call search_cells before proposing premises, including paraphrases. Search for each specific premise.")
+    if candidates and has_earlier_cells(context.deps) and not context.deps.search_performed:
+        raise ModelRetry("Call search_cells before proposing premises, including paraphrases. Search for each specific premise.")
     for candidate in candidates:
         if isinstance(candidate, PremiseCandidate):
             if context.deps.db_path is not None:

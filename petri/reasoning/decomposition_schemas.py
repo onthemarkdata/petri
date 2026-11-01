@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, StringConstraints, Tag, model_validator
 
 ClaimText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -19,7 +19,16 @@ class ReferencePremise(BaseModel):
     reason: ClaimText
 
 
-Premise = PremiseCandidate | ReferencePremise
+def premise_kind(value) -> str:
+    if isinstance(value, ReferencePremise) or isinstance(value, dict) and "existing_cell_id" in value:
+        return "reference"
+    return "new"
+
+
+Premise = Annotated[
+    Annotated[PremiseCandidate, Tag("new")] | Annotated[ReferencePremise, Tag("reference")],
+    Discriminator(premise_kind),
+]
 
 
 class InitialDecomposition(BaseModel):

@@ -22,13 +22,17 @@ class _Calls(BaseModel):
     tool_calls: list[_Call] = Field(min_length=1)
 
 
-def tool_instructions(parameters: ModelRequestParameters) -> str:
+def tool_instructions(parameters: ModelRequestParameters, *, required: bool = False) -> str:
     tools = parameters.declared_function_tools
     if not tools:
         return ""
     definitions = [{"name": tool.name, "description": tool.description,
                     "parameters": tool.parameters_json_schema} for tool in tools]
-    return (
+    required_note = (
+        "The next response must be a host function-call envelope; a final result is not allowed yet.\n"
+        if required else ""
+    )
+    return required_note + (
         "\nPetri host function tools are available, independently of CLI built-in tools. "
         'To call them, return exactly {"tool_calls": [{"name": "tool_name", "arguments": {}}]}. '
         "Use real arguments matching the schema. Return no final result in the same response. "

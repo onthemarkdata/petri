@@ -178,3 +178,22 @@ Offline scripted tool calls verify the search/reference/storage path, including
 a real fake-pi subprocess tool round trip; they do not establish that this local
 model reliably chooses the tool. The live reference acceptance check remains
 open.
+
+### Required search and final-result formatting
+
+The raw local responses exposed two separate failures: nested child expansions
+that violated the flat schema, and required function calls returned as ordinary
+JSON text. The premise union now selects its validation branch from the input's
+keys, so errors describe the matching shape instead of unrelated missing fields.
+Instructions also state that children cannot contain nested expansions.
+
+When earlier colonies exist, the first request requires `search_cells`. That
+request omits final-result JSON mode and its schema instructions; after the tool
+returns, prompted JSON mode and the final-result schema are restored. Pydantic
+validation and the reference-ID checks still apply. This distinction matters
+for the tested llama.cpp endpoint: combining required tools with JSON-object
+response mode returned text; a tool-only request returned a real function call.
+A subsequent direct local Gemma CLI smoke seeded two colonies and persisted a
+reference to the first colony's level-one cell with its reason. This closes the
+specific direct-provider reference smoke; it does not imply that all quality
+Dataset cases pass.
