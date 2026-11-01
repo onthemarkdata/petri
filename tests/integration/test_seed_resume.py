@@ -54,3 +54,4 @@ def test_field_report_8_seed_cli_resumes_after_interruption(tmp_path, interrupt)
     assert len(database.read_edges(domain)) == 2
     assert len(database.read_events(domain, event_type="cell_expansion_completed")) == 3
     assert len(database.read_events(domain, event_type="colony_approved")) == 1
+    assert len(database.read_events(domain, event_type="decomposition_completed")) == 1

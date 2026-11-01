@@ -17,6 +17,7 @@ from petri.cli._bootstrap import (
 )
 from petri.cli_ui import print_error_and_exit
 from petri.execution import resolve_backend
+from petri.reasoning.seed_events import current_attempt, record_completion
 from petri.storage.colonies import (
     clear_unapproved_colony,
     colony_exists,
@@ -213,8 +214,9 @@ def _resume_colony(
         resume=True,
     )
     provider = None
+    result = None
     try:
-        decompose_claim(
+        result = decompose_claim(
             colony_model.center_claim, _clarifications_to_models(colony_model.clarifications),
             dish_id, colony_name, provider=None, agent_runner=_CompletedSeedRunner(),
             settings=DecompositionSettings.from_dish(petri_dir), db_path=path, resume=True,
@@ -226,9 +228,10 @@ def _resume_colony(
             print_error_and_exit("Seed resume requires the configured typed agent backend.", code=2)
         runner = provider
     try:
-        result = backend.seed_colony(
-            petri_dir=petri_dir, **arguments, provider=runner, agent_runner=runner
-        )
+        if result is None:
+            result = backend.seed_colony(
+                petri_dir=petri_dir, **arguments, provider=runner, agent_runner=runner
+            )
     except Exception as error:
         print_error_and_exit(f"Seed resume failed: {error}", code=2)
     finally:
@@ -240,6 +243,9 @@ def _resume_colony(
     for edge in result.edges:
         graph.add_edge(edge)
     save_colony(path, graph, colony_model)
+    record_completion(
+        path, center_id, attempt=current_attempt(path, center_id), cell_count=len(result.cells)
+    )
     typer.echo(format_colony_display(result))
     import sys
 
@@ -558,10 +564,11 @@ def register(app: typer.Typer) -> None:
             for edge_result in result.edges:
                 graph.add_edge(edge_result)
 
-            log_for_this_run(
+            record_completion(
+                colony_path,
                 center_id,
-                "decomposition_completed",
-                {"cell_count": len(result.cells)},
+                attempt=current_attempt(colony_path, center_id),
+                cell_count=len(result.cells),
             )
 
             while True:

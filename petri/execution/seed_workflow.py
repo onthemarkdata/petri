@@ -13,6 +13,7 @@ from petri.harness.errors import RateLimitedError
 from petri.models import ClarifyingQuestion
 from petri.reasoning.decomposition_runner import decompose_typed
 from petri.reasoning.decomposition_settings import DecompositionSettings
+from petri.reasoning.seed_events import record_completion
 from petri.storage import database
 from petri.storage.colonies import load_colony
 from petri.storage.event_log import append_event
@@ -116,6 +117,9 @@ def _decompose_seed_step(spec, app):
             resume=True,
             on_progress=app.seed_on_progress,
             on_cell_created=created,
+        )
+        record_completion(
+            app.db_path, center.id, attempt=spec.attempt, cell_count=len(result.cells)
         )
         return _bounded(SeedProgress(spec.colony_id, complete=True, cell_count=len(result.cells)))
     except _NextStep:

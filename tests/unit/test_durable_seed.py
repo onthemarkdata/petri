@@ -3,6 +3,7 @@
 import asyncio
 import pickle
 import time
+from dataclasses import replace
 
 import pytest
 from dbos import DBOS
@@ -15,6 +16,7 @@ from petri.harness.errors import RateLimitedError
 from petri.models import Cell, Colony
 from petri.reasoning.decomposition_schemas import InitialDecomposition, WhyExpansion
 from petri.reasoning.decomposition_settings import DecompositionSettings
+from petri.reasoning.seed_events import record_completion
 from petri.storage import database
 from petri.storage.colonies import save_colony
 from tests.pipeline_stubs import StubPhases
@@ -99,11 +101,68 @@ async def test_seed_round_deduplicates_and_sleeps(seed_fixture, rate_limit):
         assert len(database.list_cells(path)) == 3
         assert len(database.read_edges(path)) == 2
         assert len(database.read_events(path, event_type="cell_expansion_completed")) == 3
+        assert len(database.read_events(path, event_type="decomposition_completed")) == 1
         steps = await DBOS.list_workflow_steps_async(spec.workflow_id)
         assert all(len(pickle.dumps(step["output"])) < CHECKPOINT_LIMIT for step in steps)
         assert all(row["is_atomic"] for row in database.list_cells(path) if row["level"])
     finally:
         await backend.close_async()
+
+
+@pytest.mark.asyncio
+async def test_completion_replay_after_append_before_checkpoint(seed_fixture, monkeypatch):
+    from petri.execution import seed_workflow
+
+    path, spec, backend = seed_fixture
+    spec = replace(spec, settings=spec.settings.model_copy(update={"depth": 1}))
+    runner = SeedRunner()
+    interrupted = False
+
+    def append_then_interrupt(*args, **kwargs):
+        nonlocal interrupted
+        record_completion(*args, **kwargs)
+        if not interrupted:
+            interrupted = True
+            raise RuntimeError("Interrupted after completion append")
+
+    monkeypatch.setattr(seed_workflow, "record_completion", append_then_interrupt)
+    start = dict(
+        db_path=path,
+        dependencies=lambda spec: StubPhases().dependencies(),
+        seed_runner_factory=lambda spec: runner,
+    )
+    await backend.start_async(path.parent, **start)
+    try:
+        handle = await backend.enqueue_seed(spec)
+        with pytest.raises(RuntimeError, match="Interrupted after completion append"):
+            await handle.get_result()
+        committed = database.read_events(path, event_type="decomposition_completed")
+        assert len(committed) == 1
+    finally:
+        await backend.close_async()
+    await backend.start_async(path.parent, **start)
+    try:
+        recovered = await backend.enqueue_seed(spec, resume=True)
+        assert (await recovered.get_result()).complete
+        assert database.read_events(path, event_type="decomposition_completed") == committed
+        assert [name for name, _ in runner.calls] == ["initial"]
+    finally:
+        await backend.close_async()
+
+
+def test_completion_identity_is_scoped_to_attempt(seed_fixture):
+    path, _, _ = seed_fixture
+    center = "dish-units-000-000"
+    record_completion(path, center, attempt=1, cell_count=3)
+    original = database.read_events(path, event_type="decomposition_completed")
+    record_completion(path, center, attempt=1, cell_count=99)
+    assert database.read_events(path, event_type="decomposition_completed") == original
+    record_completion(path, center, attempt=2, cell_count=5)
+    events = database.read_events(path, event_type="decomposition_completed")
+    assert [event["data"] for event in events] == [
+        {"attempt": 1, "cell_count": 3},
+        {"attempt": 2, "cell_count": 5},
+    ]
 
 
 def test_seed_provider_cancellation_releases_its_run_lock():

@@ -61,3 +61,4 @@ def test_dashboard_seed_recovers_after_sigkill(tmp_path):
     path = dish_db_path(tmp_path, "dish")
     assert len(database.list_cells(path)) == 3
     assert len(database.read_events(path, event_type="seed_started")) == 1
+    assert len(database.read_events(path, event_type="decomposition_completed")) == 1
