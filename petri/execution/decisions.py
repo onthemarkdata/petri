@@ -94,6 +94,7 @@ async def run_convergence(value: PipelineInput, services: PhaseServices) -> Conv
             value.iteration,
             {
                 "converged": result.converged,
+                "stall_reason": "circuit_breaker" if decision.outcome == PipelineOutcome.circuit_breaker else None,
                 "blocking_verdicts": {
                     name.value: vote.verdict for name, vote in result.blocking_results.items()
                 }

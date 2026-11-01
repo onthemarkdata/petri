@@ -61,7 +61,7 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#45](https://github.com/onthemarkdata/petri/issues/45) | Refuse to overwrite an existing colony in seed | Integrated in [PR #126](https://github.com/onthemarkdata/petri/pull/126); final v2 acceptance pending |
 | [#46](https://github.com/onthemarkdata/petri/issues/46) | Checkpoint seed state and add petri seed --resume | Integrated in [PR #174](https://github.com/onthemarkdata/petri/pull/174); final v2 acceptance pending |
 | [#47](https://github.com/onthemarkdata/petri/issues/47) | Add an edit option to seed approval | Pending |
-| [#48](https://github.com/onthemarkdata/petri/issues/48) | Add pydantic_evals suite for decomposition quality | Pending |
+| [#48](https://github.com/onthemarkdata/petri/issues/48) | Add pydantic_evals suite for decomposition quality | Integrated in [PR #190](https://github.com/onthemarkdata/petri/pull/190); final v2 acceptance pending |
 | [#49](https://github.com/onthemarkdata/petri/issues/49) | Spike: validate DBOS-on-SQLite for durable execution | Integrated in [PR #138](https://github.com/onthemarkdata/petri/pull/138); final v2 acceptance pending |
 | [#50](https://github.com/onthemarkdata/petri/issues/50) | Add an ExecutionBackend seam in front of the v1 engine | Integrated in [PR #151](https://github.com/onthemarkdata/petri/pull/151); final v2 acceptance pending |
 | [#51](https://github.com/onthemarkdata/petri/issues/51) | Make append_event idempotent with deterministic IDs | Integrated in [PR #140](https://github.com/onthemarkdata/petri/pull/140); final v2 acceptance pending |
@@ -72,9 +72,9 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#56](https://github.com/onthemarkdata/petri/issues/56) | Port decision-side phases and iterate loop into nodes | Integrated in [PR #161](https://github.com/onthemarkdata/petri/pull/161); final v2 acceptance pending |
 | [#57](https://github.com/onthemarkdata/petri/issues/57) | Implement DBOSExecutionBackend with durable cell workflows | Integrated in [PR #175](https://github.com/onthemarkdata/petri/pull/175); final v2 acceptance pending |
 | [#58](https://github.com/onthemarkdata/petri/issues/58) | Add grow_colony workflow for bottom-up scheduling | Integrated in [PR #176](https://github.com/onthemarkdata/petri/pull/176); final v2 acceptance pending |
-| [#59](https://github.com/onthemarkdata/petri/issues/59) | Re-platform petri seed onto the DBOS backend | Pending |
-| [#60](https://github.com/onthemarkdata/petri/issues/60) | Port sync-check as a startup reconciliation step | Pending |
-| [#61](https://github.com/onthemarkdata/petri/issues/61) | Repoint dashboard /api/queue onto the backend seam | Pending |
+| [#59](https://github.com/onthemarkdata/petri/issues/59) | Re-platform petri seed onto the DBOS backend | Integrated in [PR #196](https://github.com/onthemarkdata/petri/pull/196); final v2 acceptance pending |
+| [#60](https://github.com/onthemarkdata/petri/issues/60) | Port sync-check as a startup reconciliation step | Integrated in [PR #187](https://github.com/onthemarkdata/petri/pull/187); final v2 acceptance pending |
+| [#61](https://github.com/onthemarkdata/petri/issues/61) | Repoint dashboard /api/queue onto the backend seam | Integrated in [PR #202](https://github.com/onthemarkdata/petri/pull/202); final v2 acceptance pending |
 | [#62](https://github.com/onthemarkdata/petri/issues/62) | Rewire grow/stop/feed onto the durable backend | Pending |
 | [#63](https://github.com/onthemarkdata/petri/issues/63) | Retire the v1 engine and fcntl queue | Pending |
 | [#64](https://github.com/onthemarkdata/petri/issues/64) | Add OTel bootstrap and petri.yaml telemetry section | Integrated in [PR #162](https://github.com/onthemarkdata/petri/pull/162); final v2 acceptance pending |
@@ -95,17 +95,17 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 | [#79](https://github.com/onthemarkdata/petri/issues/79) | Add petri backup --restore with an overwrite guard | Integrated in [PR #181](https://github.com/onthemarkdata/petri/pull/181); final v2 acceptance pending |
 | [#80](https://github.com/onthemarkdata/petri/issues/80) | Add petri export for git-reviewable derived text | Integrated in [PR #182](https://github.com/onthemarkdata/petri/pull/182); final v2 acceptance pending |
 | [#81](https://github.com/onthemarkdata/petri/issues/81) | Replace /api/proc and sync seed with durable runs | Pending |
-| [#82](https://github.com/onthemarkdata/petri/issues/82) | Harden colony graph integrity and persistence | Pending |
-| [#83](https://github.com/onthemarkdata/petri/issues/83) | Ship starter analytics views in petri.sqlite | Pending |
+| [#82](https://github.com/onthemarkdata/petri/issues/82) | Harden colony graph integrity and persistence | Integrated in [PR #192](https://github.com/onthemarkdata/petri/pull/192); final v2 acceptance pending |
+| [#83](https://github.com/onthemarkdata/petri/issues/83) | Ship starter analytics views in petri.sqlite | Integrated in [PR #188](https://github.com/onthemarkdata/petri/pull/188); final v2 acceptance pending |
 | [#84](https://github.com/onthemarkdata/petri/issues/84) | Write the verdict-driven re-decomposition RFC | Integrated in [PR #185](https://github.com/onthemarkdata/petri/pull/185); final v2 acceptance pending |
-| [#85](https://github.com/onthemarkdata/petri/issues/85) | Detect re-decomposition triggers from verdict history | Pending |
-| [#86](https://github.com/onthemarkdata/petri/issues/86) | Build the re-decomposition proposal workflow | Pending |
+| [#85](https://github.com/onthemarkdata/petri/issues/85) | Detect re-decomposition triggers from verdict history | Integrated in [PR #186](https://github.com/onthemarkdata/petri/pull/186); final v2 acceptance pending |
+| [#86](https://github.com/onthemarkdata/petri/issues/86) | Build the re-decomposition proposal workflow | Integrated in [PR #199](https://github.com/onthemarkdata/petri/pull/199); final v2 acceptance pending |
 | [#87](https://github.com/onthemarkdata/petri/issues/87) | Add the re-decomposition approval gate to petri grow | Pending |
 | [#88](https://github.com/onthemarkdata/petri/issues/88) | Re-validate fed evidence by forking workflows | Pending |
-| [#89](https://github.com/onthemarkdata/petri/issues/89) | Re-scope the contradiction scanner and schedule it | Pending |
-| [#90](https://github.com/onthemarkdata/petri/issues/90) | Extend the edge registry with dish-level graph queries | Pending |
-| [#91](https://github.com/onthemarkdata/petri/issues/91) | Compute edge-intelligence metrics from the dish graph | Pending |
-| [#92](https://github.com/onthemarkdata/petri/issues/92) | Surface edge intelligence in CLI and dashboard | Pending |
+| [#89](https://github.com/onthemarkdata/petri/issues/89) | Re-scope the contradiction scanner and schedule it | Integrated in [PR #189](https://github.com/onthemarkdata/petri/pull/189); final v2 acceptance pending |
+| [#90](https://github.com/onthemarkdata/petri/issues/90) | Extend the edge registry with dish-level graph queries | Integrated in [PR #191](https://github.com/onthemarkdata/petri/pull/191); final v2 acceptance pending |
+| [#91](https://github.com/onthemarkdata/petri/issues/91) | Compute edge-intelligence metrics from the dish graph | Integrated in [PR #193](https://github.com/onthemarkdata/petri/pull/193); final v2 acceptance pending |
+| [#92](https://github.com/onthemarkdata/petri/issues/92) | Surface edge intelligence in CLI and dashboard | Integrated in [PR #197](https://github.com/onthemarkdata/petri/pull/197); final v2 acceptance pending |
 | [#93](https://github.com/onthemarkdata/petri/issues/93) | Add opt-in convergence-point priority to grow scheduling | Pending |
 | [#94](https://github.com/onthemarkdata/petri/issues/94) | Add a read-only Analyst for research-health flags | Pending |
 | [#95](https://github.com/onthemarkdata/petri/issues/95) | Write the GitHub feedback re-entry RFC | Pending |
@@ -140,3 +140,23 @@ Newly discovered work is recorded separately unless required to satisfy this sco
 - Historical research fixtures remain private by the maintainer's explicit choice.
   Public tests use synthetic cases; private archive checks require a local opt-in.
   No private research text, source paths, or review manifest is part of the public stack.
+
+## Integration checks through PR #203
+
+The combined offline suite passed 1,390 tests, with two skips and 16 integration
+tests deselected. Five selected real process recovery tests passed: seed SIGKILL
+and SIGINT, proposal SIGKILL, and cell/colony SIGKILL. These checks use controlled
+inference fixtures; they do not establish live model quality.
+
+Headless Chromium opened the trace waterfall and Lab graph-intelligence view
+without JavaScript errors after PR #201 repaired the embedded script boundary.
+The browser fixture contains synthetic research data. Full live-dish browser
+acceptance remains open.
+
+The historical archive remains private by maintainer decision. Public evaluation
+uses synthetic fixtures; historical checks require an explicit local opt-in.
+No private research document or local corpus manifest is included in this stack.
+
+Additional fixes in this stack: PR #194 makes graph writes transactional,
+PR #198 separates required search from final JSON output, PR #200 corrects the
+seed-retirement test baseline, and PR #203 handles complete fenced Pi tool calls.
