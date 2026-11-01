@@ -168,6 +168,13 @@ def register(app: typer.Typer) -> None:
                 "Repaired petri dish — added missing: " + ", ".join(repaired)
             )
 
+        from petri.config import get_telemetry_config
+        from petri.telemetry.span_store import prune
+
+        telemetry = get_telemetry_config(petri_dir)
+        if telemetry.enabled and telemetry.local.enabled:
+            prune(petri_dir, telemetry.local.retention_days)
+
         typer.echo("Building event index...")
         count = rebuild_sqlite(petri_dir, db_path)
         typer.echo(f"Indexed {count} events.")
