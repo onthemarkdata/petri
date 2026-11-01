@@ -12,8 +12,9 @@ from pydantic_ai.settings import ModelSettings
 
 
 def has_retrieval_attempt(messages: Sequence[ModelMessage]) -> bool:
-    """Count actual tool returns, including failed retrieval attempts."""
-    return any(isinstance(part, ToolReturnPart) and part.tool_name in {"web_search", "web_fetch"}
+    """Count completed retrieval tools, whose results can contain HTTP errors."""
+    return any(isinstance(part, ToolReturnPart) and part.outcome == "success"
+               and part.tool_name in {"web_search", "web_fetch"}
                for message in messages for part in message.parts)
 
 
