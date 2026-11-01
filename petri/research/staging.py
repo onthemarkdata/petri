@@ -64,7 +64,7 @@ class RequiredInvestigationOutput(AbstractCapability[Any]):
 
 
 class NativeFunctionPromptedOutput(AbstractCapability[Any]):
-    """Keep native function calls available while validating prompted final output."""
+    """Use native tools normally and constrain only final JSON syntax retries."""
 
     async def prepare_model_request(
         self, context: RunContext[Any], request: ModelRequestContext,
@@ -78,7 +78,8 @@ class NativeFunctionPromptedOutput(AbstractCapability[Any]):
                 and all(error.get("type") == "json_invalid" for error in part.content)
                 for part in parts
             )
-            if (syntax_retry and has_retrieval_attempt(context.messages)
+            # The investigator rejects premature finals before JSON parsing.
+            if (syntax_retry
                     and not any(isinstance(part, ToolReturnPart) for part in parts)
                     and request.model.profile.get("supports_json_object_output", False)):
                 request.model_request_parameters = replace(

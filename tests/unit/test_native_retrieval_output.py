@@ -273,3 +273,40 @@ async def test_invalid_tool_arguments_do_not_replace_an_executed_retrieval(fake_
         required = "The next response must be a host function-call envelope"
         assert all(required in request["message"] for request in requests[:3])
         assert required not in requests[-1]["message"]
+
+
+@pytest.mark.asyncio
+async def test_freshness_syntax_retry_precedes_its_first_fetch():
+    raw, sources, calls, url = _syntax_retry_fixture()
+    requests = []
+    malformed = '{"verdict":'
+    final = json.dumps({"verdict": "EVIDENCE_CURRENT",
+        "sources_cited": [{"url": url, "hierarchy_level": 2, "finding": "Measured finding."}]})
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        step = len(requests)
+        if step == 3:
+            message = {"role": "assistant", "tool_calls": [{"id": "fetch", "type": "function",
+                "function": {"name": "web_fetch", "arguments": json.dumps({"url": url})}}]}
+        else:
+            message = {"role": "assistant", "content": malformed if step == 1 else final}
+        return httpx.Response(200, json={"id": "fixture", "object": "chat.completion", "created": 0,
+            "model": "local-test", "choices": [{"index": 0, "message": message,
+            "finish_reason": "tool_calls" if "tool_calls" in message else "stop"}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        model = OpenAIChatModel("local-test", provider=OpenAIProvider(
+            base_url="http://local.invalid/v1", api_key="local-test", http_client=http))
+        agent = build_agents(raw, constitution="Preserve attribution.", model=model,
+                             research_client=sources)[AgentName.FRESHNESS_CHECKER]
+        result = await agent.run("Assess the supplied evidence's freshness.")
+    assert len(requests) == 4 and calls == [("fetch", url)]
+    assert requests[1]["response_format"] == {"type": "json_object"}
+    assert not requests[1].get("tools")
+    assert "json_invalid" in requests[1]["messages"][-1]["content"]
+    assert any(message.get("content") == malformed for message in requests[1]["messages"])
+    assert all("response_format" not in request and len(request["tools"]) == 2
+               for request in [requests[0], *requests[2:]])
+    assert "successful web_fetch in this run" in requests[2]["messages"][-1]["content"]
+    assert result.output.verdict == "EVIDENCE_CURRENT"
