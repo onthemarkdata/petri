@@ -314,3 +314,19 @@ Captured results are in [instrumentation-native.json](validation/instrumentation
 and [instrumentation-logfire.json](validation/instrumentation-logfire.json). This
 spike verifies agent/model/tool spans and usage. DBOS parenting and Petri domain
 attributes are implemented and tested separately in #67 and #68.
+
+The #67 implementation lives in `petri.telemetry.instrument_agents` and is called
+by CLI inference bootstrap after provider initialization. It configures all
+factory agents and later-created Pydantic AI agents through one shared default;
+changing the active dish/provider installs new settings. It uses `Agent.run()`
+and does not depend on streaming.
+
+`tests/integration/test_dbos_agent_spans.py` verified Pydantic AI 2.64.0 inside an
+actual async DBOS 3.4.0 step: the agent span's parent ID equals the DBOS step span
+ID, and reported token usage survives. The test uses SQLite, an in-memory span
+exporter, and a socket connection guard (zero attempts). DBOS obtains its tracer
+from OpenTelemetry's global provider, so the isolated test process installs the
+same provider globally. Production DBOS wiring belongs to #66 and must connect
+that global tracer to Petri's active provider. In DBOS 3.4.0, `enable_otlp=False`
+disables span creation as well as export; recording locally requires it enabled
+with empty exporter endpoints. No Logfire endpoint is configured.
