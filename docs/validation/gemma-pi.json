@@ -1,0 +1,14 @@
+{
+  "scope": "model readiness, not Petri end-to-end validation",
+  "timestamp_utc": "2026-11-01T20:36:50.835223+00:00",
+  "model": "huggingface.co/google/gemma-4-e2b-it-qat-q4_0-gguf:Q4_0",
+  "dmr_id": "sha256:520cda67ab7bf1f3d92b179382f86a3df5036e6f9b1024d96583fce53cbdaf8d",
+  "result": {
+    "check": "pi_read_tool",
+    "answer": "PETRI42",
+    "tool_names": [
+      "read"
+    ],
+    "elapsed_seconds": 1.295
+  }
+}
