@@ -59,7 +59,8 @@ def bootstrap_telemetry(petri_dir: Path, *, config: dict | None = None):
 
     dish = config if config is not None else load_dish_config(petri_dir)
     provider = init_telemetry(
-        get_telemetry_config(petri_dir), dish_id=dish.get("name", petri_dir.parent.name)
+        get_telemetry_config(petri_dir), dish_id=dish.get("name", petri_dir.parent.name),
+        petri_dir=petri_dir,
     )
     instrument_agents(provider)
     return provider

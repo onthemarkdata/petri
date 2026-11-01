@@ -7,6 +7,7 @@ import json
 import threading
 import warnings
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider as SDKTracerProvider
@@ -27,7 +28,9 @@ def _version() -> str:
         return "0.0.0"
 
 
-def init_telemetry(config: TelemetryConfig | dict, *, dish_id: str = "petri") -> TracerProvider:
+def init_telemetry(
+    config: TelemetryConfig | dict, *, dish_id: str = "petri", petri_dir: Path | None = None
+) -> TracerProvider:
     """Reuse one provider per configuration and dish; setup failures never stop research.
 
     Consumers use the returned provider or this module's accessors. This does not
@@ -37,7 +40,7 @@ def init_telemetry(config: TelemetryConfig | dict, *, dish_id: str = "petri") ->
     global _active
     cfg = TelemetryConfig.model_validate(config)
     fingerprint = hashlib.sha256(
-        json.dumps([cfg.model_dump(mode="json"), dish_id], sort_keys=True).encode()
+        json.dumps([cfg.model_dump(mode="json"), dish_id, str(petri_dir.resolve()) if petri_dir is not None else None], sort_keys=True).encode()
     ).hexdigest()
     with _lock:
         if fingerprint in _providers:
@@ -56,6 +59,13 @@ def init_telemetry(config: TelemetryConfig | dict, *, dish_id: str = "petri") ->
                     ),
                     sampler=ParentBased(TraceIdRatioBased(cfg.sample_ratio)),
                 )
+                if cfg.local.enabled and petri_dir is not None:
+                    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+                    from petri.telemetry.span_store import SQLiteSpanExporter
+
+                    db_path = petri_dir / "petri-dishes" / dish_id / "petri.sqlite"
+                    sdk.add_span_processor(BatchSpanProcessor(SQLiteSpanExporter(db_path)))
                 if cfg.otlp.traces_endpoint:
                     from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
                         OTLPSpanExporter,
