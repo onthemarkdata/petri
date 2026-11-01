@@ -62,8 +62,9 @@ petri/
 │   ├── load_balancer.py   # Adaptive concurrency control
 │   └── preflight.py       # Prerequisite checks (Python, Claude Code)
 │
-├── storage/               # File-based persistence
-│   ├── event_log.py       # Append-only JSONL per cell
+├── storage/               # Per-dish SQLite domain storage and legacy queue
+│   ├── database.py        # WAL schema and append-only event writes
+│   ├── event_log.py       # Domain event seam with legacy JSONL support
 │   └── queue.py           # 13-state machine with fcntl file locking
 │
 ├── analysis/              # Validation, convergence, scanning
@@ -83,14 +84,15 @@ petri/
 ├── telemetry/            # Local SQLite span/usage sink and optional OTLP traces
 ├── defaults/              # Opinionated config (13 agents, 4 debates, constitution)
 ├── templates/             # Plain-text templates for adapter config generation
-├── dashboard/             # FastAPI REST+SSE, SQLite migration
+├── query/                 # Short-lived read-only SQLite queries
+├── dashboard/             # FastAPI REST+SSE over per-dish queries
 └── adapters/              # Harness adapters (Claude Code adapter)
 ```
 
 ## Active Technologies
 
 - Python 3.11+ / Core: stdlib + Pydantic / CLI: Typer / Dashboard: FastAPI + SSE
-- Storage: JSONL (event logs, append-only), JSON (queue, file-locked), SQLite (disposable dashboard index)
+- Storage: JSONL (event logs, append-only), JSON (queue, file-locked), SQLite (per-dish domain data, spans, and usage)
 - Testing: pytest
 - Config generation: stdlib string.Template (no Jinja2)
 
