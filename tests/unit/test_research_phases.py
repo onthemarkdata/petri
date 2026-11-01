@@ -185,8 +185,10 @@ def inputs(cell_id):
 
 
 @pytest.mark.asyncio
-async def test_research_handoff_contains_current_investigator_findings(phase_services):
+@pytest.mark.parametrize("public_web", [False, True])
+async def test_research_handoff_contains_current_investigator_findings(phase_services, public_web):
     services, signals = phase_services
+    services.config.research = services.config.research.model_copy(update={"public_web": public_web})
     prompts = {}
 
     def respond(messages, info):
@@ -207,6 +209,14 @@ async def test_research_handoff_contains_current_investigator_findings(phase_ser
     assert "CURRENT_INVESTIGATOR_FINDING" in prompts[AgentName.DEPENDENCY_AUDITOR]
     assert "FULL_ARGUMENT_HANDOFF" in prompts[AgentName.FRESHNESS_CHECKER]
     assert "FULL_EVIDENCE_HANDOFF" in prompts[AgentName.DEPENDENCY_AUDITOR]
+    assert "WebSearch" not in prompts[AgentName.INVESTIGATOR]
+    assert "WebFetch" not in prompts[AgentName.INVESTIGATOR]
+    if public_web:
+        assert "web_search tool" in prompts[AgentName.INVESTIGATOR]
+        assert "web_fetch to verify" in prompts[AgentName.INVESTIGATOR]
+    else:
+        assert "No source retrieval tools are available" in prompts[AgentName.INVESTIGATOR]
+        assert "You MUST use" not in prompts[AgentName.INVESTIGATOR]
 
 
 @pytest.mark.asyncio

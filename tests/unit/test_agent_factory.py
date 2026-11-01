@@ -17,7 +17,7 @@ from pydantic_ai.models.test import TestModel
 
 from petri.agents.config import load_agent_config
 from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode, Phase
-from petri.agents.factory import AgentRunError, build_agents, run_agent
+from petri.agents.factory import AgentRunError, build_agents, run_agent, typed_role_instruction
 from petri.agents.outputs import SourceCitation
 
 DEFAULTS = Path(__file__).parents[2] / "petri/defaults"
@@ -43,7 +43,7 @@ def test_roster_names_instructions_and_structure(config):
     for name, agent in agents.items():
         assert any("Preserve evidence." in item.instruction for item in agent._instructions)
         assert any(
-            config.agents[name].instruction in item.instruction for item in agent._instructions
+            typed_role_instruction(config.agents[name].instruction) in item.instruction for item in agent._instructions
         )
     assert AGENT_SPECS[AgentName.TRIAGE].blocking_mode == BlockingMode.CONDITIONAL
     assert AGENT_SPECS[AgentName.TRIAGE].redirect_on_block == "DEFER_OPEN"

@@ -19,6 +19,11 @@ ModelResolver = Callable[[dict], Model | str]
 OutputMode = Literal["tool", "prompted"]
 
 
+def typed_role_instruction(instruction: str) -> str:
+    """Use the registered host-tool names in typed agent instructions."""
+    return instruction.replace("WebSearch", "web_search").replace("WebFetch", "web_fetch")
+
+
 def _resolve(config: dict) -> Model | str:
     # Delay optional harness imports until a caller explicitly builds real agents.
     from petri.harness.resolve import resolve_model
@@ -61,7 +66,7 @@ def build_agents(
         mode = output_mode or ("prompted" if backend in {"pi", "claude-code"} else "tool")
         delivery = ToolOutput(schema) if mode == "tool" else PromptedOutput(schema)
         instructions = (
-            f"{constitution.strip()}\n\n{content.instruction}\n\n"
+            f"{constitution.strip()}\n\n{typed_role_instruction(content.instruction)}\n\n"
             f"Act as {name.value}. Return one of these exact verdicts: "
             f"{', '.join(content.verdicts_pass + content.verdicts_block)}.\n\n"
             f"{ASSESSMENT_FORMAT}"
