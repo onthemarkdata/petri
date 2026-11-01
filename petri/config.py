@@ -18,7 +18,7 @@ _DEFAULTS_PATH = Path(__file__).parent / "defaults" / "legacy-petri.yaml"
 @functools.lru_cache(maxsize=1)
 def load_config(config_path: Path | None = None) -> dict:
     """Load and cache the full petri.yaml config."""
-    path = config_path if config_path and config_path.exists() else _DEFAULTS_PATH
+    path = config_path if config_path is not None else _DEFAULTS_PATH
     if not path.exists():
         raise FileNotFoundError(f"Petri config not found: {path}")
     cfg = yaml.safe_load(path.read_text())

@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional, cast
 
+from petri.reasoning.decomposition_settings import DecompositionSettings
+
 from petri.models import (
     Cell,
     ClarifyingQuestion,
@@ -82,6 +84,7 @@ def decompose_claim(
     on_progress: Optional[Callable[[str], None]] = None,
     on_cell_created: Optional[OnCellCreated] = None,
     center: Optional[Cell] = None,
+    settings: DecompositionSettings | None = None,
 ) -> DecompositionResult:
     """Decompose a claim into a colony of cells and edges.
 
@@ -123,6 +126,7 @@ def decompose_claim(
         on_progress=on_progress,
         on_cell_created=on_cell_created,
         center=center,
+        settings=settings or DecompositionSettings.defaults(),
     )
 
 
@@ -234,6 +238,7 @@ def _provider_decompose(
     on_progress: Optional[Callable[[str], None]] = None,
     on_cell_created: Optional[OnCellCreated] = None,
     center: Optional[Cell] = None,
+    settings: DecompositionSettings | None = None,
 ) -> DecompositionResult:
     """Decompose using iterative Five Whys via an LLM provider.
 
@@ -242,7 +247,7 @@ def _provider_decompose(
        the next level down.
     3. Repeat until premises are atomic or max_depth is reached.
 
-    Each level is capped at ``get_max_nodes_per_layer()`` total cells.
+    Each level is capped at ``settings.per_layer`` total cells.
     The provider prompts ask the model to brainstorm broadly, prioritise,
     and return only the top N most important premises; the decomposer
     additionally hard-truncates as a safety net so the cap holds even if
@@ -252,10 +257,9 @@ def _provider_decompose(
     persist it to disk and log a ``cell_created`` event before the next
     LLM call begins. ``on_progress`` is forwarded to every provider call.
     """
-    from petri.config import get_max_decomposition_depth, get_max_nodes_per_layer
-
-    max_depth = get_max_decomposition_depth()
-    max_per_layer = get_max_nodes_per_layer()
+    settings = settings or DecompositionSettings.defaults()
+    max_depth = settings.depth
+    max_per_layer = settings.per_layer
     colony_id = f"{dish_id}-{colony_name}"
 
     # Per-level usage tracker — used to enforce the cap and to compute
