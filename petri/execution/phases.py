@@ -36,6 +36,7 @@ from petri.execution.pipeline import (
     SyncConflict,
 )
 from petri.reasoning.prompts import build_assess_cell_prompt
+from petri.research.tools import ResearchContext
 from petri.storage import database
 from petri.storage.event_log import append_event, derive_event_id
 
@@ -229,6 +230,7 @@ async def _assessment(
         )
         response = await agent.run(
             prompt,
+            deps=ResearchContext(services.db_path,value.cell_id,agent_name,value.iteration,services.round_number,node),
             usage=services.usage,
             usage_limits=UsageLimits(
                 request_limit=services.config.limits.run.request_limit,

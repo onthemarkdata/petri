@@ -112,6 +112,8 @@ class Confidence(str, Enum):
 
 
 class SearchExecutedData(BaseModel):
+    source_urls: list[str] | None = None
+    search_provider: str | None = None
     query: str
     sources_found: int = Field(ge=0)
 
@@ -123,6 +125,9 @@ class CellQueuedData(BaseModel):
 
 
 class SourceReviewedData(BaseModel):
+    retrieved_at: str | None = None
+    content_sha256: str | None = None
+    retrieval_method: str | None = None
     url: str
     title: str = ""
     pub_date: str = ""
