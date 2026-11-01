@@ -290,3 +290,12 @@ and original creation timestamp, so database maintenance cannot change the
 reference. Replaying a removed version stays removed. A later explicit addition
 can append a new version. `active_edges` and the `dependents` view expose only
 versions without a tombstone; snapshots retain the complete history.
+
+
+Colony topology uses canonical typed edge records. Adjacency maps and the
+`Cell.dependencies`/`dependents` lists are derived projections. Save/load preserves
+cross-colony references, reasons, and original edge timestamps. Removing a cell
+retires it through `cell_tombstones` and tombstones all incident active edges in
+one transaction. Active views omit the retired cell; historical rows remain to
+preserve audit references. Invalid colony data is logged with its dish and colony
+ID, and healthy colonies continue loading.

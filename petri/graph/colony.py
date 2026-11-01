@@ -1,34 +1,82 @@
-"""Colony graph module for DAG operations.
+"""Colony topology has one authority: typed edge records.
 
-Manages the directed acyclic graph structure of a colony. A colony is a
-connected DAG of cells rooted at a colony center (level 0). Edges represent
-logical dependencies: Edge(from_cell=A, to_cell=B) means A depends on B.
+Adjacency maps and Cell dependency/dependent lists are projections of those records.
+Topology mutations and cell reads refresh the lists; persistence reads the same
+records, including typed references to cells in another colony.
 """
 
 from __future__ import annotations
 
 import json
 from collections import deque
+from datetime import datetime, timezone
+
+from pydantic import BaseModel, ConfigDict
+from petri.storage.edge_registry import EdgeRecord
 from pathlib import Path
 
-from petri.models import Cell, CellStatus, Colony, Edge
+from petri.models import Cell, CellStatus, Colony, Edge, parse_key
+
+
+class GraphIntegrityError(ValueError):
+    """A colony edge references an invalid or missing endpoint."""
+
+
+class ExternalCellReference(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    cell_id: str
+    colony_id: str
+
+    @classmethod
+    def from_id(cls, cell_id: str) -> ExternalCellReference:
+        try:
+            parsed = parse_key(cell_id,strict=True)
+        except ValueError as error:
+            raise GraphIntegrityError(f'Invalid cross-colony cell reference: {cell_id}') from error
+        return cls(cell_id=cell_id,colony_id=parsed['colony_prefix'])
 
 
 class ColonyGraph:
-    """Mutable graph structure that manages cells and directed dependency edges.
+    """Store local cells and canonical edge records; derive all adjacency views."""
 
-    Cells are keyed by composite ID. Edges are directed: from_cell depends on
-    to_cell. The adjacency dict (_adj) maps a cell to the set of cells that
-    depend on it (forward/dependents). The reverse adjacency dict (_rev) maps a
-    cell to the set of cells it depends on (dependencies).
-    """
+    def __init__(self, colony_id: str = '') -> None:
+        self.colony_id = colony_id
+        self._cells: dict[str,Cell] = {}
+        self._edges: dict[tuple[str,str,str],EdgeRecord] = {}
+        self._removed_cells: set[str] = set()
+        self.external_references: dict[str,ExternalCellReference] = {}
 
-    def __init__(self, colony_id: str = "") -> None:
-        self.colony_id: str = colony_id
-        self._cells: dict[str, Cell] = {}
-        self._edges: list[Edge] = []
-        self._adj: dict[str, set[str]] = {}  # cell_id -> dependents
-        self._rev: dict[str, set[str]] = {}  # cell_id -> dependencies
+    @property
+    def _adj(self) -> dict[str,set[str]]:
+        result: dict[str,set[str]] = {cell_id:set() for cell_id in self._cells}
+        for edge in self._edges.values():
+            result.setdefault(edge.to_cell,set()).add(edge.from_cell)
+        return result
+
+    @property
+    def _rev(self) -> dict[str,set[str]]:
+        result: dict[str,set[str]] = {cell_id:set() for cell_id in self._cells}
+        for edge in self._edges.values():
+            result.setdefault(edge.from_cell,set()).add(edge.to_cell)
+        return result
+
+    def _refresh_cells(self) -> None:
+        dependencies,dependents = self._rev,self._adj
+        self.external_references = {}
+        for edge in self._edges.values():
+            for endpoint in (edge.from_cell,edge.to_cell):
+                if endpoint not in self._cells:
+                    self.external_references[endpoint] = ExternalCellReference.from_id(endpoint)
+        for cell in self._cells.values():
+            cell.dependencies = sorted(dependencies.get(cell.id,set()))
+            cell.dependents = sorted(dependents.get(cell.id,set()))
+
+    @property
+    def removed_cell_ids(self) -> tuple[str,...]:
+        return tuple(sorted(self._removed_cells))
+
+    def get_edge_records(self) -> list[EdgeRecord]:
+        return [self._edges[key] for key in sorted(self._edges)]
 
     # ── Cell operations ──────────────────────────────────────────────
 
@@ -40,8 +88,8 @@ class ColonyGraph:
         if cell.id in self._cells:
             raise ValueError(f"Cell already exists: {cell.id}")
         self._cells[cell.id] = cell
-        self._adj.setdefault(cell.id, set())
-        self._rev.setdefault(cell.id, set())
+        self._removed_cells.discard(cell.id)
+        self._refresh_cells()
 
     def remove_cell(self, cell_id: str) -> None:
         """Remove a cell and all edges that reference it.
@@ -51,22 +99,11 @@ class ColonyGraph:
         if cell_id not in self._cells:
             raise KeyError(f"Cell not found: {cell_id}")
 
-        # Remove edges that reference this cell
-        self._edges = [
-            edge
-            for edge in self._edges
-            if edge.from_cell != cell_id and edge.to_cell != cell_id
-        ]
-
-        # Clean up adjacency references
-        for dep_id in self._adj.get(cell_id, set()):
-            self._rev.get(dep_id, set()).discard(cell_id)
-        for dep_id in self._rev.get(cell_id, set()):
-            self._adj.get(dep_id, set()).discard(cell_id)
-
-        self._adj.pop(cell_id, None)
-        self._rev.pop(cell_id, None)
+        self._edges = {key:edge for key,edge in self._edges.items()
+                       if edge.from_cell != cell_id and edge.to_cell != cell_id}
         del self._cells[cell_id]
+        self._removed_cells.add(cell_id)
+        self._refresh_cells()
 
     def get_cell(self, cell_id: str) -> Cell:
         """Get a cell by its composite ID.
@@ -75,34 +112,43 @@ class ColonyGraph:
         """
         if cell_id not in self._cells:
             raise KeyError(f"Cell not found: {cell_id}")
+        self._refresh_cells()
         return self._cells[cell_id]
 
     def get_all_cells(self) -> list[Cell]:
         """Return all cells sorted by level then seq."""
+        self._refresh_cells()
         return sorted(self._cells.values(), key=lambda cell: (cell.level, cell.id))
 
     def get_edges(self) -> list[Edge]:
         """Return all edges."""
-        return list(self._edges)
+        return [Edge.model_validate(edge.model_dump()) for edge in self.get_edge_records()]
 
     # ── Edge operations ──────────────────────────────────────────────
 
-    def add_edge(self, edge: Edge) -> None:
-        """Add a directed dependency edge.
-
-        Edge(from_cell=A, to_cell=B) means A depends on B. Before adding,
-        checks that adding this edge would not create a cycle.
-
-        Raises ValueError if the edge would create a cycle.
-        """
-        if self.has_cycle_with_edge(edge.from_cell, edge.to_cell):
-            raise ValueError(
-                f"Adding edge {edge.from_cell} -> {edge.to_cell} would create a cycle"
-            )
-
-        self._edges.append(edge)
-        self._adj.setdefault(edge.to_cell, set()).add(edge.from_cell)
-        self._rev.setdefault(edge.from_cell, set()).add(edge.to_cell)
+    def add_edge(self, edge: Edge | EdgeRecord) -> None:
+        """Validate local endpoints, preserve external references, and deduplicate."""
+        if edge.from_cell == edge.to_cell:
+            raise ValueError('A self-reference would create a cycle')
+        record = edge if isinstance(edge,EdgeRecord) else EdgeRecord(
+            **edge.model_dump(),created_at=datetime.now(timezone.utc).isoformat())
+        if not any(endpoint in self._cells for endpoint in (record.from_cell,record.to_cell)):
+            raise GraphIntegrityError(f'Edge does not touch colony {self.colony_id}: {record.from_cell} -> {record.to_cell}')
+        for endpoint in (record.from_cell,record.to_cell):
+            if endpoint in self._cells:
+                continue
+            if record.edge_type != 'cross_colony' or endpoint.startswith(self.colony_id+'-'):
+                raise GraphIntegrityError(f'Missing local cell in colony {self.colony_id}: {endpoint}')
+            reference = ExternalCellReference.from_id(endpoint)
+            if reference.colony_id == self.colony_id:
+                raise GraphIntegrityError(f'Missing local cell in colony {self.colony_id}: {endpoint}')
+        key = (record.from_cell,record.to_cell,record.edge_type)
+        if key in self._edges:
+            return
+        if self.has_cycle_with_edge(record.from_cell,record.to_cell):
+            raise ValueError(f'Adding edge {record.from_cell} -> {record.to_cell} would create a cycle')
+        self._edges[key] = record
+        self._refresh_cells()
 
     def has_cycle_with_edge(self, from_cell: str, to_cell: str) -> bool:
         """Check if adding an edge from from_cell to to_cell would create a cycle.
@@ -142,7 +188,7 @@ class ColonyGraph:
         # Compute in-degrees (number of dependencies for each cell)
         in_degree: dict[str, int] = {cell_id: 0 for cell_id in self._cells}
         for cell_id in self._cells:
-            in_degree[cell_id] = len(self._rev.get(cell_id, set()))
+            in_degree[cell_id] = len(self._rev.get(cell_id, set()) & self._cells.keys())
 
         # Start with cells that have no dependencies
         queue: deque[str] = deque(
@@ -154,6 +200,8 @@ class ColonyGraph:
             current = queue.popleft()
             processed += 1
             for dependent in self._adj.get(current, set()):
+                if dependent not in in_degree:
+                    continue
                 in_degree[dependent] -= 1
                 if in_degree[dependent] == 0:
                     queue.append(dependent)
@@ -181,7 +229,7 @@ class ColonyGraph:
             current = queue.popleft()
             current_level = levels[current]
             for dep in self._rev.get(current, set()):
-                if dep not in levels:
+                if dep in self._cells and dep not in levels:
                     levels[dep] = current_level + 1
                     queue.append(dep)
 
@@ -203,6 +251,7 @@ class ColonyGraph:
         These are the most granular claims in the colony, at the deepest
         levels of the DAG. They must be validated first (bottom-up).
         """
+        self._refresh_cells()
         return [
             self._cells[cell_id]
             for cell_id in sorted(self._cells)
@@ -218,6 +267,7 @@ class ColonyGraph:
         - It has no dependencies, OR
         - ALL of its dependencies have VALIDATED status.
         """
+        self._refresh_cells()
         eligible: list[Cell] = []
         for cell_id, cell in sorted(self._cells.items()):
             status = cells_status.get(cell_id, cell.status)
@@ -360,6 +410,8 @@ def deserialize_colony(
         cell = Cell.model_validate(cell_data)
         cells.append(cell)
 
+    stored_dependencies = {cell.id:list(cell.dependencies) for cell in cells}
+
     # Add cells first
     for cell in cells:
         graph.add_cell(cell)
@@ -367,7 +419,7 @@ def deserialize_colony(
     # Reconstruct edges from cell dependency lists
     seen_edges: set[tuple[str, str]] = set()
     for cell in cells:
-        for dep_id in cell.dependencies:
+        for dep_id in stored_dependencies[cell.id]:
             edge_pair = (cell.id, dep_id)
             if edge_pair not in seen_edges:
                 seen_edges.add(edge_pair)
@@ -381,8 +433,6 @@ def deserialize_colony(
                     to_cell=dep_id,
                     edge_type=edge_type,
                 )
-                # Only add if both cells are in the graph
-                if dep_id in graph._cells:
-                    graph.add_edge(edge)
+                graph.add_edge(edge)
 
     return graph, colony

@@ -227,7 +227,7 @@ examples with a v2 dish directory.
   sqlite3 .petri/petri-dishes/DISH/petri.sqlite 'SELECT * FROM blocking_verdict_patterns ORDER BY blocked_verdicts DESC;'
   ```
 
-- `cell_velocity` reports each active cell's first and latest event, first positive
+- `cell_velocity` reports each cell's first and latest event, first positive
   convergence check, and elapsed seconds to that check. Cells with no events are
   absent; unconverged cells have null convergence time.
 

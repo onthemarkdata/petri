@@ -43,12 +43,13 @@ def list_cells(
     with read_connection(db_path) as connection:
         if connection is None or not has_table(connection, "cells"):
             return []
+        cell_table = "active_cells" if has_table(connection,"active_cells") else "cells"
         edge_table = "active_edges" if has_table(connection, "active_edges") else "edges"
         sql = (
             "SELECT c.*,"
             f"(SELECT json_group_array(to_cell) FROM (SELECT DISTINCT to_cell FROM {edge_table} WHERE from_cell=c.id ORDER BY to_cell)) AS dependencies,"
             "(SELECT json_group_array(dependent_cell_id) FROM (SELECT DISTINCT dependent_cell_id FROM dependents WHERE cell_id=c.id ORDER BY dependent_cell_id)) AS dependents "
-            "FROM cells c WHERE (? IS NULL OR c.colony=?) AND (? IS NULL OR c.status=?) "
+            f"FROM {cell_table} c WHERE (? IS NULL OR c.colony=?) AND (? IS NULL OR c.status=?) "
             "AND (? IS NULL OR c.level=?) AND (? IS NULL OR c.id=?) ORDER BY c.colony,c.level,c.seq,c.id"
         )
         result = []

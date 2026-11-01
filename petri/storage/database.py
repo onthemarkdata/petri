@@ -261,14 +261,14 @@ def put_cell(db_path: Path, cell: Mapping[str, Any]) -> None:
 
 def get_cell(db_path: Path, cell_id: str) -> dict | None:
     with closing(connect(db_path)) as conn:
-        row = conn.execute("SELECT * FROM cells WHERE id = ?", (cell_id,)).fetchone()
+        row = conn.execute("SELECT * FROM active_cells WHERE id = ?", (cell_id,)).fetchone()
         return dict(row) if row is not None else None
 
 
 def list_cells(db_path: Path, *, colony: str | None = None) -> list[dict]:
     with closing(connect(db_path)) as conn:
         rows = conn.execute(
-            "SELECT * FROM cells WHERE (? IS NULL OR colony = ?) ORDER BY colony,level,seq,id",
+            "SELECT * FROM active_cells WHERE (? IS NULL OR colony = ?) ORDER BY colony,level,seq,id",
             (colony, colony),
         )
         return [dict(row) for row in rows]
