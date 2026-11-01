@@ -16,6 +16,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from petri.agents.config import UsageLimitConfig
 from petri.agents.contract import AgentName, DebateProtocol
 from petri.agents.outputs import AgentAssessment
+from petri.harness.errors import HarnessError
 
 if TYPE_CHECKING:
     from petri.models import Event
@@ -84,7 +85,7 @@ async def run_debate(
                     usage=result.usage,
                     usage_limits=budget,
                 )
-            except (UsageLimitExceeded, UnexpectedModelBehavior) as error:
+            except (UsageLimitExceeded, UnexpectedModelBehavior, HarnessError) as error:
                 result.status = (
                     DebateStatus.LIMIT_EXCEEDED
                     if isinstance(error, UsageLimitExceeded)
@@ -104,6 +105,8 @@ def log_debate(
     cell_id: str,
     iteration: int,
     result: DebateResult,
+    *,
+    round_number: int = 0,
 ) -> Event:
     """Append through the domain-event seam, preserving the standard event envelope."""
     from petri.storage.event_log import append_event
@@ -139,4 +142,6 @@ def log_debate(
             "to_agent": result.protocol.pairing[1].value,
             "exchange_summary": summary,
         },
+        round_number=round_number,
+        node="debate:" + ":".join(name.value for name in result.protocol.pairing),
     )
