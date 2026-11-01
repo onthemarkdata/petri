@@ -37,10 +37,13 @@ def register(app: typer.Typer) -> None:
             typer.echo("No colonies found.")
             raise typer.Exit(code=0)
 
+        from petri.query.intelligence import get_intelligence
+        intelligence = get_intelligence(petri_dir)
+
         for colony_graph, colony in colonies:
             if format == "dot":
-                render_dot(colony_graph, colony)
+                render_dot(colony_graph, colony, intelligence=intelligence)
             else:
-                render_text_tree(colony_graph, colony)
+                render_text_tree(colony_graph, colony, intelligence=intelligence)
 
         raise typer.Exit(code=0)

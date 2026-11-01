@@ -525,10 +525,32 @@ def create_app(petri_dir: Path) -> FastAPI:
             for dish in query.enumerate_dishes(petri_dir) for cell in query.list_cells(dish.db_path)
         ]
 
-    @app.get('/api/edges')
+    from petri.storage.edge_registry import EdgeRecord
+
+    @app.get('/api/edges', response_model=list[EdgeRecord])
     def get_edges(cell_id: str | None = None, colony: str | None = None):
-        return [edge for dish in query.enumerate_dishes(petri_dir)
-                for edge in query.get_edges(dish.db_path, cell_id=cell_id, colony=colony)]
+        from petri.telemetry import get_tracer
+        attributes = {'petri.dish_id':_get_dish_id(petri_dir),'http.route':'/api/edges'}
+        if cell_id is not None:
+            attributes['petri.cell_id'] = cell_id
+        if colony is not None:
+            attributes['petri.colony_id'] = colony
+        with get_tracer().start_as_current_span('petri.dashboard.edges',attributes=attributes) as span:
+            result = [edge for dish in query.enumerate_dishes(petri_dir)
+                      for edge in query.get_edges(dish.db_path,cell_id=cell_id,colony=colony)]
+            span.set_attribute('petri.outcome','ok')
+            return result
+
+    @app.get('/api/intelligence')
+    def get_intelligence():
+        from petri.query.intelligence import get_intelligence as read_intelligence
+        from petri.telemetry import get_tracer
+        with get_tracer().start_as_current_span('petri.dashboard.intelligence',attributes={
+            'petri.dish_id':_get_dish_id(petri_dir),'http.route':'/api/intelligence',
+        }) as span:
+            report = read_intelligence(petri_dir)
+            span.set_attribute('petri.outcome','ok')
+            return report.model_dump(mode='json')
 
     @app.get('/api/cell/{cell_id}')
     def get_cell_detail(cell_id: str):

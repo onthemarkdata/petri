@@ -25,3 +25,32 @@ is true or reliable.
 `EdgeIntelligenceReport`. It does not load a model, run inference, schedule work,
 or write a database. Reports serialize as JSON for downstream CLI, dashboard, and
 scheduling consumers. Tombstoned edges and retired cells do not contribute.
+
+## CLI and dashboard
+
+`petri check --targets 5` prints the highest-ranked convergence points with their
+importance and fragility. The default limit is five. `petri graph` marks those
+points in text and DOT output and labels references across colonies. The dashboard
+uses the same `/api/intelligence` report for its five validation targets;
+`/api/edges` supplies typed edge records. Shared presentation settings define edge
+labels and styles for the dashboard and DOT renderer.
+
+### Fixture verification
+
+Run these checks against a dish with two colonies whose cells share a dependency:
+
+- [x] Compare `petri check --targets 5` with the first five IDs from
+  `/api/intelligence`. The three-cell fixture returned the same target,
+  `intelligence-alpha-001-001`, with importance 2 and fragility 3.
+- [x] Inspect `petri graph --format dot`: the target has a double outline and
+  convergence annotation; the cross-colony reference has a dashed blue edge.
+- [x] Read `/api/edges` and validate every row as an `EdgeRecord`. The fixture
+  contains one intra-colony edge and one cross-colony edge.
+- [x] Verify both routes emit dish/outcome span attributes. Automated fixture
+  checks also cover cell/colony filters and a schema-valid report.
+- [ ] Open the dashboard and inspect the target panel and distinct edge styles
+  in a browser. Browser rendering remains unverified in this environment because
+  the browser tool could not create a tab.
+
+The CLI and TestClient steps were executed on the local fixture. No inference or
+live grow was needed. Browser appearance still requires the final visual check.

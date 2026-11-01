@@ -1855,6 +1855,7 @@ var EVENT_COLORS = $event_colors_json;
 var QUEUE_ACTIVE_STATES = $queue_active_states_json;
 
 var PASS_VERDICTS = new Set($pass_verdicts_json);
+var EDGE_STYLES = $edge_styles_json;
 
 // ── State ───────────────────────────────────────────────────────────────
 
@@ -2098,10 +2099,12 @@ function loadLabData() {
     fetchJSON('/api/cells'),
     fetchJSON('/api/queue'),
     fetchJSON('/api/stats'),
+    fetchJSON('/api/intelligence'),
   ]).then(function(results) {
     State.cells = results[0];
     State.queue = results[1];
     State.stats = results[2];
+    State.intelligence = results[3];
     renderLab();
   }).catch(function(err) {
     var container = document.getElementById('lab-content');
@@ -2146,6 +2149,16 @@ function renderLab() {
     ribbon.appendChild(card);
   });
   container.appendChild(ribbon);
+  var targets = buildEl('div', {id:'validation-targets-panel',className:'hud-panel compact'});
+  targets.appendChild(buildEl('div', {className:'lab-section-label'}, 'Validation targets'));
+  var report = State.intelligence || {cells:{},convergence_points:[]};
+  if (!report.convergence_points.length) targets.appendChild(buildEl('div', {}, 'No convergence points found.'));
+  report.convergence_points.slice(0,5).forEach(function(cellId) {
+    var metric = report.cells[cellId];
+    targets.appendChild(buildEl('button', {className:'trace-choice',onclick:function() { navigate('cell',cellId); }},
+      cellId + ' · importance=' + metric.importance + ' · fragility=' + metric.fragility));
+  });
+  container.appendChild(targets);
 
   // Colony cards — each colony is a clickable HUD panel.
   var colonyKeys = Object.keys(colonies);
@@ -2485,6 +2498,7 @@ function renderDAG(colonyCells, allCells, colonyId, activeSet, edges) {
       d: straightPath(src, tgt),
       class: 'dag-edge ' + (edgeType === 'cross_colony' ? 'cross' : 'intra'),
       'data-edge-type': edgeType,
+      style: 'stroke:' + (EDGE_STYLES[edgeType] || EDGE_STYLES.intra_colony).color + ';stroke-dasharray:' + (EDGE_STYLES[edgeType] || EDGE_STYLES.intra_colony).dash,
     }));
   });
 
@@ -2633,6 +2647,13 @@ function renderDAGLegend() {
     var chip = buildEl('span', { className: 'legend-chip' });
     chip.appendChild(buildEl('span', { className: 'legend-swatch', style: { background: STATUS_COLORS[status] } }));
     chip.appendChild(document.createTextNode(status));
+    legend.appendChild(chip);
+  });
+  Object.keys(EDGE_STYLES).forEach(function(type) {
+    var style = EDGE_STYLES[type];
+    var chip = buildEl('span', {className:'legend-chip'});
+    chip.appendChild(buildEl('span', {className:'legend-swatch', style:{background:style.color}}));
+    chip.appendChild(document.createTextNode(style.label));
     legend.appendChild(chip);
   });
 }
