@@ -28,6 +28,24 @@ class MemoryBackend:
             }
         }
 
+    async def start_owner(self, petri_dir, **kwargs):
+        self.calls.append("start_owner")
+
+    async def shutdown_owner(self):
+        self.calls.append("shutdown_owner")
+
+    async def submit_seed(self, request):
+        raise NotImplementedError
+
+    async def submit_run(self, request):
+        raise NotImplementedError
+
+    async def get_run(self, petri_dir, run_id):
+        return None
+
+    async def cancel_run(self, petri_dir, run_id):
+        return None
+
     def seed_colony(self, **kwargs):
         self.calls.append("seed_colony")
         return None

@@ -72,5 +72,7 @@ def test_utility_content_is_preserved_outside_roster():
     legacy = yaml.safe_load((defaults / "legacy-petri.yaml").read_text())
     assert set(current["agents"]) == set(AgentName)
     utility = current["pre_pipeline"]["socratic_questioner"]
-    for key in ("instruction", "verdicts_pass", "verdicts_block"):
+    for key in ("verdicts_pass", "verdicts_block"):
         assert utility[key] == legacy["agents"]["socratic_questioner"][key]
+    assert "identify the current sources that research must retrieve" in utility["instruction"]
+    assert "WebSearch" not in utility["instruction"]

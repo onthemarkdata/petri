@@ -10,6 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from petri.analysis.analyst import AnalystConfig
+from petri.dashboard.config import DashboardConfig
 from petri.execution.config import ExecutionConfig, SchedulingConfig
 from petri.lifecycle.config import LifecycleConfig
 from petri.research.config import ResearchConfig
@@ -144,6 +145,7 @@ class PrePipelineContent(StrictContent):
 
 
 class AgentConfig(StrictContent):
+    dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     scheduling: SchedulingConfig = Field(default_factory=SchedulingConfig)
     analyst: AnalystConfig = Field(default_factory=AnalystConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)

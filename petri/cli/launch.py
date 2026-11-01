@@ -64,7 +64,7 @@ def _free_port_or_exit(port: int) -> None:
     instance if that's what's holding it. Fails loudly on anything else.
 
     Committed dish data remains in SQLite. Replacing a stale dashboard can lose
-    buffered telemetry and interrupt terminal sessions; it does not rebuild data.
+    buffered telemetry and interrupt active inference calls; it does not rebuild data.
     """
     if not _port_is_listening(port):
         return

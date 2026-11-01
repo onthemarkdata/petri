@@ -80,6 +80,7 @@ class PhaseServices:
     dish_id: str = ""
     on_progress: Callable[[PhaseProgress], None] | None = None
     usage: RunUsage = field(default_factory=RunUsage)
+    event_stream_handler_factory: Callable[...,Any] | None = None
 
     def __post_init__(self):
         self.config = AgentConfig.model_validate(self.config.model_dump(mode="json"))
@@ -213,6 +214,16 @@ def _measured_delta(before: RunUsage, after: RunUsage) -> RunUsage | None:
         unmeasured_requests=after.unmeasured_requests - before.unmeasured_requests)
 
 
+def _stream_handler(services: PhaseServices, value: PipelineInput, agent, name: str):
+    model = agent.model
+    supports_streaming = isinstance(model, str) or (
+        isinstance(model, Model) and type(model).request_stream is not Model.request_stream
+    )
+    if services.event_stream_handler_factory and supports_streaming:
+        return services.event_stream_handler_factory(value.cell_id, name)
+    return None
+
+
 async def _assessment(
     services: PhaseServices, value: PipelineInput, *, node: str, phase: str,
     agent_name: str, agent: Agent[Any, Any], claim: str,
@@ -282,6 +293,7 @@ async def _assessment_impl(
             try:
                 response = await agent.run(
                     prompt,
+                    event_stream_handler=_stream_handler(services, value, agent, agent_name),
                     deps=ResearchContext(services.db_path,value.cell_id,agent_name,value.iteration,services.round_number,node),
                     usage=services.usage,
                     usage_limits=UsageLimits(
@@ -404,6 +416,8 @@ async def run_critique(value: PipelineInput, services: PhaseServices) -> PhaseRu
                     prior_evidence=_prior_evidence(services, value),
                     deps_factory=lambda name: ResearchContext(services.db_path, value.cell_id,
                         name.value, value.iteration, services.round_number, node),
+                    event_stream_handler_factory=lambda name: _stream_handler(
+                        services, value, services.agents[name], name.value),
                 )
                 set_verdict_attributes(span, result.status.value, usage=result.usage,
                     model=services.config.model, prices=services.config.prices, outcome=result.status.value)

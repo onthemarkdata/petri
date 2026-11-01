@@ -24,7 +24,7 @@ def adapt_stream_event(event: Any, *, cell_id: str, agent: str) -> AgentProgress
 
 
 def progress_handler(*, cell_id: str, agent: str):
-    """Build an event_stream_handler; production agent wiring is a separate step."""
+    """Build the event handler used by dashboard-owned agent runs."""
     async def handler(context: Any, events: AsyncIterable[Any]) -> None:
         async for event in events:
             progress = adapt_stream_event(event, cell_id=cell_id, agent=agent)

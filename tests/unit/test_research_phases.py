@@ -471,3 +471,51 @@ async def test_actual_phase_spans_attribute_usage_once_per_call(phase_services):
         assert [tuple(row) for row in rows] == [(cell_id, 40, 16)]
     finally:
         shutdown_telemetry()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_stream_handler_observes_real_research_agent_calls(phase_services):
+    from petri.dashboard.broker import listen
+    from petri.engine.streaming import progress_handler
+
+    services, signals = phase_services
+    services.event_stream_handler_factory = lambda cell_id, agent: progress_handler(
+        cell_id=cell_id, agent=agent)
+    cell_id = database.list_cells(services.db_path)[0]['id']
+    async with listen() as progress:
+        await run_research(inputs(cell_id), services)
+        # Broker delivery is scheduled on the listener's event loop.
+        import asyncio
+        await asyncio.sleep(0)
+        events = []
+        while not progress.empty():
+            events.append(progress.get_nowait())
+    assert any(event['kind'] == 'tool_start' for event in events)
+    assert all(event['cell_id'] == cell_id for event in events)
+    assert {event['agent'] for event in events}
+    assert any(event.kind == 'agent_end' for event in signals)
+
+
+@pytest.mark.asyncio
+async def test_request_only_model_uses_progress_without_streaming(phase_services):
+    services, signals = phase_services
+    # FunctionModel without a stream function models the request-only adapters.
+    class RequestOnlyModel(FunctionModel):
+        from pydantic_ai.models import Model
+        request_stream = Model.request_stream
+
+    def response(messages, info):
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+            'verdict':'CLARIFIED','summary':'The claim is defined.','sources_cited':[],
+        })])
+
+    from petri.execution.phases import _assessment
+    services.socratic_agent = build_socratic_agent(services.config,
+        constitution='Preserve source attribution.',model=RequestOnlyModel(response))
+    def forbidden(cell_id,agent):
+        raise AssertionError('Request-only models cannot stream.')
+    services.event_stream_handler_factory = forbidden
+    cell_id = database.list_cells(services.db_path)[0]['id']
+    await _assessment(services,inputs(cell_id),node='socratic:0',phase='socratic',
+        agent_name='socratic_questioner',agent=services.socratic_agent,claim='A defined unit')
+    assert [event.kind for event in signals] == ['agent_start','agent_end']

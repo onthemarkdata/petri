@@ -27,11 +27,11 @@ def colony_exists(db_path: Path, colony_id: str) -> bool:
         ).fetchone() is not None
 
 
-def reserve_colony(db_path: Path, colony: Colony) -> None:
+def reserve_colony(db_path: Path, colony: Colony, *, connection: sqlite3.Connection | None = None) -> None:
     """Claim a seed name atomically so concurrent runs cannot overwrite it."""
     from petri.storage.seed_guard import ColonyExistsError
 
-    with database._write(db_path) as conn:
+    with database.write_connection(db_path,connection) as conn:
         if conn.execute("SELECT 1 FROM cells WHERE colony=? LIMIT 1", (colony.id,)).fetchone():
             raise ColonyExistsError(f"Colony '{colony.id}' already exists")
         try:
