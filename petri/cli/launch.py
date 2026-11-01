@@ -179,7 +179,7 @@ def register(app: typer.Typer) -> None:
         count = rebuild_sqlite(petri_dir, db_path)
         typer.echo(f"Indexed {count} events.")
 
-        dashboard_app = create_app(petri_dir, db_path)
+        dashboard_app = create_app(petri_dir)
 
         # The browser always opens localhost even when we're also bound on
         # a wider interface, because localhost is always reachable from the

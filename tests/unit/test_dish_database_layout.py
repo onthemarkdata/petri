@@ -44,7 +44,7 @@ def test_cli_and_dashboard_ignore_legacy_directories(seeded_petri_dir, monkeypat
     assert len(json.loads(checked.output)) == 5
     graphed = CliRunner().invoke(app, ["graph", "--format", "dot"])
     assert graphed.exit_code == 0 and "digraph" in graphed.output
-    client = TestClient(create_app(env["petri_dir"], env["tmp_path"] / "index.sqlite"))
+    client = TestClient(create_app(env["petri_dir"]))
     assert len(client.get("/api/cells").json()) == 5
     assert [dish["id"] for dish in client.get("/api/dishes").json()] == [env["dish_id"]]
     graph, colony = load_colony(dish_db_path(env["petri_dir"]), env["colony_id"])
