@@ -1655,6 +1655,7 @@ wheels = [
 name = "petri-grow"
 source = { editable = "." }
 dependencies = [
+    { name = "croniter" },
     { name = "dbos" },
     { name = "fastapi" },
     { name = "filelock" },
@@ -1695,6 +1696,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "croniter", specifier = ">=6.0,<7" },
     { name = "dbos", specifier = "==3.4.0" },
     { name = "fastapi", specifier = ">=0.100" },
     { name = "filelock", specifier = ">=3.16" },

@@ -52,6 +52,7 @@ class QueueState(str, Enum):
 
 
 class EventType(str, Enum):
+    scan_completed = "scan_completed"
     search_executed = "search_executed"
     source_reviewed = "source_reviewed"
     freshness_checked = "freshness_checked"
@@ -203,10 +204,17 @@ class AgentStepData(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ScanCompletedData(BaseModel):
+    findings: list[dict]
+    findings_count: int = Field(ge=0)
+    trigger: Literal["manual", "scheduled"]
+
+
 # ── Event Data Dispatch ──────────────────────────────────────────────────
 
 
 EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
+    "scan_completed": ScanCompletedData,
     "search_executed": SearchExecutedData,
     "source_reviewed": SourceReviewedData,
     "freshness_checked": FreshnessCheckedData,

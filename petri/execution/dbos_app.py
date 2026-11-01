@@ -65,7 +65,7 @@ class DBOSApp:
         from dbos import DBOS
 
         # Importing registers the fixed workflow and step definitions before launch.
-        from petri.execution import dbos_backend, scheduler  # noqa: F401
+        from petri.execution import dbos_backend, scan_workflow, scheduler  # noqa: F401
 
         self.petri_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -96,6 +96,7 @@ class DBOSApp:
                 }
             )
             DBOS.launch()
+            scan_workflow.register_scan_schedule(self.settings.scan_cron)
             DBOS.register_queue(
                 QUEUE_NAME,
                 worker_concurrency=self.settings.worker_concurrency,
