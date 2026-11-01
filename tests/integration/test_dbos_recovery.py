@@ -15,13 +15,15 @@ from petri.storage import database
 
 
 @pytest.mark.integration
-def test_sigkill_resumes_checkpointed_cell_and_excludes_another_owner(tmp_path):
+@pytest.mark.parametrize("content_event", [False, True])
+def test_sigkill_resumes_checkpointed_cell_and_excludes_another_owner(tmp_path, content_event):
     root = Path(__file__).resolve().parents[2]
     worker = root / "tests/helpers/dbos_recovery_worker.py"
     environment = {**os.environ, "PYTHONPATH": str(root)}
     command = [sys.executable, str(worker), str(tmp_path)]
+    prefix = "content-" if content_event else ""
     with (tmp_path / "worker.log").open("w") as log:
-        process = subprocess.Popen(command + ["start"], env=environment, stdout=log, stderr=log)
+        process = subprocess.Popen(command + [prefix + "start"], env=environment, stdout=log, stderr=log)
         try:
             deadline = time.monotonic() + 20
             while not (tmp_path / "in-research").exists():
@@ -41,14 +43,15 @@ def test_sigkill_resumes_checkpointed_cell_and_excludes_another_owner(tmp_path):
                 process.wait(timeout=5)
     (tmp_path / "release").write_text("resume")
     resumed = subprocess.run(
-        command + ["resume"], env=environment, capture_output=True, text=True, timeout=30
+        command + [prefix + "resume"], env=environment, capture_output=True, text=True, timeout=30
     )
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert json.loads((tmp_path / "result.json").read_text())["status"] == "validated"
     with sqlite3.connect(tmp_path / "audit.sqlite") as conn:
         calls = dict(conn.execute("SELECT phase,COUNT(*) FROM calls GROUP BY phase"))
     assert calls == {"socratic": 1, "research": 2}
-    events = database.read_events(tmp_path / "petri.sqlite", event_type="verdict_issued")
+    events = [event for event in database.read_events(tmp_path / "petri.sqlite")
+              if event["type"] in {"verdict_issued", "evidence_appended"}]
     assert len(events) == 2
     assert {event["id"] for event in events} == {
         "dish-colony-002-001:socratic",
@@ -57,6 +60,8 @@ def test_sigkill_resumes_checkpointed_cell_and_excludes_another_owner(tmp_path):
     queued = database.read_events(tmp_path / "petri.sqlite", event_type="cell_queued")
     assert len(queued) == 1
     assert queued[0]["data"]["workflow_id"] == "dish-colony-002-001:r1"
+    if content_event:
+        assert database.get_cell(tmp_path / "petri.sqlite", "dish-colony-002-001")["evidence_md"] == "research"
 
 
 @pytest.mark.integration

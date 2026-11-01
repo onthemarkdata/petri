@@ -1,5 +1,6 @@
 """Domain snapshots cannot silently roll back checkpointed research."""
 
+import asyncio
 import hashlib
 import importlib
 import json
@@ -13,11 +14,77 @@ from typer.testing import CliRunner
 
 from petri.execution.dbos_backend import CellRunSpec
 from petri.execution.pipeline import SyncConflict
+from petri.execution.reconciliation import reconcile
 from petri.models import Event
 from petri.storage import database
 from tests.unit import test_durable_scheduler
 
 scheduler_fixture = test_durable_scheduler.scheduler_fixture
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrupt_field", [None, "claim_text", "evidence_md", "summary_md"])
+async def test_uncheckpointed_content_progress_preserves_corruption_guards(
+    scheduler_fixture, canonical_colony, corrupt_field
+):
+    directory, path, backend, dependencies, _, _ = scheduler_fixture
+    cell = canonical_colony["cell1"].id
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    def with_content(spec):
+        deps = dependencies(spec)
+
+        async def research(value):
+            for event_type, summary in (
+                ("evidence_appended", "Committed research"),
+                ("verdict_issued", "Committed summary"),
+            ):
+                database.append_event(
+                    path,
+                    Event(
+                        id=f"{cell}:{event_type}",
+                        cell_id=cell,
+                        timestamp="2026-11-01T00:00:00Z",
+                        type=event_type,
+                        agent="cell_lead",
+                        iteration=0,
+                        data={"summary": summary, "verdict": "VALIDATED"},
+                    ),
+                )
+            entered.set()
+            await release.wait()
+            return await deps.research(value)
+
+        return replace(deps, research=research)
+
+    await backend.start_async(directory, db_path=path, dependencies=with_content)
+    try:
+        handle = await backend.enqueue_cell(CellRunSpec(cell, 1, "2026-11-01"), level=2)
+        await asyncio.wait_for(entered.wait(), 10)
+        row = database.get_cell(path, cell)
+        assert row["evidence_md"] == "Committed research"
+        assert row["summary_md"] == "Committed summary"
+        if corrupt_field is not None:
+            with database._write(path) as conn:
+                conn.execute(
+                    f"UPDATE cells SET {corrupt_field}=? WHERE id=?", ("Uncommitted edit", cell)
+                )
+        before = database.get_cell(path, cell)
+        events = database.read_events(path, cell_id=cell)
+        conflicts = reconcile(path, directory / "dbos.sqlite")
+        if corrupt_field is None:
+            assert conflicts == {}
+        else:
+            expected = "cell fields" if corrupt_field == "claim_text" else "cell content"
+            assert expected in conflicts[cell]["reason"]
+        assert database.get_cell(path, cell) == before
+        assert database.read_events(path, cell_id=cell) == events
+        release.set()
+        await handle.get_result()
+    finally:
+        release.set()
+        await backend.close_async()
 
 
 def backup(source, destination):

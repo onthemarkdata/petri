@@ -27,7 +27,7 @@ def main():
     colony = _build_canonical_colony() if colony_mode else None
     if colony_mode and not domain.exists():
         save_colony(domain, colony["graph"], colony["colony_model"])
-    elif not colony_mode and mode == "start":
+    elif not colony_mode and mode.endswith("start"):
         database.put_cell(
             domain,
             {
@@ -55,7 +55,7 @@ def main():
                 id=f"{value.cell_id}:{phase}",
                 cell_id=value.cell_id,
                 timestamp="2026-11-01T00:00:00Z",
-                type="verdict_issued",
+                type="evidence_appended" if mode.startswith("content-") and phase == "research" else "verdict_issued",
                 agent="investigator",
                 iteration=0,
                 data={"verdict": "EVIDENCE_SUFFICIENT", "summary": phase},
