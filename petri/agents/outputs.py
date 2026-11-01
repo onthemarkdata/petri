@@ -16,6 +16,17 @@ from petri.agents.config import AgentContent
 from petri.agents.contract import AgentName
 
 
+ASSESSMENT_FORMAT = (
+    "Return the assessment object directly, without a wrapper named after its type. "
+    "Its fields are agent, verdict, summary, arguments, evidence, confidence, and sources_cited. "
+    "Role-specific analysis belongs in the plain-text arguments or evidence strings, not extra JSON fields. "
+    "Each source citation uses only url, title, hierarchy_level, finding, supports_or_contradicts, "
+    "confidence, pub_date, and pub_year. Use pub_date for a publication date; put staleness risk "
+    "or other analytical labels in arguments or evidence, not inside source citations. "
+    "When no source is available, return an empty sources_cited array; never use a placeholder URL such as N/A."
+)
+
+
 class SourceCitation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

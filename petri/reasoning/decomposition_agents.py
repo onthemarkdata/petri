@@ -52,7 +52,9 @@ SEARCH_INSTRUCTIONS = (
 
 FLAT_RESULT = (
     "Return only the current expansion level. Each new premise has only claim_text and relation. "
-    "Each reference has only existing_cell_id and reason. Never put sub_premises, nodes, "
+    "Each reference has only existing_cell_id and reason. The values of claim_text, "
+    "existing_cell_id, reason, and a non-null bedrock_reason are plain JSON strings, never nested objects. "
+    "Never put sub_premises, nodes, "
     "is_atomic, or bedrock_reason inside a child premise; the runtime expands children separately. "
     "The final-result schema does not replace tool calls: call search_cells before the final result.\n\n"
 )

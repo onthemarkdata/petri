@@ -25,7 +25,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from petri.agents.config import AgentConfig
 from petri.agents.contract import AGENT_SPECS, AgentName, Phase
 from petri.agents.debates import DebateStatus, log_debate, run_debate
-from petri.agents.outputs import AgentAssessment
+from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment
 from petri.execution.evidence import RecordedAssessment, format_socratic, render_evidence
 from petri.execution.pipeline import (
     ConvergenceDecision,
@@ -121,7 +121,7 @@ def build_socratic_agent(
         selected,
         name="socratic_questioner",
         output_type=output,
-        instructions=constitution + "\n\n" + config.pre_pipeline.socratic_questioner.instruction,
+        instructions=constitution + "\n\n" + config.pre_pipeline.socratic_questioner.instruction + "\n\n" + ASSESSMENT_FORMAT,
         retries=2,
     )
 

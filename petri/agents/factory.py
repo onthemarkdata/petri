@@ -10,7 +10,7 @@ from pydantic_ai.usage import UsageLimits
 
 from petri.agents.config import AgentConfig
 from petri.agents.contract import AGENT_SPECS, AgentName, Phase
-from petri.agents.outputs import AgentAssessment, output_model
+from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment, output_model
 from petri.agents.source_policy import check_terminal_sources
 from petri.research.tools import ResearchClient, register_research_tools
 from petri.research.web import PublicWebClient
@@ -63,7 +63,8 @@ def build_agents(
         instructions = (
             f"{constitution.strip()}\n\n{content.instruction}\n\n"
             f"Act as {name.value}. Return one of these exact verdicts: "
-            f"{', '.join(content.verdicts_pass + content.verdicts_block)}."
+            f"{', '.join(content.verdicts_pass + content.verdicts_block)}.\n\n"
+            f"{ASSESSMENT_FORMAT}"
         )
         if web is not None and AGENT_SPECS[name].phase == Phase.RESEARCH:
             instructions += (
