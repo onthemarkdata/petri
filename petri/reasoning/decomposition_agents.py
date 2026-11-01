@@ -25,7 +25,9 @@ Prefer claims with quantified thresholds where the claim supports them, explicit
 
 """
 BEDROCK_TEST = """FIRST — BEDROCK TEST.
-Before generating children, ask whether the parent is a definition, an axiom, or a directly verifiable measurement. If so, return is_atomic=true, an empty sub_premises list, and a specific bedrock_reason. Do not turn its wording into more premises. A contested causal or predictive claim is not bedrock merely because it sounds plausible.
+Before generating children, ask whether the parent is a definition, an axiom, or a directly verifiable measurement. If so, STOP: skip all brainstorming, prioritization, and selection below. Return is_atomic=true, an empty sub_premises list, and a specific bedrock_reason. Do not turn its wording into more premises.
+For example, for "One meter equals one hundred centimeters", return {"is_atomic": true, "sub_premises": [], "bedrock_reason": "The metric unit conversion is definitional."}.
+A contested causal or predictive claim is not bedrock merely because it sounds plausible. Only if the bedrock test fails should you follow the expansion steps below.
 
 """
 COUNTERARGUMENT = (

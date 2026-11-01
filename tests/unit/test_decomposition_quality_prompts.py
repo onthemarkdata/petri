@@ -131,6 +131,8 @@ def test_prompt_quality_bar_and_bedrock_first():
     assert "quantified thresholds" in initial and "exclusions" in initial
     why = why_instructions(DecompositionInput("claim"))
     assert why.startswith("FIRST — BEDROCK TEST.")
+    assert "STOP: skip all brainstorming" in why
+    assert '"is_atomic": true, "sub_premises": []' in why
     assert "strongest counterargument" in why and "relation limits or rebuts" in why
 
 
@@ -138,3 +140,11 @@ def test_parent_overlap_normalizes_case_and_punctuation():
     assert parent_overlap("A solar-panel output", "a SOLAR panel output!") == 1.0
     assert parent_overlap("six word parent claim text here", "six word parent claim text") >= 0.8
     assert parent_overlap("Different premise", "Other evidence") == 0
+
+
+def test_bedrock_decision_precedes_children_in_output_schema():
+    from petri.reasoning.decomposition_schemas import WhyExpansion
+
+    assert list(WhyExpansion.model_json_schema()["properties"]) == [
+        "is_atomic", "bedrock_reason", "sub_premises",
+    ]
