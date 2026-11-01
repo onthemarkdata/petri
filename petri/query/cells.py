@@ -47,8 +47,17 @@ def list_cells(
             return []
         cell_table = "active_cells" if has_table(connection,"active_cells") else "cells"
         edge_table = "active_edges" if has_table(connection, "active_edges") else "edges"
+        terminal_summary = (
+            "(SELECT json_extract(e.payload,'$.summary') FROM events e "
+            "WHERE e.cell_id=c.id AND e.event_type='verdict_issued' AND e.agent='evidence_evaluator' "
+            "AND c.status IN ('VALIDATED','DISPROVEN','DEFER_OPEN','DEFER_CLOSED') "
+            "AND e.rowid>COALESCE((SELECT MAX(r.rowid) FROM events r "
+            "WHERE r.cell_id=c.id AND r.event_type='cell_reopened'),0) ORDER BY e.rowid DESC LIMIT 1)"
+            if has_table(connection, "events") else "NULL"
+        )
         sql = (
             "SELECT c.*,"
+            f"{terminal_summary} AS terminal_assessment_summary,"
             f"(SELECT json_group_array(to_cell) FROM (SELECT DISTINCT to_cell FROM {edge_table} WHERE from_cell=c.id ORDER BY to_cell)) AS dependencies,"
             "(SELECT json_group_array(dependent_cell_id) FROM (SELECT DISTINCT dependent_cell_id FROM dependents WHERE cell_id=c.id ORDER BY dependent_cell_id)) AS dependents "
             f"FROM {cell_table} c WHERE (? IS NULL OR c.colony=?) AND (? IS NULL OR c.status=?) "
@@ -74,7 +83,7 @@ def list_cells(
                     bedrock_reason=record["bedrock_reason"],
                     created_at=record["created_at"],
                     evidence_md=record.get("evidence_md", ""),
-                    summary_md=record.get("summary_md", ""),
+                    summary_md=record.get("summary_md", "") or record.get("terminal_assessment_summary") or "",
                 )
             )
         return result
