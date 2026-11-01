@@ -20,7 +20,7 @@ those implementations. Their behavioral replacements remain:
 | Processor phases, evidence, and sources | `test_research_phases.py`, `test_decision_phases.py`, and source/tool conformance tests exercise typed agents and committed SQLite evidence |
 | Busy-wait grow loop and adaptive workers | `test_durable_scheduler.py` and `test_dbos_backend.py` check dependency gates, deduplication, concurrency, rate limits, and typed failures |
 | Stop sentinels and processor callbacks | Cancellation tests and `test_grow_resume.py` cover graceful/force stop, public-client resume, backend polling, real SIGKILL, and Ctrl+C |
-| Legacy provider transport and parsing | First-party Claude Code and pi model/transport tests cover typed output, retries, streaming, and resource cleanup |
+| Legacy provider transport and parsing | First-party Claude Code and pi model/transport tests cover typed output, retries, transport events, and resource cleanup; these model adapters do not expose token streaming |
 | File-backed reopen and propagation | Durable round tests cover r+1 allocation; propagation and feed tests cover impact flags without dependent reopening |
 
 `test_retire_v1.py` runs init, seed, grow, check, and stop with local fake inference
