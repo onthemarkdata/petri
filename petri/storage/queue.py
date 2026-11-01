@@ -24,7 +24,8 @@ if sys.platform == "win32":
     )
 import fcntl
 
-from petri.models import QueueEntry
+from petri.models import QueueEntry, parse_key
+from petri.storage.dish import resolve_dish_id
 
 # ── Valid State Transitions ─────────────────────────────────────────────
 
@@ -307,8 +308,8 @@ def sync_check(queue_path: Path, cells_dir: Path) -> dict:
             # Derive cell directory from composite key.
             # Key format: {dish}-{colony}-{level}-{seq}
             # Filesystem: cells_dir/{colony}/{level}-{seq}/metadata.json
-            parts = cell_id.rsplit("-", 2)
-            if len(parts) < 3:
+            parsed = parse_key(cell_id, resolve_dish_id(queue_path.parent))
+            if "level" not in parsed:
                 conflicts.append(
                     {
                         "cell_id": cell_id,
@@ -318,11 +319,9 @@ def sync_check(queue_path: Path, cells_dir: Path) -> dict:
                 )
                 continue
 
-            # parts[-2] is level (3 digits), parts[-1] is seq (3 digits)
-            # Everything before that is the colony prefix (dish-colony)
-            colony_prefix = parts[0]
-            level_str = parts[1]
-            seq_str = parts[2]
+            colony_prefix = parsed["colony_prefix"]
+            level_str = f"{parsed['level']:03d}"
+            seq_str = f"{parsed['seq']:03d}"
 
             metadata_path = (
                 cells_dir / colony_prefix / f"{level_str}-{seq_str}" / "metadata.json"

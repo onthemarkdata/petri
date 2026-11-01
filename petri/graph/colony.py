@@ -276,7 +276,7 @@ def serialize_colony(
                 events.jsonl
                 evidence.md
     """
-    from petri.models import claim_to_slug
+    from petri.models import claim_to_slug, parse_key
 
     base_path.mkdir(parents=True, exist_ok=True)
 
@@ -289,9 +289,9 @@ def serialize_colony(
     cell_paths: dict[str, str] = {}
 
     for cell in graph.get_all_cells():
-        parts = cell.id.split("-")
-        seq_str = parts[-1]
-        level_str = parts[-2]
+        parsed = parse_key(cell.id, colony.dish, strict=True)
+        seq_str = f"{parsed['seq']:03d}"
+        level_str = f"{parsed['level']:03d}"
 
         # Level directory: use first cell at this level for the level slug
         level_cells = by_level[cell.level]

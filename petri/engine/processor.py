@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from petri.storage.dish import resolve_dish_id as _get_dish_id
 from petri.config import MAX_CONCURRENT, MAX_ITERATIONS
 from petri.analysis.convergence import (
     check_convergence,
@@ -28,6 +29,7 @@ from petri.reasoning.debate import load_debate_pairings, log_debate, mediate_deb
 from petri.storage.event_log import append_event, get_verdicts, query_events
 from petri.models import (
     AssessmentResult,
+    parse_key,
     CellStatus,
     ConvergenceOutcome,
     EvaluationResult,
@@ -133,29 +135,9 @@ def _queue_path(petri_dir: Path) -> Path:
     return petri_dir / "queue.json"
 
 
-def _get_dish_id(petri_dir: Path) -> str:
-    """Get the dish ID from config or derive from directory name."""
-    config_path = petri_dir / "defaults" / "petri.yaml"
-    if config_path.exists():
-        try:
-            import yaml
-
-            with open(config_path) as f:
-                config = yaml.safe_load(f) or {}
-            return config.get("name", petri_dir.parent.name)
-        except Exception:
-            pass
-    return petri_dir.parent.name
-
-
 def _colony_slug(cell_id: str, dish_id: str) -> str:
     """Extract the colony slug from a cell's composite key."""
-    dish_prefix = dish_id + "-"
-    if cell_id.startswith(dish_prefix):
-        colony_and_rest = cell_id[len(dish_prefix):]
-        return colony_and_rest.rsplit("-", 2)[0]
-    parts = cell_id.split("-")
-    return "-".join(parts[:-2])
+    return parse_key(cell_id, dish_id, strict=True)["colony"]
 
 
 def _load_cell_paths(petri_dir: Path, cell_id: str, dish_id: str) -> dict[str, str]:
@@ -183,8 +165,8 @@ def _cell_dir(petri_dir: Path, cell_id: str, dish_id: str) -> Path:
         return colony_base / cell_paths[cell_id]
 
     # Fallback: flat layout
-    parts = cell_id.split("-")
-    return colony_base / f"{parts[-2]}-{parts[-1]}"
+    parsed = parse_key(cell_id, dish_id, strict=True)
+    return colony_base / f"{parsed['level']:03d}-{parsed['seq']:03d}"
 
 
 def _events_path(petri_dir: Path, cell_id: str, dish_id: str) -> Path:

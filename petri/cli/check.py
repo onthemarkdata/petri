@@ -7,13 +7,14 @@ from typing import Optional
 
 import typer
 
+from petri.models import parse_key
+
 from petri.cli._bootstrap import find_petri_dir, get_dish_id, load_colonies
 from petri.cli_ui import print_error_and_exit
 from petri.storage.paths import (
     cell_dir as cell_dir_for,
     colony_dir as colony_dir_for,
     events_path as events_file_path,
-    parse_cell_id,
 )
 
 
@@ -104,7 +105,8 @@ def register(app: typer.Typer) -> None:
                     if cell_rel:
                         cell_events_path = colony_base / cell_rel / "events.jsonl"
                     else:
-                        _, _, level_int, seq_int = parse_cell_id(cell_obj.id)
+                        parsed = parse_key(cell_obj.id, strict=True)
+                        level_int, seq_int = parsed["level"], parsed["seq"]
                         cell_events_path = events_file_path(
                             cell_dir_for(colony_base, level_int, seq_int)
                         )

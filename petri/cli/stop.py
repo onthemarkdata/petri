@@ -7,12 +7,13 @@ from typing import Optional
 
 import typer
 
+from petri.models import parse_key
+
 from petri.cli._bootstrap import find_petri_dir
 from petri.storage.paths import (
     cell_dir as cell_dir_for,
     events_path as events_file_path,
     metadata_path as metadata_file_path,
-    parse_cell_id,
 )
 
 
@@ -64,7 +65,8 @@ def register(app: typer.Typer) -> None:
                     level_int: Optional[int]
                     seq_int: Optional[int]
                     try:
-                        _, _, level_int, seq_int = parse_cell_id(cell_id)
+                        parsed = parse_key(cell_id, strict=True)
+                        level_int, seq_int = parsed["level"], parsed["seq"]
                     except ValueError:
                         level_int = seq_int = None
 

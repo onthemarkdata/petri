@@ -519,7 +519,7 @@ def build_event_key(cell_key: str, hex_id: str) -> str:
     return f"{cell_key}-{hex_id}"
 
 
-def parse_key(key: str, dish_id: str | None = None) -> dict:
+def parse_key(key: str, dish_id: str | None = None, *, strict: bool = False) -> dict:
     """Parse a composite key from right to left.
 
     Returns dict with available segments:
@@ -527,8 +527,17 @@ def parse_key(key: str, dish_id: str | None = None) -> dict:
     - If event key (5+ segments ending in 8-hex): 'event_hex', 'seq', 'level', 'colony_prefix'
     - If cell key (ends in two 3-digit groups): 'seq', 'level', 'colony_prefix'
     - If dish_id provided: 'dish', 'colony' (split from colony_prefix)
+    - If strict: require a cell ID with three-digit level and sequence fields.
     """
+    if not isinstance(key, str):
+        raise ValueError(f"cell_id must be a string, got {type(key).__name__}")
     parts = key.split("-")
+    if strict:
+        if len(parts) < 4:
+            raise ValueError(f"cell_id {key!r} has fewer than 4 hyphen-separated parts")
+        for label, segment in (("level", parts[-2]), ("seq", parts[-1])):
+            if not re.fullmatch(r"\d{3}", segment):
+                raise ValueError(f"cell_id {key!r} {label} segment {segment!r} must be three digits")
     result: dict[str, Any] = {"raw": key}
 
     # Try to parse from the right
