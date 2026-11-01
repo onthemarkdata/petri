@@ -214,7 +214,11 @@ def _resume_colony(
     )
     provider = None
     try:
-        decompose_claim(**arguments, provider=None, agent_runner=_CompletedSeedRunner())
+        decompose_claim(
+            colony_model.center_claim, _clarifications_to_models(colony_model.clarifications),
+            dish_id, colony_name, provider=None, agent_runner=_CompletedSeedRunner(),
+            settings=DecompositionSettings.from_dish(petri_dir), db_path=path, resume=True,
+        )
         runner = _CompletedSeedRunner()
     except _IncompleteSeed:
         provider = resolve_provider(petri_dir)
