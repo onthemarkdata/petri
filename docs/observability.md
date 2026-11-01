@@ -212,3 +212,43 @@ progress messages. Detached CLI processes remain visible through persisted domai
 events, but their live text does not cross process boundaries. Production agent
 stream-handler wiring and cross-process live text are separate work; no detached
 CLI text coverage is claimed by this adapter.
+
+## Analytics
+
+The domain database includes four research-health views. They use domain event
+history, so telemetry sampling does not affect them. Replace `DISH` in these
+examples with a v2 dish directory.
+
+- `blocking_verdict_patterns` counts non-passing verdicts from blocking or
+  conditional agents by colony, level, and agent. Advisory agents are excluded.
+  Counts include historical verdicts, not only each cell's latest verdict.
+
+  ```sh
+  sqlite3 .petri/petri-dishes/DISH/petri.sqlite 'SELECT * FROM blocking_verdict_patterns ORDER BY blocked_verdicts DESC;'
+  ```
+
+- `cell_velocity` reports each active cell's first and latest event, first positive
+  convergence check, and elapsed seconds to that check. Cells with no events are
+  absent; unconverged cells have null convergence time.
+
+  ```sh
+  sqlite3 .petri/petri-dishes/DISH/petri.sqlite 'SELECT cell_id,seconds_to_convergence FROM cell_velocity;'
+  ```
+
+- `stalled_cells` lists unconverged cells with event history. The wrapper's default
+  inactivity window is 24 hours; use an explicit cutoff in ad-hoc SQL.
+
+  ```sh
+  sqlite3 .petri/petri-dishes/DISH/petri.sqlite "SELECT * FROM stalled_cells WHERE julianday(last_event_at)<=julianday('now','-24 hours');"
+  ```
+
+- `colony_convergence_rates` divides cells with a positive convergence check by all
+  cells in that colony. Colonies with no events are absent.
+
+  ```sh
+  sqlite3 .petri/petri-dishes/DISH/petri.sqlite 'SELECT * FROM colony_convergence_rates;'
+  ```
+
+Typed read-only wrappers live in `petri.query.analytics`. These are historical
+signals; a past convergence check does not prove that a reopened cell is currently
+validated.
