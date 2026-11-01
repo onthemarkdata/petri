@@ -330,3 +330,52 @@ same provider globally. Production DBOS wiring belongs to #66 and must connect
 that global tracer to Petri's active provider. In DBOS 3.4.0, `enable_otlp=False`
 disables span creation as well as export; recording locally requires it enabled
 with empty exporter endpoints. No Logfire endpoint is configured.
+
+### D7 domain attributes and command roots
+
+`petri.telemetry.attributes` owns the typed attribute keys and deterministic
+attribute maps. `CellSpanContext` takes the explicit dish ID, full colony ID,
+level, and sequence; its cell key comes from `build_cell_key`. It never guesses
+the dish boundary by splitting a hyphenated ID. Setter helpers apply these maps
+to the supplied span. They do not read configuration, write events, or import DBOS.
+
+| Attribute | Type | Present when |
+|---|---|---|
+| `petri.command` | string | Root command: `seed`, `grow`, `scan`, `feed`, or `re-decompose` |
+| `petri.dish_id` | string | Command roots and cell/phase spans |
+| `petri.colony_id` | string | Cell context is supplied; full composite colony ID |
+| `petri.cell_id` | string | Cell context is supplied; `build_cell_key` output |
+| `petri.level` | integer | Cell context is supplied |
+| `petri.seq` | integer | Cell context is supplied |
+| `petri.phase` | string | A phase span is open |
+| `petri.agent_role` | string | A specialist is supplied; canonical `AgentName` |
+| `petri.agent_blocking` | boolean | A specialist is supplied; true for blocking and conditional roles |
+| `petri.verdict` | string | A validated verdict or mechanical convergence result is available |
+| `petri.iteration` | integer | A phase span is open; dispatcher-owned iteration |
+| `petri.weakest_link` | string | A weakest link is known |
+| `petri.tokens_input` | integer | RunUsage includes measured token usage |
+| `petri.tokens_output` | integer | RunUsage includes measured token usage |
+| `petri.cost_usd` | number | All requests have measured usage and the exact model has configured prices |
+| `petri.outcome` | string | A mechanical pipeline outcome is available |
+
+A dish can supply `prices` keyed by exact model ID, with
+`input_per_million` and `output_per_million` in USD. Cost is the sum of each rate
+multiplied by its measured token count, divided by one million. These rates do
+not model cache discounts or other provider billing rules. Missing prices or
+usage omit cost; an explicit zero rate remains a configured zero cost. Partial
+usage can report measured token totals, but omits cost when any request was
+unmeasured. A dry run has no inferred token or cost attributes.
+
+The pi RPC adapter supports usage: it sums assistant `usage.input`, `output`,
+`cacheRead`, and `cacheWrite` across the request; input totals include cache
+reads and writes. It marks missing usage with `unmeasured_requests`, which the
+domain helpers preserve by omitting unknown totals and incomplete costs. The
+source of these fields is the harness response, never the agent's assessment.
+
+`phase_span` and `set_verdict_attributes` supply phase/agent hooks without coupling
+research code to DBOS. Workflow code must apply `set_cell_attributes` through the
+execution seam. `root_command_span` supplies the same command identity for
+lifecycle operations; the existing seed/grow/scan/feed commands use the
+`traced_command` wrapper. Re-decomposition (#84–#88) must use
+`root_command_span("re-decompose", dish_id)` when its command is added. These hooks
+preserve the distinction between execution spans and domain events.

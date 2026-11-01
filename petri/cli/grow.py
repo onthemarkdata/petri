@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import typer
 
+from petri.telemetry.commands import traced_command
+
 from petri.cli._bootstrap import find_petri_dir, resolve_provider
 from petri.cli_ui import (
     MultiSpinner,
@@ -18,6 +20,7 @@ from petri.execution.models import GrowOutcome, NoProviderError, ProgressEvent
 
 def register(app: typer.Typer) -> None:
     @app.command()
+    @traced_command("grow")
     def grow(
         cell: list[str] | None = typer.Option(
             None,

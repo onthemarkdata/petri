@@ -7,12 +7,15 @@ from typing import Optional
 
 import typer
 
+from petri.telemetry.commands import traced_command
+
 from petri.cli._bootstrap import find_petri_dir, get_dish_id, load_colonies
 from petri.cli_ui import print_error_and_exit
 
 
 def register(app: typer.Typer) -> None:
     @app.command()
+    @traced_command("feed")
     def feed(
         source: str = typer.Argument(..., help="URL, file path, or - for stdin"),
         colony_name: Optional[str] = typer.Option(

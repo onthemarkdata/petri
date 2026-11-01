@@ -7,11 +7,14 @@ from typing import Optional
 
 import typer
 
+from petri.telemetry.commands import traced_command
+
 from petri.cli._bootstrap import find_petri_dir
 
 
 def register(app: typer.Typer) -> None:
     @app.command()
+    @traced_command("scan")
     def scan(
         fix: bool = typer.Option(False, "--fix", help="Auto-fix issues"),
         loop: bool = typer.Option(
