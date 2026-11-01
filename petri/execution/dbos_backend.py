@@ -936,6 +936,10 @@ class DBOSExecutionBackend:
             "user_stop" if self._stopped else
             "sync_conflict"
             if states.get("sync_conflict")
+            else "failure"
+            if result.failed or states.get("failed")
+            else "needs_human"
+            if result.stalled or states.get("needs_human")
             else "not_eligible"
             if states.get("queued")
             else "all_terminal"
