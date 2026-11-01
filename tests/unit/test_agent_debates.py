@@ -102,6 +102,24 @@ async def test_limit_returns_partial_exchanges():
 
 
 @pytest.mark.asyncio
+async def test_failed_debate_output_and_feedback_are_durable(tmp_path):
+    config, agents, _ = setup_debate()
+
+    def invalid(messages, info):
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                             {"verdict": "UNKNOWN_VERDICT", "summary": "Unvalidated output."})])
+
+    with agents[AgentName.SKEPTIC].override(model=FunctionModel(invalid)):
+        result = await run_debate(config.debates[0].protocol, agents, "A claim.", config.limits.debate)
+    assert result.status == DebateStatus.EXECUTION_ERROR and not result.exchanges
+    event = log_debate(SQLiteEventLog(tmp_path / "petri.sqlite"), "test-colony-0-1", 0, result)
+    payload = json.loads(event.data["exchange_summary"])
+    assert "UNKNOWN_VERDICT" in payload["failure_detail"]["partial_output"]
+    assert payload["failure_detail"]["last_stream_event"]["validation_feedback"]
+    assert not payload["exchanges"]
+
+
+@pytest.mark.asyncio
 async def test_history_survives_next_iteration_and_event_append(tmp_path):
     config, agents, calls = setup_debate()
     protocol = config.debates[1].protocol

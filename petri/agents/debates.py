@@ -9,14 +9,15 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent, capture_run_messages
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.exceptions import AgentRunError, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from petri.agents.config import UsageLimitConfig
 from petri.agents.contract import AgentName, DebateProtocol
 from petri.agents.outputs import AgentAssessment
-from petri.harness.errors import HarnessError
+from petri.harness.errors import FailureDetail, HarnessError
+from petri.harness.diagnostics import model_failure_detail
 
 if TYPE_CHECKING:
     from petri.models import Event
@@ -44,6 +45,7 @@ class DebateResult:
     message_history: list[ModelMessage] = field(default_factory=list)
     usage: RunUsage = field(default_factory=RunUsage)
     detail: str = ""
+    failure_detail: FailureDetail | None = None
 
 
 async def run_debate(
@@ -93,13 +95,14 @@ async def run_debate(
                     usage=result.usage,
                     usage_limits=budget,
                 )
-            except (UsageLimitExceeded, UnexpectedModelBehavior, HarnessError) as error:
+            except (AgentRunError, HarnessError) as error:
                 result.status = (
                     DebateStatus.LIMIT_EXCEEDED
                     if isinstance(error, UsageLimitExceeded)
                     else DebateStatus.EXECUTION_ERROR
                 )
                 result.detail = str(error)
+                result.failure_detail = model_failure_detail(error, attempted)
                 if attempted:
                     result.message_history = list(attempted)
                 return result
@@ -123,6 +126,7 @@ def log_debate(
         {
             "status": result.status.value,
             "detail": result.detail,
+            "failure_detail": result.failure_detail.model_dump(mode="json") if result.failure_detail else None,
             "purpose": result.protocol.purpose,
             "exchanges": [
                 {

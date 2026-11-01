@@ -72,6 +72,26 @@ async def test_failed_model_output_is_durable_without_a_verdict(phase_services):
 
 
 @pytest.mark.asyncio
+async def test_provider_http_failure_is_durable_without_a_verdict(phase_services):
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    services, signals = phase_services
+    cell_id = database.list_cells(services.db_path)[0]["id"]
+
+    def failed(messages, info):
+        raise ModelHTTPError(500, "local-test", body={"error": "Local provider unavailable"})
+
+    services.socratic_agent = build_socratic_agent(services.config,
+        constitution="Preserve source attribution.", model=FunctionModel(failed))
+    with pytest.raises(ModelHTTPError):
+        await run_socratic(inputs(cell_id), services)
+    failure = database.read_events(services.db_path, event_type="agent_execution_failed")[0]
+    assert failure["data"]["error_type"] == "ModelHTTPError"
+    assert "Local provider unavailable" in failure["data"]["message"]
+    assert not database.read_events(services.db_path, event_type="verdict_issued")
+
+
+@pytest.mark.asyncio
 async def test_permanent_harness_failure_keeps_backend_diagnostics(phase_services):
     from petri.harness.errors import FailureDetail, PermanentHarnessError
 

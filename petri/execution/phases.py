@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import Agent, PromptedOutput, ToolOutput, capture_run_messages
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -38,7 +38,7 @@ from petri.execution.pipeline import (
     RedTeamResult,
     SyncConflict,
 )
-from petri.harness.errors import PermanentHarnessError
+from petri.harness.errors import HarnessError
 from petri.harness.diagnostics import model_failure_detail
 from petri.reasoning.prompts import build_assess_cell_prompt
 from petri.research.tools import ResearchContext
@@ -304,7 +304,7 @@ async def _assessment_impl(
                         tool_calls_limit=services.config.limits.run.tool_calls_limit,
                     ),
                 )
-            except (UnexpectedModelBehavior, UsageLimitExceeded, PermanentHarnessError) as error:
+            except (AgentRunError, HarnessError) as error:
                 detail = model_failure_detail(error, messages)
                 append_event(database.SQLiteEventLog(services.db_path, value.cell_id),
                     value.cell_id, "agent_execution_failed", agent_name, value.iteration,
