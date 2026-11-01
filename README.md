@@ -247,3 +247,20 @@ that need no prior context. See [CONTRIBUTING.md](CONTRIBUTING.md) for the branc
 ## Credit
 - Image Credits: Gemini Pro, April 2026
 - Music by [Karl Casey @ White Bat Audio](https://youtu.be/o9C-4Gln9Tc?si=7Hi3_ouxqvgd28eR)
+
+### Typed agent configuration
+
+Inside a dish with v2 agent content, inspect and validate the roster before a run:
+
+```sh
+petri agents list
+petri agents list --json
+petri agents check
+petri agents check --config path/to/petri.yaml
+```
+
+Both commands are cost-neutral: they construct no inference models and make no
+LLM calls. `check` exits 0 for valid content, 1 for configuration violations, and
+3 when no `.petri/` dish exists. Errors name the offending YAML fields. The v2
+loader requires `schema_version: 2`; it does not silently convert v0.3.x content.
+See [the schema contract](docs/ARCHITECTURE-V2.md#v2-agent-content-schema).

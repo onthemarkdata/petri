@@ -1,7 +1,7 @@
 """Typer CLI for the Petri Research Orchestration Framework.
 
-11 commands: init, seed, check, grow, stop, feed, inspect, launch, scan,
-graph, connect. All commands except ``init``, ``inspect``, and ``launch``
+Commands: init, seed, check, grow, stop, feed, inspect, launch, scan,
+graph, connect, and the agents group. All commands except ``init``, ``inspect``, and ``launch``
 require a ``.petri/`` directory to exist.
 """
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import typer
 
+from petri.cli.agents_cmd import register as register_agents
 from petri.cli.check import register as register_check
 from petri.cli.connect import register as register_connect
 from petri.cli.feed import register as register_feed
@@ -28,6 +29,7 @@ app = typer.Typer(
     invoke_without_command=True,  # Add this line here
 )
 _COMMAND_REGISTRARS = (
+    register_agents,
     register_init,
     register_seed,
     register_check,
