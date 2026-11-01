@@ -316,3 +316,66 @@ async def test_large_evidence_stays_out_of_checkpoints_and_fork_obeys_admission(
         assert starts[1] - starts[0] >= 1.1
     finally:
         await backend.close_async()
+
+
+@pytest.mark.asyncio
+async def test_force_stop_interrupts_fork_admission_before_another_inference(
+    tmp_path, canonical_colony, monkeypatch
+):
+    import threading
+    from dbos._error import DBOSAwaitedWorkflowCancelledError
+    from petri.execution.dbos_app import DBOSApp
+    from petri.storage.colonies import save_colony
+    from petri.storage.paths import dish_db_path
+    from tests.pipeline_stubs import StubPhases
+
+    (tmp_path / "petri.yaml").write_text("name: test-dish\ntelemetry:\n  enabled: false\n")
+    path = dish_db_path(tmp_path)
+    save_colony(path, canonical_colony["graph"], canonical_colony["colony_model"])
+    phases = StubPhases()
+
+    async def finish(value, result):
+        with database._write(path) as conn:
+            conn.execute(
+                "UPDATE cells SET status=? WHERE id=?", (result.status.upper(), value.cell_id)
+            )
+
+    deps = replace(phases.dependencies(), finish=finish)
+    backend = DBOSExecutionBackend(config={"execution": {"limiter": None}})
+    waiting = threading.Event()
+    original_delay = DBOSApp.admission_delay
+
+    def delay(self, workflow_id):
+        result = original_delay(self, workflow_id)
+        if workflow_id.endswith(":r2") and result > 0:
+            waiting.set()
+        return result
+
+    monkeypatch.setattr(DBOSApp, "admission_delay", delay)
+    await backend.start_async(tmp_path, db_path=path, dependencies=lambda _: deps)
+    try:
+        cell_id = canonical_colony["cell1"].id
+        original = await backend.enqueue_cell(CellRunSpec(cell_id, 1, "2026-11-01"))
+        await original.get_result()
+        from petri.execution.config import ExecutionConfig
+        # Isolate the application guard: SQLite's queue limiter is disabled here.
+        backend.app.settings = ExecutionConfig.model_validate({
+            "limiter": {"limit": 1, "period": 30},
+        })
+        request = FeedRequest(
+            cell_id,
+            hashlib.sha256(b"force-wait").hexdigest(),
+            "New measured evidence",
+            "2026-11-01",
+        )
+        handle = await backend.feed_evidence(request)
+        async with asyncio.timeout(5):
+            while not waiting.is_set():
+                await asyncio.sleep(0.01)
+        backend.request_stop(tmp_path, force=True)
+        with pytest.raises(DBOSAwaitedWorkflowCancelledError):
+            await asyncio.wait_for(handle.get_result(), timeout=2)
+        assert sum(name == "research" for name, _ in phases.calls) == 1
+        assert backend.app._active_steps == 0
+    finally:
+        await backend.close_async()

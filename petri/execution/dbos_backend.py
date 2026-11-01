@@ -106,7 +106,11 @@ async def cell_phase(spec: CellRunSpec, phase: str, value: PipelineInput) -> Ste
         # A fork copies the workflow's original admission checkpoint. Enforce the
         # new identity's start budget inside its first uncheckpointed phase too.
         while delay := app.admission_delay(spec.workflow_id):
-            await asyncio.sleep(delay)
+            if cancellation_mode(app.petri_dir / "dbos.sqlite", spec.workflow_id) == "force":
+                raise DBOSWorkflowCancelledError("Force stop requested before phase admission")
+            await asyncio.sleep(min(delay, 0.05))
+        if cancellation_mode(app.petri_dir / "dbos.sqlite", spec.workflow_id) == "force":
+            raise DBOSWorkflowCancelledError("Force stop requested before phase admission")
         task = asyncio.create_task(getattr(deps, phase)(value))
         try:
             while not task.done():
