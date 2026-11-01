@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-_DEFAULTS_PATH = Path(__file__).parent / "defaults" / "petri.yaml"
+_DEFAULTS_PATH = Path(__file__).parent / "defaults" / "legacy-petri.yaml"
 
 
 @functools.lru_cache(maxsize=1)

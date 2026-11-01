@@ -128,3 +128,21 @@ Architecture Decision Records append here as the migration makes further decisio
 | ADR | Title | Status |
 |-----|-------|--------|
 | ADR-0001 | Storage: single Petri-owned `petri.sqlite` per dish (the D4 amendment) — replaces the earlier JSONL-files-plus-DuckDB read-layer design; text becomes a derived `petri export` artifact | Accepted — full write-up pending (tracked by the M1 "Finalize docs/ARCHITECTURE-V2.md" issue) |
+
+## Typed roster and temporary legacy defaults
+
+`petri.agents.contract` defines the ordered 13-agent roster: three non-blocking
+leads, six blocking specialists, one conditional specialist, and three advisory
+specialists. `socratic_questioner` lives under `pre_pipeline` in the shipped YAML;
+it remains a clarifying-question utility outside `AgentName`. Its original
+instruction and verdict vocabulary are preserved. Each roster member has a
+verdict enum and explicit pass/block tuples.
+
+During the migration, `defaults/legacy-petri.yaml` preserves the v0.3.x content.
+The legacy config loader, convergence/debate default loaders, and v1 init select
+that file. Existing dish filenames remain `defaults/petri.yaml`. The filename
+change in the convergence loader is necessary because its unchanged tests expect
+14 entries while v2 requires 13; convergence decisions and `AgentRole` are
+unchanged. Legacy test fixtures explicitly copy the legacy file to the dish's
+normal filename. The final v2 CLI switch must initialize from the current v2
+`petri.yaml` and use the selected v2 harness instead of this temporary path.

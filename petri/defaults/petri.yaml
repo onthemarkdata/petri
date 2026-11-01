@@ -304,7 +304,8 @@ agents:
       today's date.
       Summary: 1-3 sentences with verdict reasoning and confidence.
 
-  # === Phase 0 (Exploratory, non-blocking) ===
+pre_pipeline:
+  # Clarifying questions run before decomposition, outside the roster.
 
   socratic_questioner:
     display_name: Socratic Questioner
