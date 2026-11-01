@@ -81,6 +81,21 @@ class _Worker:
                 future.cancel()
                 raise
 
+    def cancel_active_run(self) -> None:
+        """Cancel on the model's loop without waiting for the caller's run lock."""
+        loop = self.loop
+        if loop is None or not loop.is_running():
+            return
+
+        def cancel():
+            if self.active_task is not None:
+                self.active_task.cancel()
+
+        try:
+            loop.call_soon_threadsafe(cancel)
+        except RuntimeError:
+            pass
+
     def close(self) -> None:
         with self.lock:
             if self.closed:
@@ -158,6 +173,10 @@ class HarnessInferenceProvider:
 
     def __exit__(self, *_):
         self.close()
+
+    def cancel_active_run(self) -> None:
+        """Request cancellation before closing a provider with an active call."""
+        self._worker.cancel_active_run()
 
     def close(self) -> None:
         """Close the model on its owning loop, then stop and join that loop."""

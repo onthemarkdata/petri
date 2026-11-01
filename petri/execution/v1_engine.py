@@ -14,6 +14,13 @@ from petri.models import QueueProcessingResult
 
 
 class V1ExecutionBackend:
+    backend_name = "v1"
+
+    def seed_colony(self, *, petri_dir, **kwargs):
+        from petri.reasoning.decomposer import decompose_claim
+
+        return decompose_claim(**kwargs)
+
     def __init__(self, config: dict | None = None):
         self.config = config
 

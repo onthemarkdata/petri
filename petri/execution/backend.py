@@ -17,6 +17,25 @@ class ExecutionBackend(Protocol):
 
     def preflight(self) -> PreflightCheck: ...
 
+    def seed_colony(
+        self,
+        *,
+        petri_dir: Path,
+        claim,
+        clarifications,
+        dish_id,
+        colony_name,
+        provider,
+        settings,
+        guidance="",
+        db_path=None,
+        on_progress=None,
+        on_cell_created=None,
+        center=None,
+        agent_runner=None,
+        resume=False,
+    ): ...
+
     def process_queue(
         self,
         *,

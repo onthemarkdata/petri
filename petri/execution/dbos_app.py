@@ -6,7 +6,7 @@ import asyncio
 import threading
 import time
 from collections.abc import Callable
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,7 +30,7 @@ class ExecutionOwnerError(RuntimeError):
 
 
 def active_app() -> DBOSApp:
-    if _ACTIVE is None:
+    if _ACTIVE is None or _ACTIVE.closing:
         raise RuntimeError("The dish execution runtime has not been started")
     return _ACTIVE
 
@@ -42,10 +42,23 @@ class DBOSApp:
         db_path: Path,
         settings: ExecutionConfig,
         dependencies: Callable[[CellRunSpec], PipelineDeps],
+        *,
+        seed_runner_factory=None,
+        seed_on_progress=None,
+        seed_on_cell_created=None,
+        owns_seed_runners=False,
     ):
         self.petri_dir = Path(petri_dir).resolve()
         self.db_path = Path(db_path).resolve()
         self.settings = settings
+        self.owns_seed_runners = owns_seed_runners
+        self.closing = False
+        self._activity = threading.Condition()
+        self._active_steps = 0
+        self.seed_runner_factory = seed_runner_factory
+        self.seed_on_progress = seed_on_progress
+        self.seed_on_cell_created = seed_on_cell_created
+        self._seed_runners: dict[str, object] = {}
         self._factory = dependencies
         self._dependencies: dict[str, PipelineDeps] = {}
         self._deps_lock = threading.Lock()
@@ -60,12 +73,48 @@ class DBOSApp:
                 self._dependencies[spec.workflow_id] = self._factory(spec)
             return self._dependencies[spec.workflow_id]
 
+    @contextmanager
+    def step_activity(self):
+        with self._activity:
+            if self.closing:
+                raise RuntimeError("The execution runtime is stopping")
+            self._active_steps += 1
+        try:
+            yield
+        finally:
+            with self._activity:
+                self._active_steps -= 1
+                self._activity.notify_all()
+
+    def detach(self):
+        """Retain pending workflows after all active steps finish."""
+        global _ACTIVE
+        from dbos import DBOS
+
+        with self._activity:
+            self.closing = True
+            if not self._activity.wait_for(lambda: self._active_steps == 0, timeout=10):
+                raise RuntimeError(
+                    "An inference call is still running; execution ownership is retained"
+                )
+        DBOS.destroy(workflow_completion_timeout_sec=0)
+        self.started = False
+        _ACTIVE = None
+        self._owner.release()
+
+    def seed_runner(self, spec):
+        if self.seed_runner_factory is None:
+            raise RuntimeError("Configure a typed seed runner before starting decomposition")
+        if spec.workflow_id not in self._seed_runners:
+            self._seed_runners[spec.workflow_id] = self.seed_runner_factory(spec)
+        return self._seed_runners[spec.workflow_id]
+
     def start(self) -> DBOSApp:
         global _ACTIVE
         from dbos import DBOS
 
         # Importing registers the fixed workflow and step definitions before launch.
-        from petri.execution import dbos_backend, scan_workflow, scheduler  # noqa: F401
+        from petri.execution import dbos_backend, scan_workflow, scheduler, seed_workflow  # noqa: F401
 
         self.petri_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -126,12 +175,18 @@ class DBOSApp:
             if pending:
                 raise RuntimeError("Wait for or cancel active workflows before closing execution")
             DBOS.destroy(workflow_completion_timeout_sec=10)
+            for runner in self._seed_runners.values() if self.owns_seed_runners else ():
+                if hasattr(runner, "close"):
+                    runner.close()
             self.started = False
             _ACTIVE = None
             self._owner.release()
 
     async def acquire_slot(self) -> None:
-        await asyncio.to_thread(self._slots.acquire)
+        while not self._slots.acquire(blocking=False):
+            if self.closing:
+                raise RuntimeError("The execution runtime is stopping")
+            await asyncio.sleep(0.01)
 
     def release_slot(self) -> None:
         self._slots.release()
