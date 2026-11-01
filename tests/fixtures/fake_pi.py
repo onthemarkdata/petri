@@ -20,6 +20,9 @@ def respond(request, scenario):
     response = {"type": "response", "command": command, "success": True}
     if "id" in request:
         response["id"] = request["id"]
+    if command != "prompt":
+        emit(response)
+        return
     kind = scenario.get("kind", "response")
     if scenario.get("stderr"):
         sys.stderr.write(scenario["stderr"])
@@ -28,6 +31,8 @@ def respond(request, scenario):
         raw = scenario.get("raw", "not-json")
         sys.stdout.write(raw + ("\n" if scenario.get("newline", True) else ""))
         sys.stdout.flush()
+        if not scenario.get("newline", True):
+            raise SystemExit(0)
         return
     if kind == "frames":
         for frame in scenario["frames"]:
