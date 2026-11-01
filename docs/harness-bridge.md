@@ -126,3 +126,17 @@ never prompt targets. Both agents use neutral count guidance: “Let the structu
 determine the count; do not pad to a quota; fewer is fine.” The legacy
 `max_premises` argument remains accepted for compatibility but is not interpolated
 into decomposition prompts or schemas.
+
+### Local decomposition quality check
+
+On November 1, 2026, the direct local Gemma CLI seed used a claim about the
+definition of a triangle and diagonal bracing in a timber frame. The first run
+created 29 cells, including eight `limits`/`rebuts` cells and no atomic stops.
+Making the stop instruction explicit still produced no atomic stops. After
+putting `is_atomic` and `bedrock_reason` before `sub_premises` in the output
+schema, a depth-two run created 16 cells: one atomic stop with a stored reason
+and three counterargument cells. These counts satisfy the smoke's storage
+checks, but the model still expanded the triangle definition and called a
+mechanical claim atomic. The check demonstrates the typed stop path and
+relation persistence; it does not establish reliable semantic bedrock judgment.
+The local pi and direct-provider seed/grow-dry-run checks also passed.

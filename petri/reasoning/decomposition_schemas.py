@@ -20,9 +20,9 @@ class InitialDecomposition(BaseModel):
 
 class WhyExpansion(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    sub_premises: list[PremiseCandidate]
     is_atomic: bool = Field(strict=True)
     bedrock_reason: ClaimText | None = None
+    sub_premises: list[PremiseCandidate]
 
     @model_validator(mode="after")
     def require_bedrock_reason(self):
