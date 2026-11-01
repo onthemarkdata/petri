@@ -37,6 +37,11 @@ class V1ExecutionBackend:
             message="; ".join(f"{check.name}: {check.message}" for check in checks),
         )
 
+    def reopen_cell(self, request, *, petri_dir):
+        from petri.engine.propagation import reopen_cell
+
+        return reopen_cell(petri_dir, request.cell_id, request.trigger)
+
     def process_queue(self, **kwargs: Any) -> QueueProcessingResult:
         from petri.storage.paths import dish_db_path
         from petri.storage.colonies import list_colonies
@@ -84,9 +89,10 @@ class V1ExecutionBackend:
     def is_stopped(self, petri_dir: Path) -> bool:
         return processor.is_stop_file_present(petri_dir)
 
-    def request_stop(self, petri_dir: Path) -> None:
+    def request_stop(self, petri_dir: Path, *, force: bool = False) -> int:
         processor.request_stop()
         processor.request_stop_file(petri_dir)
+        return sum(entry.get("queue_state", "").endswith("active") for entry in self.list_entries(petri_dir))
 
     def entries(self, petri_dir: Path) -> dict[str, dict]:
         return queue.load_queue(petri_dir / "queue.json").get("entries", {})

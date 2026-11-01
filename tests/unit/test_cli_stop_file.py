@@ -1,42 +1,21 @@
-"""Verify ``petri stop`` writes the cross-process stop sentinel file.
+"""The stop command delegates durable cancellation without domain writes."""
 
-The actual queue / event-log side-effects are covered by other tests; the
-narrow contract here is just: after ``petri stop`` returns, the
-``.petri/.stop`` sentinel must exist so detached worker processes can
-observe the stop request.
-"""
+from types import SimpleNamespace
 
-from __future__ import annotations
-
+import pytest
 from typer.testing import CliRunner
 
 from petri.cli import app
 
 
-runner = CliRunner()
-
-
-def test_stop_command_writes_stop_file(seeded_petri_dir) -> None:
-    """``petri stop`` must create ``.petri/.stop`` even with no active cells."""
-    result = runner.invoke(app, ["stop"])
-
-    # The stop command always exits 0 — it never errors when nothing is
-    # running, it just reports "no active cells to stop".
+@pytest.mark.parametrize("force", [False, True])
+def test_stop_delegates_force_without_writing_files(tmp_path, monkeypatch, force):
+    calls = []
+    backend = SimpleNamespace(request_stop=lambda path, **options: calls.append((path, options)))
+    monkeypatch.setattr("petri.cli.stop.find_petri_dir", lambda: tmp_path)
+    monkeypatch.setattr("petri.cli.stop.resolve_backend", lambda _: backend)
+    result = CliRunner().invoke(app, ["stop", *(["--force"] if force else [])])
     assert result.exit_code == 0, result.output
-
-    petri_dir = seeded_petri_dir["petri_dir"]
-    stop_file = petri_dir / ".stop"
-    assert stop_file.exists(), (
-        f"expected stop sentinel at {stop_file}; cli output:\n{result.output}"
-    )
-
-
-def test_stop_command_writes_stop_file_with_force(seeded_petri_dir) -> None:
-    """``petri stop --force`` also writes the sentinel."""
-    result = runner.invoke(app, ["stop", "--force"])
-
-    assert result.exit_code == 0, result.output
-
-    petri_dir = seeded_petri_dir["petri_dir"]
-    stop_file = petri_dir / ".stop"
-    assert stop_file.exists()
+    assert calls == [(tmp_path, {"force": force})]
+    assert "No active runs" in result.output
+    assert list(tmp_path.iterdir()) == []

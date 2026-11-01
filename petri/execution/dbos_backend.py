@@ -8,13 +8,14 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from datetime import datetime, timezone
-from collections.abc import Callable
+from collections.abc import Callable, Awaitable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 from dbos import DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID
+from dbos._error import DBOSWorkflowCancelledError, DBOSAwaitedWorkflowCancelledError
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 
 from petri.execution.config import ExecutionConfig
@@ -26,7 +27,7 @@ from petri.execution.dbos_app import (
     active_app,
 )
 from petri.execution.decisions import build_pipeline_dependencies
-from petri.execution.models import CellPipelineState, GrowOutcome, PreflightCheck
+from petri.execution.models import CellPipelineState, GrowOutcome, PreflightCheck, ProgressEvent
 from petri.execution.phases import PhaseServices, build_socratic_agent
 from petri.execution.pipeline import (
     NeedsHuman,
@@ -94,22 +95,35 @@ def admit_cell(spec: CellRunSpec) -> float:
 
 @DBOS.step(name="petri.cell_phase")
 async def cell_phase(spec: CellRunSpec, phase: str, value: PipelineInput) -> StepResult:
-    deps = active_app().dependencies(spec)
-    try:
-        output = await getattr(deps, phase)(value)
-        return _bounded(
-            StepResult(
-                value=output, domain_receipt=capture_receipt(active_app().db_path, spec.cell_id)
+    from petri.execution.control import cancellation_mode
+
+    app = active_app()
+    deps = app.dependencies(spec)
+    with app.step_activity():
+        task = asyncio.create_task(getattr(deps, phase)(value))
+        try:
+            while not task.done():
+                await asyncio.wait({task}, timeout=0.05)
+                if not task.done() and cancellation_mode(
+                    app.petri_dir / "dbos.sqlite", spec.workflow_id
+                ) == "force":
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    raise DBOSWorkflowCancelledError("Force stop requested by user")
+            output = task.result()
+            return _bounded(
+                StepResult(value=output, domain_receipt=capture_receipt(app.db_path, spec.cell_id))
             )
-        )
-    except RateLimitedError as error:
-        return StepResult(
-            retry_after_seconds=(
+        except RateLimitedError as error:
+            return StepResult(retry_after_seconds=(
                 error.retry_after_seconds if error.retry_after_seconds is not None else 1.0
-            )
-        )
-    except (PermanentHarnessError, UnexpectedModelBehavior, UsageLimitExceeded) as error:
-        return StepResult(failure=str(error)[-4096:] or type(error).__name__)
+            ))
+        except (PermanentHarnessError, UnexpectedModelBehavior, UsageLimitExceeded) as error:
+            return StepResult(failure=str(error)[-4096:] or type(error).__name__)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 @DBOS.step(name="petri.finish_cell")
@@ -129,8 +143,12 @@ async def _finish(spec, value, result) -> None:
 
 
 async def _phase(spec: CellRunSpec, name: str, value: PipelineInput):
+    from petri.execution.control import cancel_at_boundary
+
+    app = active_app()
     while True:
         result = await cell_phase(spec, name, value)
+        cancel_at_boundary(app.petri_dir / "dbos.sqlite", spec.workflow_id)
         if result.retry_after_seconds is not None:
             await DBOS.sleep_async(result.retry_after_seconds)
             continue
@@ -144,6 +162,9 @@ async def validate_cell(spec: CellRunSpec) -> PipelineEnd:
     if spec.application_version != APPLICATION_VERSION:
         raise RuntimeError("The workflow shape changed; run recovery with its original version")
     app = active_app()
+    from petri.execution.control import cancel_at_boundary
+
+    cancel_at_boundary(app.petri_dir / "dbos.sqlite", spec.workflow_id)
     if spec.cell_id in app.conflicts:
         return SyncConflict(reason=app.conflicts[spec.cell_id]["reason"])
     await app.acquire_slot()
@@ -180,11 +201,14 @@ class DBOSExecutionBackend:
         *,
         config: dict | None = None,
         services_factory: Callable[[CellRunSpec], PhaseServices] | None = None,
+        after_pass: Callable[[Path], Awaitable[bool]] | None = None,
     ):
         self.config = config or {}
         self.settings = ExecutionConfig.model_validate(self.config.get("execution", {}))
         self.services_factory = services_factory
+        self.after_pass = after_pass
         self.app: DBOSApp | None = None
+        self._stopped = False
 
     def preflight(self) -> PreflightCheck:
         settings = self.settings
@@ -248,7 +272,7 @@ class DBOSExecutionBackend:
             return ParkedCellHandle(spec.workflow_id, self.app.conflicts[spec.cell_id]["reason"])
         from petri.execution.priorities import enqueue_with_priority
 
-        return await enqueue_with_priority(self.app,spec,level)
+        return await enqueue_with_priority(self.app, spec, level)
 
     def close(self):
         if self.app:
@@ -410,11 +434,14 @@ class DBOSExecutionBackend:
         if self.app is None or not self.app.started:
             raise RuntimeError("Start the dish runtime before enqueueing a colony")
         _bounded(spec)
+        status = await DBOS.get_workflow_status_async(spec.workflow_id)
+        if status is not None and status.status == "CANCELLED":
+            return await DBOS.resume_workflow_async(spec.workflow_id)
         with SetWorkflowID(spec.workflow_id):
             return await DBOS.start_workflow_async(grow_colony, spec)
 
     async def grow_dish(
-        self, petri_dir, *, colony_filter=None, cell_ids=None, dry_run=False, round_number=1
+        self, petri_dir, *, colony_filter=None, cell_ids=None, dry_run=False, round_number=None
     ):
         from petri.execution.scheduler import ColonyRunSpec
         from petri.storage.colonies import list_colonies
@@ -433,11 +460,29 @@ class DBOSExecutionBackend:
                 colony.id.removeprefix(f"{colony.dish}-"),
             }:
                 continue
+            generation = round_number
+            if generation is None:
+                prior = await DBOS.list_workflows_async(name="petri.grow_colony")
+                prefix = f"{colony.id}:grow:r"
+                selected = tuple(sorted(cell_ids or []))
+                suffix = ColonyRunSpec(colony.id, 1, "generation", cell_ids=selected).workflow_id.removeprefix(prefix + "1")
+                matches = []
+                for run in prior:
+                    if not run.workflow_id.startswith(prefix):
+                        continue
+                    number, _, scope = run.workflow_id[len(prefix):].partition(":")
+                    if number.isdigit() and (f":{scope}" if scope else "") == suffix:
+                        matches.append((int(number), run.status))
+                generation, status = max(matches, default=(1, "NEW"))
+                if status == "SUCCESS" and self.eligible_cells(
+                    petri_dir, cell_ids=cell_ids, colony_filter=colony.id
+                ):
+                    generation += 1
             handles.append(
                 await self.enqueue_colony(
                     ColonyRunSpec(
                         colony.id,
-                        round_number,
+                        generation,
                         datetime.now(timezone.utc).date().isoformat(),
                         max_iterations=self.config.get("max_iterations", 5),
                         cell_ids=tuple(sorted(cell_ids or [])),
@@ -446,16 +491,28 @@ class DBOSExecutionBackend:
             )
         return handles
 
-    async def reopen_cell(self, request):
+    def reopen_cell(self, request, *, petri_dir=None):
         from petri.execution.scheduler import revalidate_cell
 
-        if self.app is None or not self.app.started:
-            raise RuntimeError("Start the dish runtime before reopening a cell")
-        if not request.request_id:
-            raise ValueError("Provide a stable request ID to deduplicate revalidation")
-        _bounded(request)
-        with SetWorkflowID(request.workflow_id):
-            return await DBOS.start_workflow_async(revalidate_cell, request)
+        async def submit():
+            if self.app is None or not self.app.started:
+                raise RuntimeError("Start the dish runtime before reopening a cell")
+            if not request.request_id:
+                raise ValueError("Provide a stable request ID to deduplicate revalidation")
+            _bounded(request)
+            with SetWorkflowID(request.workflow_id):
+                return await DBOS.start_workflow_async(revalidate_cell, request)
+
+        if petri_dir is None:
+            return submit()
+        self.start(petri_dir, db_path=dish_db_path(petri_dir))
+        async def run():
+            handle = await submit()
+            return await handle.get_result()
+        try:
+            return asyncio.run(run())
+        finally:
+            self.close()
 
     def process_queue(
         self,
@@ -482,39 +539,98 @@ class DBOSExecutionBackend:
         path = dish_db_path(petri_dir)
         if not path.is_file():
             return QueueProcessingResult()
+        self.clear_stop(petri_dir)
         self.start(petri_dir, db_path=path)
 
-        async def run():
-            handles = await self.grow_dish(
-                petri_dir, colony_filter=colony_filter, cell_ids=cell_ids
-            )
-            colonies = await asyncio.gather(*(handle.get_result() for handle in handles))
-            completed = sorted(
-                {
-                    cell
-                    for colony in colonies
-                    for cell in colony.completed
-                    if cell not in self.app.conflicts
+        async def poll_progress(done):
+            slots = {}
+            last = {}
+            while not done.is_set():
+                runs = await DBOS.list_workflows_async(name="petri.validate_cell")
+                active = {
+                    run.workflow_id.rpartition(":r")[0]
+                    for run in runs if run.status == "PENDING"
                 }
+                for cell_id in list(slots):
+                    if cell_id not in active:
+                        on_event(ProgressEvent(slots.pop(cell_id), cell_id, "finished"))
+                        last.pop(cell_id, None)
+                for cell_id in sorted(active):
+                    if cell_id not in slots:
+                        available = set(range(self.settings.worker_concurrency)) - set(slots.values())
+                        if not available:
+                            continue
+                        slots[cell_id] = min(available)
+                        on_event(ProgressEvent(slots[cell_id], cell_id, "started"))
+                    events = database.read_events(path, cell_id=cell_id)
+                    row = database.get_cell(path, cell_id) or {}
+                    latest = events[-1] if events else {}
+                    state = (row.get("status", "NEW"), latest.get("id"))
+                    if last.get(cell_id) != state:
+                        last[cell_id] = state
+                        on_event(ProgressEvent(
+                            slots[cell_id], cell_id, "phase", phase=state[0].lower(),
+                            agent=latest.get("agent"), iteration=latest.get("iteration"),
+                        ))
+                try:
+                    await asyncio.wait_for(done.wait(), timeout=self.status_interval)
+                except TimeoutError:
+                    pass
+            for cell_id, slot in slots.items():
+                on_event(ProgressEvent(slot, cell_id, "finished"))
+
+        async def run():
+            # Resume children outside their parent replay so no new parent step is inserted.
+            cancelled = await DBOS.list_workflows_async(
+                name="petri.validate_cell", status=["CANCELLED"]
             )
-            results = [
-                ProcessCellResult(cell_id=cell, final_state=database.get_cell(path, cell)["status"])
-                for cell in completed
-            ]
-            return QueueProcessingResult(
-                processed=len(results),
-                succeeded=sum(
-                    result.final_state in {"VALIDATED", "DISPROVEN", "DEFER_OPEN", "DEFER_CLOSED"}
-                    for result in results
-                ),
-                stalled=sum(
-                    result.final_state in {"STALLED", "NEEDS_EXPERIMENT"} for result in results
-                ),
-                results=results,
-            )
+            for child in cancelled:
+                await DBOS.resume_workflow_async(child.workflow_id, queue_name=QUEUE_NAME)
+            done = asyncio.Event()
+            poller = asyncio.create_task(poll_progress(done)) if on_event else None
+            try:
+                colonies = []
+                while True:
+                    handles = await self.grow_dish(
+                        petri_dir, colony_filter=colony_filter, cell_ids=cell_ids
+                    )
+                    colonies.extend(await asyncio.gather(*(handle.get_result() for handle in handles)))
+                    if self.after_pass is None or not await self.after_pass(petri_dir):
+                        break
+                completed = sorted({
+                    cell for colony in colonies for cell in colony.completed
+                    if cell not in self.app.conflicts
+                })
+                results = [
+                    ProcessCellResult(cell_id=cell, final_state=database.get_cell(path, cell)["status"])
+                    for cell in completed
+                ]
+                return QueueProcessingResult(
+                    processed=len(results),
+                    succeeded=sum(result.final_state in {
+                        "VALIDATED", "DISPROVEN", "DEFER_OPEN", "DEFER_CLOSED"
+                    } for result in results),
+                    stalled=sum(result.final_state in {
+                        "STALLED", "NEEDS_EXPERIMENT"
+                    } for result in results),
+                    results=results,
+                )
+            except (DBOSWorkflowCancelledError, DBOSAwaitedWorkflowCancelledError):
+                self._stopped = True
+                while self.app._active_steps:
+                    await asyncio.sleep(0.05)
+                return QueueProcessingResult()
+            finally:
+                done.set()
+                if poller:
+                    await poller
 
         try:
             return asyncio.run(run())
+        except BaseException:
+            self.request_stop(petri_dir, force=True)
+            self.app.detach()
+            raise
         finally:
             self.close()
 
@@ -522,6 +638,7 @@ class DBOSExecutionBackend:
         result = run_one_pass()
         states = get_states()
         reason = (
+            "user_stop" if self._stopped else
             "sync_conflict"
             if states.get("sync_conflict")
             else "not_eligible"
@@ -583,19 +700,35 @@ class DBOSExecutionBackend:
         return ", ".join(f"{name}: {count}" for name, count in sorted(states.items()))
 
     def clear_stop(self, petri_dir: Path) -> None:
-        pass
+        from petri.execution.control import clear_cancellation
+
+        clear_cancellation(petri_dir / "dbos.sqlite")
+        self._stopped = False
 
     def is_stopped(self, petri_dir: Path) -> bool:
-        return False
+        from petri.execution.control import has_cancellation
 
-    def request_stop(self, petri_dir: Path) -> None:
+        return self._stopped or has_cancellation(petri_dir / "dbos.sqlite")
+
+    def request_stop(self, petri_dir: Path, *, force: bool = False) -> int:
+        from petri.execution.control import record_cancellation
+
         path = petri_dir / "dbos.sqlite"
         if not path.exists():
-            return
+            return 0
         client = DBOSClient(system_database_url=f"sqlite:///{path.resolve()}")
         try:
-            for run in client.list_workflows(status=["PENDING", "ENQUEUED"]):
-                client.cancel_workflow(run.workflow_id)
+            runs = client.list_workflows(status=["PENDING", "ENQUEUED"])
+            ids = [run.workflow_id for run in runs]
+            if ids:
+                record_cancellation(path, ids, force=force)
+                immediate = ids if force else [
+                    run.workflow_id for run in runs if run.status == "ENQUEUED"
+                ]
+                if immediate:
+                    client.cancel_workflows(immediate)
+                self._stopped = True
+            return len(ids)
         finally:
             client.destroy()
 

@@ -61,8 +61,12 @@ class MemoryBackend:
     def is_stopped(self, petri_dir):
         return False
 
-    def request_stop(self, petri_dir):
+    def request_stop(self, petri_dir, *, force=False):
         self.calls.append("request_stop")
+        return 1
+
+    def reopen_cell(self, request, *, petri_dir):
+        self.calls.append("reopen_cell")
 
     def entries(self, petri_dir):
         self.calls.append("entries")
@@ -84,7 +88,7 @@ class MemoryBackend:
         ("grow", ["--dry-run"], "process_queue"),
         ("grow", [], "grow_loop"),
         ("check", ["--json"], "entries"),
-        ("stop", [], "update_state"),
+        ("stop", [], "request_stop"),
     ],
 )
 def test_cli_uses_memory_backend(

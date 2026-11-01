@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timezone
+import hashlib
 from typing import Optional
 
 import typer
 
 from petri.telemetry.commands import traced_command
 
-from petri.cli._bootstrap import find_petri_dir, get_dish_id, load_colonies
+from petri.cli._bootstrap import find_petri_dir, load_colonies
+from petri.execution import resolve_backend
+from petri.execution.models import ReopenRequest
+from petri.storage.dish import resolve_dish_id
 from petri.cli_ui import print_error_and_exit
 
 
@@ -27,7 +32,8 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Provide new evidence to the colony."""
         petri_dir = find_petri_dir()
-        dish_id = get_dish_id(petri_dir)
+        dish_id = resolve_dish_id(petri_dir)
+        backend = resolve_backend(petri_dir)
 
         # Load colonies
         colonies = load_colonies(petri_dir, dish_id)
@@ -49,7 +55,7 @@ def register(app: typer.Typer) -> None:
         # Instead, show all cells and let the user choose which to re-open.
         all_cells = []
         for colony_graph, colony in colonies:
-            if colony_name and colony.id.split("-", 1)[-1] != colony_name:
+            if colony_name and colony.id.removeprefix(f"{dish_id}-") != colony_name:
                 continue
             for cell in colony_graph.get_all_cells():
                 all_cells.append((colony_graph, colony, cell))
@@ -90,20 +96,27 @@ def register(app: typer.Typer) -> None:
             typer.echo(f"  {index}. [{status_val}] {cell.id}: {cell.claim_text}")
 
         # Re-open cells
-        from petri.engine.propagation import (
-            get_impact_report,
-            propagate_upward,
-            reopen_cell,
-        )
+        from petri.lifecycle.propagation import get_impact_report, propagate_upward
+
+        def reopen(colony_graph, colony, cell):
+            request_id = hashlib.sha256(
+                f"{cell.id}\0{source}\0{content}".encode()
+            ).hexdigest()
+            report = get_impact_report(petri_dir, cell.id, colony_graph, dish_id)
+            typer.echo(f"  Impact: {report['total_affected']} dependent cells")
+            backend.reopen_cell(ReopenRequest(
+                cell.id, request_id, datetime.now(timezone.utc).date().isoformat(),
+                trigger=f"New evidence from: {source}",
+            ), petri_dir=petri_dir)
+            flagged = propagate_upward(
+                petri_dir, cell.id, colony_graph, dish_id, request_id=request_id
+            )
+            typer.echo(f"  Re-opened {cell.id}, flagged {len(flagged)} dependents")
 
         if auto_reopen:
             # Re-open all
             for colony_graph, colony, cell in reopenable:
-                reopen_cell(petri_dir, cell.id, trigger=f"New evidence from: {source}")
-                flagged = propagate_upward(petri_dir, cell.id, colony_graph, dish_id)
-                typer.echo(
-                    f"  Re-opened {cell.id}, flagged {len(flagged)} dependents"
-                )
+                reopen(colony_graph, colony, cell)
         else:
             # In non-interactive mode, just show the impact report
             import sys
@@ -128,17 +141,7 @@ def register(app: typer.Typer) -> None:
                     if questionary.confirm(
                         f"Re-open {cell.id}?", default=False
                     ).ask():
-                        reopen_cell(
-                            petri_dir,
-                            cell.id,
-                            trigger=f"New evidence from: {source}",
-                        )
-                        flagged = propagate_upward(
-                            petri_dir, cell.id, colony_graph, dish_id
-                        )
-                        typer.echo(
-                            f"  Re-opened. Flagged {len(flagged)} dependents."
-                        )
+                        reopen(colony_graph, colony, cell)
             except (ImportError, OSError):
                 typer.echo(
                     "\nRun with --auto-reopen in non-interactive mode."

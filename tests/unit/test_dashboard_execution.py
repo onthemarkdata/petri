@@ -15,9 +15,10 @@ from petri.storage.paths import dish_db_path
 def test_queue_and_stats_match_between_backends(seeded_petri_dir):
     petri_dir = seeded_petri_dir["petri_dir"]
     path = petri_dir / "queue.json"
-    legacy = queue.load_queue(path)
-    for entry in legacy["entries"].values():
-        entry["queue_state"] = "queued"
+    legacy = {"version": 1, "entries": {
+        row["id"]: {"cell_id": row["id"], "queue_state": "queued", "iteration": 0}
+        for row in database.list_cells(dish_db_path(petri_dir))
+    }}
     queue.save_queue(path, legacy)
     v1 = TestClient(create_app(petri_dir, execution_backend=V1ExecutionBackend()))
     before = v1.get("/api/queue").json()

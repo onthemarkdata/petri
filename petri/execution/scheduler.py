@@ -13,6 +13,7 @@ from petri.execution.dbos_app import active_app
 from petri.execution.dbos_backend import CellRunSpec, _bounded
 from petri.execution.pipeline import SyncConflict
 from petri.execution.priorities import enqueue_with_priority, prepare_priority_pass
+from petri.execution.models import ReopenRequest
 from petri.models import CellStatus, parse_key
 from petri.storage import database
 from petri.storage.colonies import load_colony
@@ -50,18 +51,6 @@ class ColonyRunResult:
     not_eligible: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class ReopenRequest:
-    cell_id: str
-    request_id: str
-    today_iso: str
-    trigger: str = "human_revalidation"
-    max_iterations: int = 5
-
-    @property
-    def workflow_id(self):
-        request = hashlib.sha256(self.request_id.encode()).hexdigest()
-        return f"{self.cell_id}:reopen:{request}"
 
 
 def prepare_rounds(db_path):
@@ -128,7 +117,11 @@ async def enqueue_validation(spec: CellRunSpec, level: int):
 
 @DBOS.workflow(name="petri.grow_colony")
 async def grow_colony(spec: ColonyRunSpec) -> ColonyRunResult:
+    from dbos._error import DBOSAwaitedWorkflowCancelledError
+    from petri.execution.control import cancel_at_boundary
+
     app = active_app()
+    cancel_at_boundary(app.petri_dir / "dbos.sqlite", spec.workflow_id)
     if any(parse_key(cell).get("colony_prefix") == spec.colony_id for cell in app.conflicts):
         return ColonyRunResult(
             spec.colony_id,
@@ -141,8 +134,14 @@ async def grow_colony(spec: ColonyRunSpec) -> ColonyRunResult:
         )
     completed: list[str] = []
     while candidates := await asyncio.to_thread(eligible_cells, spec):
+        cancel_at_boundary(app.petri_dir / "dbos.sqlite", spec.workflow_id)
         handles = [await enqueue_validation(cell, level) for cell, level in candidates]
-        await asyncio.gather(*(handle.get_result() for handle in handles))
+        try:
+            await asyncio.gather(*(handle.get_result() for handle in handles))
+        except DBOSAwaitedWorkflowCancelledError:
+            cancel_at_boundary(app.petri_dir / "dbos.sqlite", spec.workflow_id)
+            raise
+        cancel_at_boundary(app.petri_dir / "dbos.sqlite", spec.workflow_id)
         completed.extend(cell.cell_id for cell, _ in candidates)
     blocked = await asyncio.to_thread(blocked_cells, spec)
     return _bounded(ColonyRunResult(spec.colony_id, tuple(completed), blocked))

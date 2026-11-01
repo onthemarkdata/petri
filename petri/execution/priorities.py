@@ -49,6 +49,9 @@ async def enqueue_with_priority(app: DBOSApp, spec: CellRunSpec, level: int):
     from petri.execution.dbos_app import QUEUE_NAME
     from petri.execution.dbos_backend import validate_cell
 
+    status = await DBOS.get_workflow_status_async(spec.workflow_id)
+    if status is not None and status.status == "CANCELLED":
+        return await DBOS.resume_workflow_async(spec.workflow_id, queue_name=QUEUE_NAME)
     priority = assigned_priority(app,spec.cell_id,level)
     event,_ = database.append_event(app.db_path,Event(
         id=database.stable_event_id(spec.cell_id,'queued',spec.round_number),cell_id=spec.cell_id,
