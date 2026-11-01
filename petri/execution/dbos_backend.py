@@ -246,8 +246,9 @@ class DBOSExecutionBackend:
         _bounded(spec)
         if spec.cell_id in self.app.conflicts:
             return ParkedCellHandle(spec.workflow_id, self.app.conflicts[spec.cell_id]["reason"])
-        with SetWorkflowID(spec.workflow_id), SetEnqueueOptions(priority=level + 1):
-            return await DBOS.enqueue_workflow_async(QUEUE_NAME, validate_cell, spec)
+        from petri.execution.priorities import enqueue_with_priority
+
+        return await enqueue_with_priority(self.app,spec,level)
 
     def close(self):
         if self.app:

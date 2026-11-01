@@ -52,6 +52,7 @@ class QueueState(str, Enum):
 
 
 class EventType(str, Enum):
+    cell_queued = "cell_queued"
     scan_completed = "scan_completed"
     redecomposition_proposed = "redecomposition_proposed"
     redecomposition_halted = "redecomposition_halted"
@@ -110,6 +111,12 @@ class Confidence(str, Enum):
 class SearchExecutedData(BaseModel):
     query: str
     sources_found: int = Field(ge=0)
+
+
+class CellQueuedData(BaseModel):
+    priority: int = Field(ge=1)
+    workflow_id: str
+    round_number: int = Field(ge=0)
 
 
 class SourceReviewedData(BaseModel):
@@ -231,6 +238,7 @@ class ScanCompletedData(BaseModel):
 
 
 EVENT_DATA_MODELS: dict[str, type[BaseModel]] = {
+    "cell_queued": CellQueuedData,
     "scan_completed": ScanCompletedData,
     "redecomposition_proposed": RedecompositionProposedData,
     "redecomposition_halted": RedecompositionHaltedData,

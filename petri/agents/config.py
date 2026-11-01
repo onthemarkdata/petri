@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from petri.analysis.analyst import AnalystConfig
-from petri.execution.config import ExecutionConfig
+from petri.execution.config import ExecutionConfig, SchedulingConfig
 from petri.lifecycle.config import LifecycleConfig
 
 from petri.agents.contract import AGENT_SPECS, AgentName, BlockingMode, DebateProtocol
@@ -143,6 +143,7 @@ class PrePipelineContent(StrictContent):
 
 
 class AgentConfig(StrictContent):
+    scheduling: SchedulingConfig = Field(default_factory=SchedulingConfig)
     analyst: AnalystConfig = Field(default_factory=AnalystConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     auto_export: bool = False
