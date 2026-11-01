@@ -56,6 +56,7 @@ async def run_debate(
     *,
     message_history: Sequence[ModelMessage] = (),
     prior_evidence: str = "",
+    claim_context: str = "",
     deps_factory: Callable[[AgentName], Any] | None = None,
     event_stream_handler_factory: Callable[[AgentName], Any] | None = None,
 ) -> DebateResult:
@@ -82,8 +83,11 @@ async def run_debate(
             f"Turn {len(result.exchanges) + 1}: respond as {name.value} to the prior "
             "participant, using the actual conversation history. Preserve source attribution."
         )
-        if not result.exchanges and prior_evidence:
-            prompt += f"\n\nPrior recorded research and assessments:\n{prior_evidence}"
+        if not result.exchanges:
+            if claim_context:
+                prompt += f"\n\n{claim_context}"
+            if prior_evidence:
+                prompt += f"\n\nPrior recorded research and assessments:\n{prior_evidence}"
         with capture_run_messages() as attempted:
             try:
                 response = await agents[name].run(

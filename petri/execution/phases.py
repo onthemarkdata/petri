@@ -29,6 +29,7 @@ from petri.agents.factory import typed_role_instruction
 from petri.agents.debates import DebateStatus, log_debate, run_debate
 from petri.agents.outputs import ASSESSMENT_FORMAT, AgentAssessment
 from petri.execution.evidence import RecordedAssessment, format_socratic, render_agent_context
+from petri.execution.claim_context import render_ancestor_context
 from petri.execution.pipeline import (
     ConvergenceDecision,
     EvaluationVerdict,
@@ -283,6 +284,7 @@ async def _assessment_impl(
                 "focused_directive": directive or value.focused_directive,
                 "phase": phase,
                 "prior_evidence": prior_evidence,
+                "claim_context": render_ancestor_context(services.db_path, value.cell_id),
             },
             "socratic_questioner" if agent_name.startswith("socratic_") else agent_name,
             valid_verdicts=content.verdicts_pass + content.verdicts_block,
@@ -431,6 +433,7 @@ async def run_critique(value: PipelineInput, services: PhaseServices) -> PhaseRu
                 result = await run_debate(
                     debate.protocol, services.agents, claim, services.config.limits.debate,
                     prior_evidence=_prior_evidence(services, value),
+                    claim_context=render_ancestor_context(services.db_path, value.cell_id),
                     deps_factory=lambda name: ResearchContext(services.db_path, value.cell_id,
                         name.value, value.iteration, services.round_number, node),
                     event_stream_handler_factory=lambda name: _stream_handler(

@@ -162,6 +162,8 @@ def build_assess_cell_prompt(
         context_parts.append(f"Source validation: {json.dumps(context['source_validation'])}")
     context_str = "\n".join(context_parts) if context_parts else "Initial assessment"
     prior_evidence = context.get("prior_evidence", "")
+    claim_context = context.get("claim_context", "")
+    claim_context_section = f"\n{claim_context}\n" if claim_context else ""
     evidence_section = ""
     if prior_evidence:
         evidence_section = (
@@ -196,6 +198,7 @@ def build_assess_cell_prompt(
         '"\nContext: '
         f"{context_str}"
         "\n"
+        f"{claim_context_section}"
         f"{evidence_section}"
         "\nValid verdicts: "
         f"{verdict_list}"

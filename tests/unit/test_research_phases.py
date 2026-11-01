@@ -204,6 +204,15 @@ def inputs(cell_id):
     return PipelineInput.model_validate(CellPipelineState(cell_id=cell_id).model_dump())
 
 
+def scoped_child(services):
+    rows = database.list_cells(services.db_path)
+    root, child = rows[0], rows[-1]
+    database.put_cell(services.db_path, {**root, "claim_text": "UNVERIFIED_ROOT_CONTEXT"})
+    database.add_edge(services.db_path, from_cell=root["id"], to_cell=child["id"],
+                      edge_type="intra_colony", created_at=root["created_at"])
+    return child["id"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("public_web", [False, True])
 async def test_research_handoff_contains_current_investigator_findings(phase_services, public_web):
@@ -234,8 +243,9 @@ async def test_research_handoff_contains_current_investigator_findings(phase_ser
 
     services.agents = build_agents(services.config, constitution="Preserve source attribution.",
                                   model=FunctionModel(respond), output_mode="tool", research_client=Sources())
-    cell_id = database.list_cells(services.db_path)[0]["id"]
+    cell_id = scoped_child(services)
     await run_research(inputs(cell_id), services)
+    assert all("UNVERIFIED_ROOT_CONTEXT" in prompt and "not evidence" in prompt for prompt in prompts.values())
     assert "CURRENT_INVESTIGATOR_FINDING" in prompts[AgentName.FRESHNESS_CHECKER]
     assert "CURRENT_INVESTIGATOR_FINDING" in prompts[AgentName.DEPENDENCY_AUDITOR]
     assert "FULL_ARGUMENT_HANDOFF" in prompts[AgentName.FRESHNESS_CHECKER]
@@ -264,7 +274,8 @@ async def test_socratic_steps_receive_previous_analysis(phase_services):
 
     services.socratic_agent = build_socratic_agent(services.config,
         constitution="Preserve source attribution.", model=FunctionModel(respond))
-    await run_socratic(inputs(database.list_cells(services.db_path)[0]["id"]), services)
+    await run_socratic(inputs(scoped_child(services)), services)
+    assert all("UNVERIFIED_ROOT_CONTEXT" in prompt and "not evidence" in prompt for prompt in prompts)
     assert "PREVIOUS_STEP_1" in prompts[1]
     assert "PREVIOUS_STEP_1" in prompts[2] and "PREVIOUS_STEP_2" in prompts[2]
     assert "PREVIOUS_STEP_3" in prompts[3]
