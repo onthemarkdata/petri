@@ -63,7 +63,7 @@ def build_agents(
             backend = "provider"
         selected_model = model if model is not None else resolver(model_config)
         schema = output_model(name, content)
-        mode = output_mode or ("prompted" if backend in {"pi", "claude-code"} else "tool")
+        mode = output_mode or validated.harness.output_mode or ("prompted" if backend in {"pi", "claude-code"} else "tool")
         delivery = ToolOutput(schema) if mode == "tool" else PromptedOutput(schema)
         instructions = (
             f"{constitution.strip()}\n\n{typed_role_instruction(content.instruction)}\n\n"

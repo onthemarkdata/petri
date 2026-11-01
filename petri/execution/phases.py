@@ -115,11 +115,9 @@ def build_socratic_agent(
         selected = resolve_model(config.model_dump(mode="json"))
     else:
         selected = model
-    output = (
-        ToolOutput(SocraticAssessment)
-        if model is not None or config.harness.backend == "provider"
-        else PromptedOutput(SocraticAssessment)
-    )
+    mode = config.harness.output_mode or (
+        "tool" if model is not None or config.harness.backend == "provider" else "prompted")
+    output = ToolOutput(SocraticAssessment) if mode == "tool" else PromptedOutput(SocraticAssessment)
     return Agent(
         selected,
         name="socratic_questioner",

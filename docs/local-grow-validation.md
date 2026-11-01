@@ -37,6 +37,20 @@ in its local provider; the probe verifies that it matches `--max-tokens`. Petri
 rejects native model settings for CLI backends rather than ignoring them.
 Truncated output must still pass the full schema and evidence validators.
 
+`--output-mode prompted` configures `harness.output_mode: prompted` for final
+assessments, including Socratic analysis. Native provider research still uses
+registered host function tools. This selects JSON final-result delivery without
+accepting malformed tool arguments or changing the assessment schema. The
+packaged native-provider default remains tool output.
+
+Run acceptance probes serially. Automatic llama.cpp slots can share a unified
+KV buffer even when each slot advertises the full configured context length.
+The local validation setup uses one 32,768-token slot, with the exact model
+unchanged. Docker supports model runtime flags through
+[`docker model configure`](https://docs.docker.com/ai/model-runner/configuration/).
+Verify the effective slot count before starting a long run; preserve existing
+runtime flags when changing the slot setting.
+
 From the repository, with the local model already running:
 
 ```sh
