@@ -44,6 +44,18 @@ def load_dish_config(petri_dir: Path) -> dict:
     return cfg or {}
 
 
+def get_execution_backend(config: dict | None = None) -> str:
+    """Return the configured execution backend, rejecting unsupported names."""
+    cfg = load_config() if config is None else config
+    execution = cfg.get("execution", {})
+    if not isinstance(execution, dict):
+        raise ValueError("execution must be a mapping with backend: v1")
+    backend = execution.get("backend", "v1")
+    if backend != "v1":
+        raise ValueError(f"Unknown execution.backend {backend!r}; supported value: v1")
+    return backend
+
+
 def get_model_name(config: dict | None = None) -> str:
     cfg = config or load_config()
     model = cfg.get("model")

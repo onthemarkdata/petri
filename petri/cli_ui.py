@@ -508,6 +508,8 @@ def grow_status_loop(
     spinner,
     stop_event,
     interval_seconds: float,
+    get_states=None,
+    format_states=None,
 ) -> None:
     """Daemon-thread body that refreshes the aggregate status header.
 
@@ -525,8 +527,15 @@ def grow_status_loop(
     walks event logs for recent verdicts. Shuts down promptly when
     ``stop_event`` is set.
     """
-    from petri.engine.grow_loop import format_state_summary
-    from petri.storage.queue import get_state_summary
+    if get_states is None:
+        from petri.storage.queue import get_state_summary
+
+        def get_states():
+            return get_state_summary(queue_path)
+    if format_states is None:
+        from petri.engine.grow_loop import format_state_summary
+
+        format_states = format_state_summary
 
     set_header = getattr(spinner, "set_header", None)
 
@@ -535,11 +544,11 @@ def grow_status_loop(
             return
 
         try:
-            state_counts = get_state_summary(queue_path)
+            state_counts = get_states()
         except Exception:
             state_counts = {}
 
-        status_line = f"status: {format_state_summary(state_counts)}"
+        status_line = f"status: {format_states(state_counts)}"
         if set_header is not None:
             set_header(status_line)
         else:
