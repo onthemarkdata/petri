@@ -12,7 +12,8 @@ from pydantic_ai.messages import ModelRequest, ToolReturnPart, UserPromptPart
 from pydantic_ai.models import ModelRequestParameters
 
 from petri.harness.errors import PermanentHarnessError, RateLimitedError
-from petri.harness.pi.model import PiModel, render_history
+from petri.harness.pi.model import PiModel
+from petri.harness.messages import render_history
 from petri.harness.pi.transport import PiRpcTransport
 from petri.harness.retry import RetryPolicy
 from petri.models import AssessmentResult
