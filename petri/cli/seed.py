@@ -213,8 +213,9 @@ def _resume_colony(
         resume=True,
     )
     provider = None
+    result = None
     try:
-        decompose_claim(
+        result = decompose_claim(
             colony_model.center_claim, _clarifications_to_models(colony_model.clarifications),
             dish_id, colony_name, provider=None, agent_runner=_CompletedSeedRunner(),
             settings=DecompositionSettings.from_dish(petri_dir), db_path=path, resume=True,
@@ -226,9 +227,10 @@ def _resume_colony(
             print_error_and_exit("Seed resume requires the configured typed agent backend.", code=2)
         runner = provider
     try:
-        result = backend.seed_colony(
-            petri_dir=petri_dir, **arguments, provider=runner, agent_runner=runner
-        )
+        if result is None:
+            result = backend.seed_colony(
+                petri_dir=petri_dir, **arguments, provider=runner, agent_runner=runner
+            )
     except Exception as error:
         print_error_and_exit(f"Seed resume failed: {error}", code=2)
     finally:

@@ -132,8 +132,19 @@ def test_completed_cli_resume_does_not_resolve_provider(tmp_path, monkeypatch):
     monkeypatch.setattr(
         seed_module, "resolve_provider", lambda _: pytest.fail("resolved a provider")
     )
+    class DashboardBackend:
+        backend_name = "dbos"
+
+        def seed_colony(self, **kwargs):
+            pytest.fail("Completed dashboard draft was submitted as a second seed workflow")
+
+    monkeypatch.setattr(seed_module, "resolve_backend", lambda _: DashboardBackend())
+    before = [(cell.id, cell.claim_text, cell.created_at) for cell in result.cells]
     runner = CliRunner()
     first = runner.invoke(app, ["seed", "--resume", "--colony", "units", "--no-questions"])
     assert first.exit_code == 0, first.output
     second = runner.invoke(app, ["seed", "--resume", "--colony", "units"])
     assert second.exit_code == 0 and "nothing to resume" in second.output
+    after = database.list_cells(path)
+    assert [(row["id"], row["claim_text"], row["created_at"]) for row in after] == before
+    assert len(database.read_events(path, event_type="colony_approved")) == 1
