@@ -2,6 +2,7 @@
 
 import hashlib
 import time
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,11 @@ from typer.testing import CliRunner
 
 from petri.cli import app
 from petri.dashboard.api import create_app
+from petri.graph.colony import ColonyGraph
+from petri.models import Cell, Colony
+from petri.storage import database
+from petri.storage.colonies import existing_colony_message, reserve_colony, save_colony
+from petri.storage.paths import dish_db_path
 from petri.storage.seed_guard import ColonyExistsError, require_empty_colony
 from tests.conftest import TypedFakeProvider as FakeProvider
 
@@ -21,8 +27,23 @@ def snapshot(path):
     }
 
 
-def test_cli_preserves_existing_colony(seeded_petri_dir, monkeypatch):
+
+@pytest.fixture
+def neighboring_colony(seeded_petri_dir):
     env = seeded_petri_dir
+    colony_id = f"{env['dish_id']}-neighbor"
+    center_id = f"{colony_id}-000-000"
+    graph = ColonyGraph(colony_id=colony_id)
+    graph.add_cell(Cell(id=center_id, colony_id=colony_id, claim_text="Another claim", level=0))
+    save_colony(
+        dish_db_path(env["petri_dir"]), graph,
+        Colony(id=colony_id, dish=env["dish_id"], center_cell_id=center_id, center_claim="Another claim"),
+    )
+    return env
+
+
+def test_cli_preserves_existing_colony(neighboring_colony, monkeypatch):
+    env = neighboring_colony
     before = snapshot(env["petri_dir"])
     provider = FakeProvider()
     monkeypatch.setattr("petri.cli.seed.resolve_provider", lambda _: provider)
@@ -30,14 +51,16 @@ def test_cli_preserves_existing_colony(seeded_petri_dir, monkeypatch):
         "seed", "New claim", "--colony", env["colony_name"], "--no-questions",
     ])
     assert result.exit_code == 1, result.output
-    assert env["colony_name"] in result.output
-    assert "already exists" in result.output
+    assert f"Colony '{env['colony_id']}' already exists with 5 stored cells." in result.output
+    assert str(dish_db_path(env["petri_dir"]).resolve()) in result.output
+    assert f"seed --resume --colony '{env['colony_name']}'" in result.output
     assert snapshot(env["petri_dir"]) == before
     assert provider.decompose_calls == []
 
 
-def test_dashboard_preserves_existing_colony(seeded_petri_dir, monkeypatch):
-    env = seeded_petri_dir
+@pytest.mark.parametrize("same_claim", [False, True])
+def test_dashboard_preserves_existing_colony(neighboring_colony, monkeypatch, same_claim):
+    env = neighboring_colony
     def unexpected_provider(self, spec):
         pytest.fail("Existing colonies must be rejected before resolving inference.")
 
@@ -45,12 +68,131 @@ def test_dashboard_preserves_existing_colony(seeded_petri_dir, monkeypatch):
     with TestClient(create_app(env["petri_dir"])) as client:
         before = {name: digest for name, digest in snapshot(env["petri_dir"]).items()
                   if not name.endswith(("-wal", "-shm"))}
-        result = client.post("/api/seed", json={"claim": "New", "colony": env["colony_name"]})
+        claim = env["colony_model"].center_claim if same_claim else "New"
+        result = client.post("/api/seed", json={"claim": claim, "colony": env["colony_name"]})
         assert result.status_code == 409
-        assert "already exists" in result.json()["detail"]
+        detail = result.json()["detail"]
+        assert f"Colony '{env['colony_id']}' already exists with 5 stored cells." in detail
+        assert str(dish_db_path(env["petri_dir"]).resolve()) in detail
+        assert "regeneration" in detail
         after = {name: digest for name, digest in snapshot(env["petri_dir"]).items()
                  if not name.endswith(("-wal", "-shm"))}
         assert after == before
+
+
+@pytest.mark.parametrize("cell_count", [0, 2])
+@pytest.mark.parametrize("supplied_connection", [False, True])
+def test_reservation_conflict_keeps_stored_cells_and_name(
+    tmp_path, cell_count, supplied_connection
+):
+    path = tmp_path / "dish" / "petri.sqlite"
+    colony = Colony(
+        id="dish-existing", dish="dish", center_cell_id="dish-existing-000-000",
+        center_claim="Existing claim",
+    )
+    reserve_colony(path, colony)
+    for seq in range(cell_count):
+        database.put_cell(path, {
+            "id": f"dish-existing-001-{seq:03d}", "colony": colony.id, "level": 1,
+            "seq": seq, "claim_text": "Stored premise", "created_at": "2026-11-01",
+        })
+    database.put_cell(path, {
+        "id": "dish-other-000-000", "colony": "dish-other", "level": 0, "seq": 0,
+        "claim_text": "Unrelated premise", "created_at": "2026-11-01",
+    })
+    before = snapshot(path.parent)
+
+    with closing(database.connect(path)) as connection:
+        if supplied_connection:
+            connection.execute("BEGIN IMMEDIATE")
+        with pytest.raises(ColonyExistsError) as raised:
+            reserve_colony(path, colony, connection=connection if supplied_connection else None)
+        message = str(raised.value)
+        assert f"Colony '{colony.id}' already exists with {cell_count} stored cells." in message
+        assert str(path.resolve()) in message
+        assert connection.in_transaction == supplied_connection
+        assert connection.execute("SELECT count(*) FROM colonies WHERE id=?", (colony.id,)).fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM cells WHERE colony=?", (colony.id,)).fetchone()[0] == cell_count
+        if supplied_connection:
+            connection.rollback()
+    assert snapshot(path.parent) == before
+
+
+def test_reservation_diagnostic_reads_uncommitted_cells(tmp_path, monkeypatch):
+    path = tmp_path / "petri.sqlite"
+    colony = Colony(
+        id="dish-existing", dish="dish", center_cell_id="dish-existing-000-000",
+        center_claim="Existing claim",
+    )
+    reserve_colony(path, colony)
+    with closing(database.connect(path)) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        database.put_cell(path, {
+            "id": colony.center_cell_id, "colony": colony.id, "level": 0, "seq": 0,
+            "claim_text": colony.center_claim, "created_at": "2026-11-01",
+        }, connection=connection)
+
+        def unexpected_connection(*args, **kwargs):
+            pytest.fail("The caller's transaction must supply the diagnostic count.")
+
+        monkeypatch.setattr(database, "connect", unexpected_connection)
+        with pytest.raises(ColonyExistsError, match="with 1 stored cell[.]"):
+            reserve_colony(path, colony, connection=connection)
+        assert connection.in_transaction
+        assert connection.execute("SELECT count(*) FROM cells").fetchone()[0] == 1
+        connection.rollback()
+        assert connection.execute("SELECT count(*) FROM cells").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM colonies").fetchone()[0] == 1
+
+
+def test_conflict_diagnostic_uses_read_only_connection(neighboring_colony, monkeypatch):
+    env = neighboring_colony
+    path = dish_db_path(env["petri_dir"])
+    before = snapshot(env["petri_dir"])
+
+    def unexpected_writer(*args, **kwargs):
+        pytest.fail("Formatting a refusal must not open or migrate a writer.")
+
+    monkeypatch.setattr(database, "connect", unexpected_writer)
+    assert existing_colony_message(path, env["colony_id"]) == (
+        f"Colony '{env['colony_id']}' already exists with 5 stored cells. "
+        f"Dish database: {path.resolve()}."
+    )
+    assert snapshot(env["petri_dir"]) == before
+
+
+def test_conflict_diagnostic_counts_committed_wal_rows(tmp_path, monkeypatch):
+    path = tmp_path / "petri.sqlite"
+    colony = Colony(
+        id="dish-wal", dish="dish", center_cell_id="dish-wal-000-000",
+        center_claim="Existing claim",
+    )
+    reserve_colony(path, colony)
+    with closing(database.connect(path)) as writer:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("BEGIN IMMEDIATE")
+        for colony_id, cell_id in [
+            (colony.id, "dish-wal-001-001"), ("dish-other", "dish-other-000-000"),
+        ]:
+            database.put_cell(path, {
+                "id": cell_id, "colony": colony_id, "level": 1, "seq": 1,
+                "claim_text": "A committed WAL premise", "created_at": "2026-11-01",
+            }, connection=writer)
+        writer.commit()
+        wal = path.with_name(path.name + "-wal")
+        assert b"dish-wal-001-001" in wal.read_bytes()
+        assert b"dish-wal-001-001" not in path.read_bytes()
+        before = (path.read_bytes(), wal.read_bytes())
+
+        def unexpected_writer(*args, **kwargs):
+            pytest.fail("Counting committed WAL rows must not run migrations.")
+
+        monkeypatch.setattr(database, "connect", unexpected_writer)
+        assert existing_colony_message(path, colony.id) == (
+            f"Colony '{colony.id}' already exists with 1 stored cell. "
+            f"Dish database: {path.resolve()}."
+        )
+        assert (path.read_bytes(), wal.read_bytes()) == before
 
 
 @pytest.mark.parametrize("surface", ["cli", "dashboard"])
