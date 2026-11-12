@@ -660,3 +660,391 @@ def test_embedded_escaped_credential_drops_ambiguous_tail_in_both_sinks(sinks):
     assert "[TRUNCATED: escaped credential tail]" in stored
     assert rows[0]["attributes"]["petri.telemetry.bounded_values"] >= 1
     assert "CANARY_second" in original and "trailing diagnostic" in original
+
+
+@pytest.fixture
+def elevated_sinks(tmp_path, monkeypatch, request):
+    """Exercise the real shared redactor and both owned exporters without networking."""
+    shutdown_telemetry()
+    monkeypatch.setattr(
+        importlib.import_module("petri.telemetry.instrument_agents"), "_active_provider", None
+    )
+    payloads = []
+
+    def create_exporter(**kwargs):
+        exporter = OTLPSpanExporter(**kwargs)
+
+        def receive(data):
+            payloads.append(ExportTraceServiceRequest.FromString(data))
+            return SimpleNamespace(success=True)
+
+        monkeypatch.setattr(exporter._client, "export", receive)
+        return exporter
+
+    cfg = TelemetryConfig(
+        capture_content=True, capture_limits=getattr(request, "param", {}),
+        otlp={"traces_endpoint": "http://collector.invalid/v1/traces"},
+    )
+    import socket
+
+    monkeypatch.setattr(socket.socket, "connect", lambda *a, **k: pytest.fail("Network is forbidden."))
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: pytest.fail("DNS is forbidden."))
+    monkeypatch.setattr(
+        "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter", create_exporter
+    )
+    provider = init_telemetry(
+        cfg, dish_id="fixture", petri_dir=tmp_path,
+        protected_secret_values=("CANARY_boundary", 'CANARY_"雪\\tail'),
+    )
+    memory = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+    instrument_agents(provider)
+    try:
+        yield provider, memory, payloads, tmp_path, cfg
+    finally:
+        Agent.instrument_all(False)
+        shutdown_telemetry()
+
+
+def _remote_spans(sinks):
+    return [span for batch in sinks[2] for resource in batch.resource_spans
+            for scope in resource.scope_spans for span in scope.spans]
+
+
+def _remote_attributes(span):
+    def decode(value):
+        kind = value.WhichOneof("value")
+        if kind == "array_value":
+            return [decode(item) for item in value.array_value.values]
+        if kind == "kvlist_value":
+            return {item.key: decode(item.value) for item in value.kvlist_value.values}
+        return getattr(value, kind)
+
+    return {item.key: decode(item.value) for item in span.attributes}
+
+
+@pytest.mark.asyncio
+async def test_elevated_function_model_preserves_complete_multiturn_capture(elevated_sinks):
+    from copy import deepcopy
+
+    from pydantic_ai.messages import ToolCallPart, UserPromptPart
+    from pydantic_ai.usage import RequestUsage
+
+    provider, memory, _, _, _ = elevated_sinks
+    # Cross the old cutoff and the retained 208296-byte sizing sample.
+    prompt = "CANARY_boundary " + "p" * 65_520 + " CANARY_boundary " + "q" * 150_000
+    public_prompt = prompt.replace("CANARY_boundary", "[REDACTED]")
+    received, snapshots, responses, response_copies, settings = [], [], [], [], []
+
+    def respond(messages, info):
+        received.append(messages)
+        snapshots.append(deepcopy(messages))
+        settings.append(deepcopy(info.model_settings))
+        if len(responses) == 0:
+            response = ModelResponse(
+                parts=[ToolCallPart("lookup", {"query": "Public CANARY_boundary"}, "call-1")],
+                provider_response_id="response-1", finish_reason="tool_call",
+                usage=RequestUsage(input_tokens=31, output_tokens=7, cache_read_tokens=3),
+            )
+        else:
+            response = ModelResponse(
+                parts=[TextPart("Public output CANARY_boundary")],
+                provider_response_id="response-2", finish_reason="stop",
+                usage=RequestUsage(input_tokens=41, output_tokens=9, cache_read_tokens=5),
+            )
+        responses.append(response)
+        response_copies.append(deepcopy(response))
+        return response
+
+    agent = Agent(FunctionModel(respond, model_name="capture-fixture"), name="complete_agent",
+                  model_settings={"temperature": 0.25, "max_tokens": 123})
+
+    @agent.tool_plain
+    def lookup(query: str) -> str:
+        assert query == "Public CANARY_boundary"
+        return "Public tool result CANARY_boundary"
+
+    with provider.get_tracer("test").start_as_current_span("workflow") as parent:
+        parent.set_attributes({"petri.workflow_id": "workflow-exact", "petri.tokens_input": 72,
+                               "petri.tokens_output": 16, "petri.cell_id": "cell-exact"})
+        result = await agent.run(prompt)
+    rows, local, remote = serialized(elevated_sinks)
+    assert len(prompt.encode()) > 208_296
+    assert result.output == "Public output CANARY_boundary"
+    assert received == snapshots
+    from dataclasses import replace
+
+    # FunctionModel/Agent annotate these four fields after the callback returns.
+    for response, snapshot in zip(responses, response_copies, strict=True):
+        assert replace(response, model_name=snapshot.model_name, model_id=snapshot.model_id,
+                       run_id=snapshot.run_id, conversation_id=snapshot.conversation_id) == snapshot
+    assert settings == [{"temperature": 0.25, "max_tokens": 123}] * 2
+    assert [part.content for msg in received[0] for part in msg.parts
+            if isinstance(part, UserPromptPart)] == [prompt]
+    assert "CANARY_" not in local + remote
+    remotes = {span.span_id.hex(): span for span in _remote_spans(elevated_sinks)}
+    spans = {f"{span.context.span_id:016x}": span for span in memory.get_finished_spans()}
+    assert set(remotes) == set(spans) == {row["span_id"] for row in rows}
+    model_rows = [row for row in rows if row["attributes"].get("gen_ai.response.id")]
+    assert {row["attributes"]["gen_ai.response.id"] for row in model_rows} == {"response-1", "response-2"}
+    for row in rows:
+        attrs = row["attributes"]
+        remote_span, original = remotes[row["span_id"]], spans[row["span_id"]]
+        assert remote_span.trace_id.hex() == row["trace_id"]
+        assert (remote_span.parent_span_id.hex() or None) == row["parent_span_id"]
+        assert remote_span.start_time_unix_nano == row["start_time_ns"] == original.start_time
+        assert remote_span.end_time_unix_nano == row["end_time_ns"] == original.end_time
+        assert row["name"] == remote_span.name
+        assert not any("bounded" in key or "dropped" in key for key in attrs)
+        remote_attrs = _remote_attributes(remote_span)
+        for key, value in attrs.items():
+            if key != "petri.telemetry.events":
+                assert remote_attrs[key] == value
+            if key in {"gen_ai.input.messages", "gen_ai.output.messages", "all_messages"}:
+                json.loads(value)
+        if "gen_ai.input.messages" in attrs:
+            inputs = json.loads(attrs["gen_ai.input.messages"])
+            assert public_prompt in json.dumps(inputs)
+    assert "Public tool result [REDACTED]" in local
+    assert {row["attributes"]["gen_ai.usage.input_tokens"] for row in model_rows} == {31, 41}
+    assert {row["attributes"]["gen_ai.usage.output_tokens"] for row in model_rows} == {7, 9}
+    assert {row["attributes"]["gen_ai.usage.cache_read.input_tokens"] for row in model_rows} == {3, 5}
+    usage = aggregate_usage(elevated_sinks[3] / "petri-dishes/fixture/petri.sqlite", group_by="phase")
+    assert sum(item["tokens_input"] or 0 for item in usage) == 72
+
+
+def test_elevated_redacts_canaries_across_boundaries_and_span_fields(elevated_sinks):
+    from opentelemetry.trace import Link, SpanContext, TraceFlags
+
+    provider = elevated_sinks[0]
+    raw = "CANARY_boundary " + "a" * 65_520 + " CANARY_boundary "
+    raw += "b" * (1_048_500 - len(raw)) + " CANARY_boundary end"
+    nested = json.dumps(json.dumps({"public": "keep", "password": 'CANARY_"雪\\tail'}))
+    tracer = provider.get_tracer("Public CANARY_boundary", "CANARY_boundary", attributes={
+        "public": "scope CANARY_boundary", "api_key": "CANARY_scope"})
+    link = Link(SpanContext(123, 456, False, TraceFlags(1)), {"public": "link CANARY_boundary"})
+    with tracer.start_as_current_span("Public CANARY_boundary", links=[link]) as span:
+        span.set_attributes({"long": raw, "nested": nested,
+                             "CANARY_boundary-key": "Public value",
+                             "url": "https://user:CANARY_user@example.org?api_key=CANARY_url&keep=42"})
+        span.add_event("Public CANARY_boundary", {"api_key": "CANARY_event", "keep": "yes"})
+        span.set_status(Status(StatusCode.ERROR, "Public CANARY_boundary"))
+    rows, local, remote = serialized(elevated_sinks)
+    assert "CANARY_" not in local + remote
+    attrs = rows[0]["attributes"]
+    assert attrs["long"] == raw.replace("CANARY_boundary", "[REDACTED]")
+    assert not any("bounded" in key or "dropped" in key for key in attrs)
+    assert json.loads(json.loads(attrs["nested"])) == {"public": "keep", "password": "[REDACTED]"}
+    assert "keep=42" in attrs["url"]
+    assert _remote_attributes(_remote_spans(elevated_sinks)[0])["long"] == attrs["long"]
+
+
+@pytest.mark.parametrize("elevated_sinks", [{"max_text_chars": 100}], indirect=True)
+def test_elevated_text_exact_boundary_and_structured_overflow(elevated_sinks):
+    provider = elevated_sinks[0]
+    with provider.get_tracer("test").start_as_current_span("boundary") as span:
+        span.set_attributes({"exact": "x" * 100, "over": "y" * 101,
+                             "structured": json.dumps({"text": "z" * 100})})
+    rows, local, remote = serialized(elevated_sinks)
+    attrs = rows[0]["attributes"]
+    assert attrs["exact"] == "x" * 100
+    assert attrs["over"] == "y" * 100 + "[TRUNCATED]"
+    assert json.loads(attrs["structured"]) == "[TRUNCATED: text limit]"
+    assert attrs["petri.telemetry.bounded_values"] == 2
+    assert "[TRUNCATED]" in local + remote
+
+
+def test_elevated_collection_and_depth_boundaries(elevated_sinks):
+    provider = elevated_sinks[0]
+    within = {"public": list(range(512))}
+    deep = "public"
+    for _ in range(40):
+        deep = [deep]
+    with provider.get_tracer("test").start_as_current_span("collections") as span:
+        span.set_attributes({"exact": json.dumps(within), "over": json.dumps(list(range(513))),
+                             "deep": json.dumps(deep)})
+    rows, _, _ = serialized(elevated_sinks)
+    for attrs in (rows[0]["attributes"], _remote_attributes(_remote_spans(elevated_sinks)[0])):
+        assert json.loads(attrs["exact"]) == within
+        assert json.loads(attrs["over"]) == list(range(512))
+        assert json.loads(attrs["deep"]) == deep
+        assert attrs["petri.telemetry.bounded_values"] == 1
+
+
+@pytest.mark.parametrize("policy,attributes", [
+    ({"max_nodes": 100}, {"wide": json.dumps(list(range(100)))}),
+    ({"max_input_bytes": 100}, {"one": "a" * 60, "two": "b" * 60}),
+    ({"max_span_bytes": 1000}, {"one": "a" * 600, "two": "b" * 600}),
+    ({}, {"one": "a" * 1_048_576, "two": "b" * 1_048_576,
+           "three": "c" * 1_048_576, "four": "d" * 1_048_576}),
+    ({}, {"deep": "[" * 65 + "0" + "]" * 65}),
+])
+def test_elevated_aggregate_overflow_drops_before_both_sinks(elevated_sinks, caplog, policy, attributes):
+    provider, memory, payloads, directory, cfg = elevated_sinks
+    # Each case owns a distinct provider, rather than mutating an active policy.
+    cfg = TelemetryConfig(**{**cfg.model_dump(), "capture_limits": policy})
+    provider = init_telemetry(cfg, dish_id="fixture", petri_dir=directory)
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+    with provider.get_tracer("test").start_as_current_span("over-budget") as span:
+        span.set_attributes(attributes)
+    assert provider.force_flush()
+    assert not memory.get_finished_spans() and payloads == []
+    assert query_spans(directory / "petri-dishes/fixture/petri.sqlite") == []
+    assert "span dropped during redaction (CaptureBudgetExceeded)" in caplog.text
+    assert "aaaa" not in caplog.text
+
+
+def test_elevated_budget_boundaries_and_json_preflight(monkeypatch):
+    from petri.telemetry.config import CaptureLimits
+    from petri.telemetry.redaction import CaptureBudgetExceeded, Redactor, _Budget
+
+    budget = _Budget(CaptureLimits(max_nodes=2, max_input_bytes=4, max_span_bytes=5))
+    budget.visit()
+    budget.visit()
+    with pytest.raises(CaptureBudgetExceeded, match="node"):
+        budget.visit()
+    budget.text("雪a")
+    assert budget.input_bytes == 4
+    with pytest.raises(CaptureBudgetExceeded, match="input"):
+        budget.text("b")
+    assert budget.serialize("abc") == '"abc"'
+    with pytest.raises(CaptureBudgetExceeded, match="serialized"):
+        budget.serialize("abcd")
+    redactor = Redactor(limits=CaptureLimits(max_nodes=10))
+    with patch("petri.telemetry.redaction.json.loads", side_effect=AssertionError("parsed")):
+        with pytest.raises(CaptureBudgetExceeded, match="decoded node"):
+            redactor.clean("[" + "0," * 100_000 + "0]", {"bounded": 0, "redacted": 0,
+                           "_budget": _Budget(redactor.limits)})
+    for depth, bounded in ((64, 0), (65, 1)):
+        counts = {"bounded": 0, "redacted": 0, "_budget": _Budget(CaptureLimits())}
+        Redactor(limits=CaptureLimits()).clean("public", counts, depth=depth)
+        assert counts["bounded"] == bounded
+
+
+def test_elevated_sdk_count_and_length_safeguards(elevated_sinks, monkeypatch):
+    provider = elevated_sinks[0]
+    with provider.get_tracer("test").start_as_current_span("sdk-counts") as span:
+        for index in range(140):
+            span.set_attribute(f"attr-{index}", index)
+            span.add_event("event", {"index": index})
+    rows, _, _ = serialized(elevated_sinks)
+    attrs = rows[0]["attributes"]
+    assert attrs["petri.telemetry.dropped_attributes"] == 12
+    assert attrs["petri.telemetry.dropped_events"] == 12
+    monkeypatch.setenv("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT", "20")
+    cfg = elevated_sinks[4]
+    other = init_telemetry(cfg, dish_id="length", petri_dir=elevated_sinks[3])
+    with other.get_tracer("test").start_as_current_span("sdk-length") as span:
+        span.set_attribute("value", "x" * 15 + "CANARY_boundary")
+    assert other.force_flush()
+    rows = query_spans(elevated_sinks[3] / "petri-dishes/length/petri.sqlite")
+    assert rows[0]["attributes"]["value"] == "[TRUNCATED: SDK length limit]"
+    remote = next(span for span in _remote_spans(elevated_sinks) if span.name == "sdk-length")
+    assert _remote_attributes(remote)["value"] == "[TRUNCATED: SDK length limit]"
+
+
+@pytest.mark.parametrize("field,exact", [("max_nodes", 6), ("max_input_bytes", 3), ("max_span_bytes", None)])
+def test_elevated_whole_span_aggregate_exact_and_one_over(elevated_sinks, field, exact, caplog):
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import ReadableSpan
+    from opentelemetry.trace import SpanContext, TraceFlags
+
+    from petri.telemetry.redaction import Redactor
+
+    raw = ReadableSpan(
+        name="n", context=SpanContext(123, 456, False, TraceFlags(1)),
+        resource=Resource({}), attributes={"a": "x"}, start_time=1, end_time=2,
+    )
+    # Six content visits: attributes, key, value, resource, schema URL and name.
+    # The key, value and name each contribute one input byte.
+    if exact is None:
+        exact = len(json.dumps(Redactor._payload(raw)).encode())
+    memory, payloads, directory = elevated_sinks[1:4]
+    for limit in (exact, exact - 1):
+        cfg = TelemetryConfig(capture_content=True, capture_limits={field: limit},
+                              otlp=elevated_sinks[4].otlp)
+        provider = init_telemetry(cfg, dish_id=f"{field}-{limit}", petri_dir=directory)
+        provider.add_span_processor(SimpleSpanProcessor(memory))
+        provider._active_span_processor.on_end(raw)
+        assert provider.force_flush()
+        rows = query_spans(directory / f"petri-dishes/{field}-{limit}/petri.sqlite")
+        assert len(rows) == (1 if limit == exact else 0)
+    assert len(memory.get_finished_spans()) == 1
+    assert len(_remote_spans(elevated_sinks)) == 1
+    assert payloads and "CaptureBudgetExceeded" in caplog.text
+
+
+def test_elevated_encoded_depth_boundary_is_visible_in_both_sinks(elevated_sinks):
+    values = []
+    for levels in (62, 63):
+        value = "Public"
+        for _ in range(levels):
+            value = [value]
+        values.append(value)
+    with elevated_sinks[0].get_tracer("test").start_as_current_span("depth-boundary") as span:
+        span.set_attributes({"exact": json.dumps(values[0]), "over": json.dumps(values[1])})
+    rows, _, _ = serialized(elevated_sinks)
+    for attrs in (rows[0]["attributes"], _remote_attributes(_remote_spans(elevated_sinks)[0])):
+        assert json.loads(attrs["exact"]) == values[0]
+        over = json.loads(attrs["over"])
+        for _ in range(63):
+            over = over[0]
+        assert over == "[TRUNCATED: nesting limit]"
+        assert attrs["petri.telemetry.bounded_values"] == 1
+
+
+def test_elevated_resource_and_scope_canaries_never_reach_either_sink(elevated_sinks):
+    cfg = elevated_sinks[4].model_copy(update={"service_name": "Public CANARY_boundary"})
+    provider = init_telemetry(cfg, dish_id="resource", petri_dir=elevated_sinks[3],
+                              protected_secret_values=("CANARY_boundary",))
+    tracer = provider.get_tracer("Public CANARY_boundary", "CANARY_boundary",
+                                 schema_url="https://example.org/CANARY_boundary",
+                                 attributes={"api_key": "CANARY_scope", "public": "Public CANARY_boundary"})
+    with tracer.start_as_current_span("resource-canaries"):
+        pass
+    assert provider.force_flush()
+    rows = query_spans(elevated_sinks[3] / "petri-dishes/resource/petri.sqlite")
+    assert rows[0]["resource"]["service.name"] == "Public [REDACTED]"
+    assert "CANARY_" not in json.dumps(rows) + str(elevated_sinks[2])
+    assert _remote_spans(elevated_sinks)[0].name == "resource-canaries"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", ["wide", "deep"])
+async def test_elevated_function_model_structures_exceed_legacy_bounds(elevated_sinks, shape):
+    from copy import deepcopy
+
+    value = list(range(200)) if shape == "wide" else "Public CANARY_boundary"
+    if shape == "deep":
+        for _ in range(40):
+            value = [value]
+    prompt = json.dumps(value)
+    expected = prompt.replace("CANARY_boundary", "[REDACTED]")
+    received, snapshots = [], []
+
+    def respond(messages, info):
+        received.append(messages)
+        snapshots.append(deepcopy(messages))
+        return ModelResponse(parts=[TextPart(prompt)], provider_response_id=f"response-{shape}")
+
+    result = await Agent(FunctionModel(respond), name=f"structured_{shape}").run(prompt)
+    rows, _, _ = serialized(elevated_sinks)
+    assert received == snapshots and result.output == prompt
+    remote = {span.span_id.hex(): _remote_attributes(span) for span in _remote_spans(elevated_sinks)}
+    found_input = found_output = False
+    for row in rows:
+        attrs = row["attributes"]
+        assert not any("bounded" in key or "dropped" in key for key in attrs)
+        for key in ("gen_ai.input.messages", "gen_ai.output.messages"):
+            if key not in attrs:
+                continue
+            assert attrs[key] == remote[row["span_id"]][key]
+            messages = json.loads(attrs[key])
+            texts = [part["content"] for message in messages for part in message["parts"]
+                     if part.get("type") == "text"]
+            assert expected in texts
+            for text in texts:
+                assert json.loads(text) == json.loads(expected)
+            found_input |= key == "gen_ai.input.messages"
+            found_output |= key == "gen_ai.output.messages"
+    assert found_input and found_output

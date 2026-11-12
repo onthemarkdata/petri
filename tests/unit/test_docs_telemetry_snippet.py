@@ -31,3 +31,14 @@ def test_attribute_table_matches_architecture():
 def test_docs_link_and_architecture_tree():
     assert '(docs/observability.md)' in (ROOT / 'README.md').read_text()
     assert '├── telemetry/' in (ROOT / 'CLAUDE.md').read_text()
+
+
+def test_capture_policy_example_matches_validated_ceilings():
+    from petri.telemetry.config import CaptureLimits
+
+    text = (ROOT / "docs/observability.md").read_text()
+    snippet = re.search(r"<!-- telemetry-capture-limits-reference -->\s*```yaml\n(.*?)```", text, re.S)[1]
+    raw = yaml.safe_load(snippet)["telemetry"]
+    actual = TelemetryConfig.model_validate(raw)
+    assert actual.capture_content is True
+    assert raw["capture_limits"] == actual.capture_limits.model_dump() == CaptureLimits().model_dump()

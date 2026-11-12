@@ -40,6 +40,7 @@ Set `telemetry` in `.petri/defaults/petri.yaml`. This complete reference matches
 telemetry:
   enabled: true
   capture_content: false
+  capture_limits: null
   redact_env_vars: []
   otlp:
     traces_endpoint: null
@@ -163,7 +164,7 @@ research inputs, source/verdict validation, and append-only events unchanged.
 
 ### Bounds and delivery limits
 
-After redaction, each string retains at most 65,536 characters plus a
+With `capture_limits: null` (the default), each string retains at most 65,536 characters plus a
 `[TRUNCATED]` marker. Nested collections retain at most 128 entries per collection
 and 32 levels of nesting. `petri.telemetry.bounded_values` reports values or
 entries affected by these limits. Text cut inside a JSON attribute is no longer
@@ -173,6 +174,66 @@ escaped text, an internal quote can make the value's boundary ambiguous. The
 redactor conservatively omits the remaining tail, including any following public
 text, and adds `[TRUNCATED: escaped credential tail]` with a bounded-value count.
 This does not affect the inference input.
+
+For a finite, larger diagnostic envelope, explicitly enable content capture and
+select a policy. An empty `capture_limits: {}` selects all ceilings below; each
+field can be reduced to a strict positive integer. Booleans, strings, zero,
+negative values, unknown fields and values above these ceilings are rejected.
+A policy without `capture_content: true` is rejected before provider setup.
+
+<!-- telemetry-capture-limits-reference -->
+```yaml
+telemetry:
+  capture_content: true
+  capture_limits:
+    max_text_chars: 1048576
+    max_collection_items: 512
+    max_depth: 64
+    max_nodes: 16384
+    max_input_bytes: 8388608
+    max_span_bytes: 4194304
+```
+
+| Field | Unit and scope |
+|---|---|
+| `max_text_chars` | Unicode characters per sanitized string, including serialized JSON framing; a plain-text truncation marker is additional |
+| `max_collection_items` | Retained entries per collection |
+| `max_depth` | Redactor recursion depth, starting at zero; decoded JSON adds a level |
+| `max_nodes` | Visited containers, scalars and keys per span; decoded layers count again |
+| `max_input_bytes` | Cumulative UTF-8 bytes inspected as strings or keys per span; decoded layers count again |
+| `max_span_bytes` | UTF-8 bytes of the sanitized span envelope serialized as ASCII-escaped JSON, including identities, resource/scope, events, links, markers and framing |
+
+All six limits apply together. The serialized envelope is a conservative JSON
+accounting representation, not a sink schema, OTLP wire-size limit or RSS bound.
+The processor checks the input budget before decoding JSON and rejects broad or
+deep JSON before allocating its decoded tree. Aggregate overflow drops the whole
+span before either owned sink and uses the existing type-only redaction warning
+(`CaptureBudgetExceeded`). The warning is emitted once per processor, so it is
+not an exact drop count. Missing spans still fail strict completeness checks.
+Collection and recursion omissions retain `petri.telemetry.bounded_values`.
+A structured value exceeding the text limit becomes a parseable JSON string
+`"[TRUNCATED: text limit]"`; plain text retains the existing prefix and marker.
+Neither form is a complete capture. Redaction happens before truncation; the
+processor never exports an unsanitized prefix to avoid work.
+
+A policy belongs to one provider. Changed policies select distinct providers;
+identical dish/path/configuration reuses its provider and can extend runtime
+secret protection. No policy changes inference inputs, model settings or usage.
+These ceilings define a testable capture envelope, not completeness for every
+model context. Capture truncation does not establish inference-input truncation.
+Earlier failed captures remain failed; exact content and identity comparisons
+are still required for new captures.
+
+Providers with a policy use queues of 16 spans and batches of at most 4 at each
+owned sink; providers without a policy keep their existing batching defaults.
+The larger 4 MiB serialized-span envelope motivates this bounded queue size.
+For two sinks, `2 × (16 + 4) × 4 MiB = 160 MiB` estimates serialized queued/batch
+volume. It excludes Python objects, original histories, decoding/redaction
+copies, protobuf/compression buffers and exporter/runtime overhead. It is not a
+process-memory ceiling. Measure synthetic peak RSS and allocations with the
+intended envelope and sink concurrency, then reserve host headroom before live
+use. Smaller queues can drop bursts; they add no delivery guarantee. Existing
+SDK limits and drop safeguards remain in force independently of this policy.
 
 The existing OpenTelemetry SDK limits also apply (normally 128 span attributes,
 128 events, 128 links, and 128 attributes per event or link). SDK count drops are

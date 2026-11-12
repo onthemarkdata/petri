@@ -227,6 +227,8 @@ limits:
 # telemetry:
 #   enabled: true
 #   capture_content: false
+#   capture_limits: null  # Keeps the existing 65536-character/128-item/32-depth limits.
+# Opt-in finite capture policies require capture_content: true; see docs/observability.md.
 #   redact_env_vars: []
 #   service_name: petri
 #   sample_ratio: 1.0

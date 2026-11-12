@@ -9,7 +9,7 @@ import threading
 import warnings
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol, TypedDict, cast
 
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import SpanLimits
@@ -24,6 +24,13 @@ _lock = threading.RLock()
 _providers: dict[str, TracerProvider] = {}
 _active: TracerProvider = NoOpTracerProvider()
 _configurations: dict[str, TelemetryConfig] = {}
+
+
+class _BatchOptions(TypedDict, total=False):
+    """Optional batch keywords for the elevated capture envelope."""
+
+    max_queue_size: int
+    max_export_batch_size: int
 
 
 class _CaptureMetadata(Protocol):
@@ -53,7 +60,7 @@ def init_telemetry(
     cfg = TelemetryConfig.model_validate(config)
     protected = [*protected_secret_values, *cfg.otlp.headers.values()]
     protected.extend(os.environ[name] for name in cfg.redact_env_vars if os.environ.get(name))
-    redactor = Redactor(protected)
+    redactor = Redactor(protected, limits=cfg.capture_limits)
     # Export credentials never enter cache keys, even as hashes. Compare configs in memory.
     public_config = cfg.model_dump(mode="json", exclude={"otlp"})
     fingerprint = hashlib.sha256(
@@ -74,6 +81,11 @@ def init_telemetry(
         provider: TracerProvider = NoOpTracerProvider()
         try:
             if cfg.enabled:
+                # The larger span envelope needs bounded queues at both owned sinks.
+                batch_options: _BatchOptions = (
+                    {"max_queue_size": 16, "max_export_batch_size": 4}
+                    if cfg.capture_limits is not None else {}
+                )
                 limits = SpanLimits()
                 sdk = SDKTracerProvider(
                     span_limits=limits,
@@ -93,7 +105,7 @@ def init_telemetry(
                     from petri.telemetry.span_store import SQLiteSpanExporter
 
                     db_path = petri_dir / "petri-dishes" / dish_id / "petri.sqlite"
-                    sdk.add_span_processor(BatchSpanProcessor(SQLiteSpanExporter(db_path)))
+                    sdk.add_span_processor(BatchSpanProcessor(SQLiteSpanExporter(db_path), **batch_options))
                 if cfg.otlp.traces_endpoint:
                     from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
                         OTLPSpanExporter,
@@ -104,7 +116,7 @@ def init_telemetry(
                         endpoint=cfg.otlp.traces_endpoint,
                         headers=cfg.otlp.headers,
                     )
-                    sdk.add_span_processor(BatchSpanProcessor(exporter))
+                    sdk.add_span_processor(BatchSpanProcessor(exporter, **batch_options))
                 cast(_CaptureMetadata, sdk)._petri_capture_content = cfg.capture_content
                 provider = sdk
         except Exception as error:  # noqa: BLE001 — telemetry setup must not stop research
