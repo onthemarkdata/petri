@@ -200,15 +200,19 @@ def search_cells(context: RunContext[DecompositionInput], query: str, top_k: int
 def validate_references(context: RunContext[DecompositionInput], candidates) -> None:
     if candidates and has_earlier_cells(context.deps) and not context.deps.search_performed:
         raise ModelRetry("Call search_cells before proposing premises, including paraphrases. Search for each specific premise.")
-    for candidate in candidates:
+    duplicates = []
+    for index, candidate in enumerate(candidates, start=1):
         if isinstance(candidate, PremiseCandidate):
             if context.deps.db_path is not None:
                 matches = search(context.deps.db_path, candidate.claim_text, exclude_colony=context.deps.colony_id)
                 words = re.findall(r"\w+", candidate.claim_text.casefold())
-                if any(re.findall(r"\w+", match.claim_text.casefold()) == words for match in matches):
-                    raise ModelRetry(
-                        "This premise already exists in an earlier colony. Call search_cells for "
-                        f"{candidate.claim_text!r} and return a ReferencePremise instead of duplicating it."
+                matching_ids = sorted({
+                    match.id for match in matches
+                    if re.findall(r"\w+", match.claim_text.casefold()) == words
+                })
+                if matching_ids:
+                    duplicates.append(
+                        f"Candidate {index}: claim_text={candidate.claim_text!r}; matching existing_cell_ids={matching_ids!r}."
                     )
             continue
         row = (database.get_cell(context.deps.db_path, candidate.existing_cell_id)
@@ -216,6 +220,17 @@ def validate_references(context: RunContext[DecompositionInput], candidates) -> 
         if (row is None or row["colony"] == context.deps.colony_id
                 or candidate.existing_cell_id not in context.deps.search_results):
             raise ModelRetry("Reference an existing cell returned by search_cells from an earlier colony.")
+    if duplicates:
+        raise ModelRetry(
+            "The following selected premises already exist in earlier colonies. "
+            "Retain every relevant selected premise by converting each matching premise to a ReferencePremise; "
+            "correct the whole list rather than only the first duplicate and discarding the others. "
+            "Do not retain irrelevant or redundant premises merely to meet a count. "
+            "Each ReferencePremise has only existing_cell_id and reason; do not add claim_text or relation. "
+            "Call search_cells for each listed claim before referencing an ID that the tool has not returned. "
+            "IDs in this feedback do not replace search results.\n"
+            + "\n".join(duplicates)
+        )
 
 
 @initial_decomposer.output_validator
