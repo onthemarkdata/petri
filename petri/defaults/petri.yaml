@@ -226,6 +226,8 @@ limits:
 # Local tracing is enabled by default. External export requires an endpoint.
 # telemetry:
 #   enabled: true
+#   capture_content: false
+#   redact_env_vars: []
 #   service_name: petri
 #   sample_ratio: 1.0
 #   local:

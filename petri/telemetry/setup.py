@@ -4,21 +4,32 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import warnings
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Protocol, cast
 
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import SpanLimits
 from opentelemetry.sdk.trace import TracerProvider as SDKTracerProvider
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import NoOpTracerProvider, Tracer, TracerProvider
 
 from petri.telemetry.config import TelemetryConfig
+from petri.telemetry.redaction import RedactingSpanProcessor, Redactor
 
 _lock = threading.RLock()
 _providers: dict[str, TracerProvider] = {}
 _active: TracerProvider = NoOpTracerProvider()
+_configurations: dict[str, TelemetryConfig] = {}
+
+
+class _CaptureMetadata(Protocol):
+    """Capture setting attached to Petri-owned SDK providers."""
+
+    _petri_capture_content: bool
 
 
 def _version() -> str:
@@ -29,7 +40,8 @@ def _version() -> str:
 
 
 def init_telemetry(
-    config: TelemetryConfig | dict, *, dish_id: str = "petri", petri_dir: Path | None = None
+    config: TelemetryConfig | dict, *, dish_id: str = "petri", petri_dir: Path | None = None,
+    protected_secret_values: tuple[str, ...] = (),
 ) -> TracerProvider:
     """Reuse one provider per configuration and dish; setup failures never stop research.
 
@@ -39,17 +51,33 @@ def init_telemetry(
     """
     global _active
     cfg = TelemetryConfig.model_validate(config)
+    protected = [*protected_secret_values, *cfg.otlp.headers.values()]
+    protected.extend(os.environ[name] for name in cfg.redact_env_vars if os.environ.get(name))
+    redactor = Redactor(protected)
+    # Export credentials never enter cache keys, even as hashes. Compare configs in memory.
+    public_config = cfg.model_dump(mode="json", exclude={"otlp"})
     fingerprint = hashlib.sha256(
-        json.dumps([cfg.model_dump(mode="json"), dish_id, str(petri_dir.resolve()) if petri_dir is not None else None], sort_keys=True).encode()
+        json.dumps([public_config, dish_id, str(petri_dir.resolve()) if petri_dir is not None else None], sort_keys=True).encode()
     ).hexdigest()
     with _lock:
-        if fingerprint in _providers:
-            _active = _providers[fingerprint]
-            return _active
+        key = fingerprint
+        index = 0
+        while key in _providers:
+            if _configurations[key] == cfg:
+                _active = _providers[key]
+                processor = getattr(_active, "_active_span_processor", None)
+                if isinstance(processor, RedactingSpanProcessor):
+                    processor.redactor.protect(protected)
+                return _active
+            index += 1
+            key = f"{fingerprint}:{index}"
         provider: TracerProvider = NoOpTracerProvider()
         try:
             if cfg.enabled:
+                limits = SpanLimits()
                 sdk = SDKTracerProvider(
+                    span_limits=limits,
+                    active_span_processor=RedactingSpanProcessor(redactor, limits),
                     resource=Resource.create(
                         {
                             "service.name": cfg.service_name,
@@ -77,6 +105,7 @@ def init_telemetry(
                         headers=cfg.otlp.headers,
                     )
                     sdk.add_span_processor(BatchSpanProcessor(exporter))
+                cast(_CaptureMetadata, sdk)._petri_capture_content = cfg.capture_content
                 provider = sdk
         except Exception as error:  # noqa: BLE001 — telemetry setup must not stop research
             warnings.warn(
@@ -84,7 +113,8 @@ def init_telemetry(
                 RuntimeWarning,
                 stacklevel=2,
             )
-        _providers[fingerprint] = provider
+        _providers[key] = provider
+        _configurations[key] = cfg.model_copy(deep=True)
         _active = provider
         return provider
 
@@ -107,4 +137,5 @@ def shutdown_telemetry() -> None:
             if isinstance(provider, SDKTracerProvider):
                 provider.shutdown()
         _providers.clear()
+        _configurations.clear()
         _active = NoOpTracerProvider()

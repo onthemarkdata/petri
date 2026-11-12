@@ -32,6 +32,8 @@ class TelemetryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
+    capture_content: Annotated[bool, Field(strict=True)] = False
+    redact_env_vars: list[Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]] = Field(default_factory=list)
     otlp: OtlpConfig = Field(default_factory=OtlpConfig)
     local: LocalTelemetryConfig = Field(default_factory=LocalTelemetryConfig)
     sample_ratio: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)] = 1.0

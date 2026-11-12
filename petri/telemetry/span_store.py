@@ -12,8 +12,6 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from typing_extensions import TypedDict
-
 from opentelemetry.context import (
     _SUPPRESS_INSTRUMENTATION_KEY,
     attach,
@@ -22,6 +20,7 @@ from opentelemetry.context import (
 )
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from typing_extensions import TypedDict
 
 from petri.query.connection import enumerate_dishes, has_table, read_connection
 from petri.storage.database import migrate
@@ -86,6 +85,12 @@ class SQLiteSpanExporter(SpanExporter):
                         if context is None:
                             continue
                         attributes = dict(span.attributes or {})
+                        if span.events:
+                            attributes["petri.telemetry.events"] = [
+                                {"name": event.name, "timestamp": event.timestamp,
+                                 "attributes": dict(event.attributes or {})}
+                                for event in span.events
+                            ]
                         span_id = f'{context.span_id:016x}'
                         trace_id = f'{context.trace_id:032x}'
                         connection.execute(
