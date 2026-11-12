@@ -9,10 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from petri.storage.dish import resolve_dish_id
-
 from petri.cli_ui import print_error_and_exit
 from petri.config import load_dish_config
+from petri.storage.dish import resolve_dish_id
 
 get_dish_id = resolve_dish_id
 
@@ -20,6 +19,7 @@ get_dish_id = resolve_dish_id
 def resolve_provider(petri_dir: Path):
     """Resolve the typed inference bridge from this dish's validated settings."""
     from click import get_current_context
+
     from petri.harness.legacy_bridge import HarnessInferenceProvider
     from petri.harness.resolve import resolve_model
 
@@ -39,11 +39,12 @@ def bootstrap_telemetry(petri_dir: Path, *, config=None):
     from petri.telemetry.instrument_agents import instrument_agents
 
     dish = config if config is not None else load_dish_config(petri_dir)
+    telemetry = get_telemetry_config(petri_dir)
     provider = init_telemetry(
-        get_telemetry_config(petri_dir), dish_id=dish.name,
+        telemetry, dish_id=dish.name,
         petri_dir=petri_dir,
     )
-    instrument_agents(provider)
+    instrument_agents(provider, capture_content=telemetry.capture_content and telemetry.enabled)
     return provider
 
 

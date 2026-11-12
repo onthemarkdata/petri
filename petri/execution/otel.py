@@ -18,7 +18,7 @@ class DBOSTelemetry:
         self.config = get_telemetry_config(petri_dir)
         self.dish_id = resolve_dish_id(petri_dir)
         self.provider = init_telemetry(self.config, dish_id=self.dish_id, petri_dir=petri_dir)
-        instrument_agents(self.provider)
+        instrument_agents(self.provider, capture_content=self.config.capture_content and self.config.enabled)
         self._native: Any = None
         self._original: Any = None
 

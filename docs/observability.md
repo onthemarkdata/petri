@@ -39,6 +39,9 @@ Set `telemetry` in `.petri/defaults/petri.yaml`. This complete reference matches
 ```yaml
 telemetry:
   enabled: true
+  capture_content: false
+  capture_limits: null
+  redact_env_vars: []
   otlp:
     traces_endpoint: null
     logs_endpoint: null
@@ -76,6 +79,182 @@ For example, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` selects
 `http://127.0.0.1:4318/v1/traces`. Signal-specific OpenTelemetry endpoint variables
 are not Petri configuration overrides. Neither environment variable overrides
 `telemetry.enabled: false`.
+
+## Opt-in diagnostic content
+
+`telemetry.capture_content: true` enables content and model-request parameter
+capture in the existing Pydantic AI instrumentation. The default is `false`.
+CLI and DBOS initialization use the current dish's validated setting; changing
+the dish or configuration selects the corresponding provider and instrumentation.
+`telemetry.enabled: false` still disables all tracing.
+
+With capture enabled, native agent, model-request, and `execute_tool` spans can
+retain prompts, instructions, returned model text, tool arguments and results,
+and the model settings exposed by the pinned instrumentation. Model-request
+usage uses `gen_ai.usage.*`; cumulative agent usage uses
+`gen_ai.aggregated_usage.*`. Sum request measurements, not both sets. These native
+attributes do not create extra Petri usage rows. With capture off, message shapes
+and tool identities may remain, but private text is excluded by the instrumentation.
+Binary content remains excluded.
+
+Registered `web_search` and `web_fetch` tools already emit native tool spans.
+Their results are captured when the tools finish, independently of a later model
+request. Offline tests retain the local tool result after cancellation before it
+is sent to either inference transport. They also verify workflow → DBOS step →
+agent → tool ancestry, invalid arguments, HTTP failures, and inference retries
+without duplicate tool execution. Invalid arguments produce an error tool span
+without executing retrieval. Public-web HTTP failures return an error object, so
+the native tool span remains `UNSET`; the existing client exposes the exception
+class rather than the numeric HTTP status. The pinned native instrumentation also
+leaves a cancelled model span `UNSET`, without final output or usage. Neither
+status should be interpreted as proof of completion.
+
+Capture describes what this path received, within its bounds. It cannot recover
+hidden reasoning, omitted provider output, or Pi subprocess tool internals. Pi
+host function tools are visible; its internal tool activity is not a separate
+Petri tool-span tree. Pi rejects unsupported per-request model settings. Internal
+provider retry attempts may share a model-request span; their intermediate errors
+are not necessarily emitted. This is diagnostic span data, not a full transcript.
+
+### Redaction before export
+
+One processor sanitizes completed spans before either the SQLite or OTLP batch
+processor receives them. It applies the same policy to attributes (including
+nested and JSON-encoded values, including repeatedly encoded string scalars),
+span names, exception and status text, events,
+resource attributes, instrumentation scope, and link attributes. SQLite retains
+sanitized events, with their timestamps, in `petri.telemetry.events` inside the
+existing attributes column. OTLP retains native events. No domain-event rows are
+rewritten.
+
+The policy replaces recognized credential values with `[REDACTED]`: authorization
+and proxy authorization, API keys, passwords, tokens, secrets, private keys,
+credentials, cookies, HTTP URL user information, and Bearer/Basic authentication
+material. It also handles these credential assignments in ordinary text and URL
+query strings. Public evidence text, source URLs without credentials, IDs,
+timestamps, usage, provider `gen_ai.response.id`, and tool-call correlation remain
+available unless a capture
+bound applies.
+
+Export-header values are protected automatically. For secrets that may appear
+without a recognizable field name, list only the environment variable **names**
+to protect:
+
+```yaml
+telemetry:
+  capture_content: true
+  redact_env_vars:
+    - MY_PROVIDER_API_KEY
+```
+
+Supply the values through your protected runtime environment, never public YAML.
+Only those named variables are read; Petri does not collect the environment.
+Embedding callers can pass `protected_secret_values` to `init_telemetry` instead.
+Protected values and their URL-encoded/decoded forms are scrubbed. Provider reuse
+adds newly supplied values to its redactor, retaining protection for older values
+until shutdown. Secret values are not included in provider cache fingerprints or
+redaction warnings. This policy cannot detect arbitrary unknown secrets or every
+encoding. Capture remains an explicit choice for material authorized for tracing.
+
+Span redaction does **not** scrub every artifact. Existing bounded `FailureDetail`
+and `model_failure_detail` values, domain events (including retrieved evidence),
+CLI output, and other logs have no general redactor in this change. They require
+separate review before handling secret-bearing research. This change leaves
+research inputs, source/verdict validation, and append-only events unchanged.
+
+### Bounds and delivery limits
+
+With `capture_limits: null` (the default), each string retains at most 65,536 characters plus a
+`[TRUNCATED]` marker. Nested collections retain at most 128 entries per collection
+and 32 levels of nesting. `petri.telemetry.bounded_values` reports values or
+entries affected by these limits. Text cut inside a JSON attribute is no longer
+valid JSON; the marker and count identify that omission. `petri.telemetry.redacted`
+marks spans whose values were scrubbed. For credential assignments embedded in
+escaped text, an internal quote can make the value's boundary ambiguous. The
+redactor conservatively omits the remaining tail, including any following public
+text, and adds `[TRUNCATED: escaped credential tail]` with a bounded-value count.
+This does not affect the inference input.
+
+For a finite, larger diagnostic envelope, explicitly enable content capture and
+select a policy. An empty `capture_limits: {}` selects all ceilings below; each
+field can be reduced to a strict positive integer. Booleans, strings, zero,
+negative values, unknown fields and values above these ceilings are rejected.
+A policy without `capture_content: true` is rejected before provider setup.
+
+<!-- telemetry-capture-limits-reference -->
+```yaml
+telemetry:
+  capture_content: true
+  capture_limits:
+    max_text_chars: 1048576
+    max_collection_items: 512
+    max_depth: 64
+    max_nodes: 16384
+    max_input_bytes: 8388608
+    max_span_bytes: 4194304
+```
+
+| Field | Unit and scope |
+|---|---|
+| `max_text_chars` | Unicode characters per sanitized string, including serialized JSON framing; a plain-text truncation marker is additional |
+| `max_collection_items` | Retained entries per collection |
+| `max_depth` | Redactor recursion depth, starting at zero; decoded JSON adds a level |
+| `max_nodes` | Visited containers, scalars and keys per span; decoded layers count again |
+| `max_input_bytes` | Cumulative UTF-8 bytes inspected as strings or keys per span; decoded layers count again |
+| `max_span_bytes` | UTF-8 bytes of the sanitized span envelope serialized as ASCII-escaped JSON, including identities, resource/scope, events, links, markers and framing |
+
+All six limits apply together. The serialized envelope is a conservative JSON
+accounting representation, not a sink schema, OTLP wire-size limit or RSS bound.
+The processor checks the input budget before decoding JSON and rejects broad or
+deep JSON before allocating its decoded tree. Aggregate overflow drops the whole
+span before either owned sink and uses the existing type-only redaction warning
+(`CaptureBudgetExceeded`). The warning is emitted once per processor, so it is
+not an exact drop count. Missing spans still fail strict completeness checks.
+Collection and recursion omissions retain `petri.telemetry.bounded_values`.
+A structured value exceeding the text limit becomes a parseable JSON string
+`"[TRUNCATED: text limit]"`; plain text retains the existing prefix and marker.
+Neither form is a complete capture. Redaction happens before truncation; the
+processor never exports an unsanitized prefix to avoid work.
+
+A policy belongs to one provider. Changed policies select distinct providers;
+identical dish/path/configuration reuses its provider and can extend runtime
+secret protection. No policy changes inference inputs, model settings or usage.
+These ceilings define a testable capture envelope, not completeness for every
+model context. Capture truncation does not establish inference-input truncation.
+Earlier failed captures remain failed; exact content and identity comparisons
+are still required for new captures.
+
+Providers with a policy use queues of 16 spans and batches of at most 4 at each
+owned sink; providers without a policy keep their existing batching defaults.
+The larger 4 MiB serialized-span envelope motivates this bounded queue size.
+For two sinks, `2 × (16 + 4) × 4 MiB = 160 MiB` estimates serialized queued/batch
+volume. It excludes Python objects, original histories, decoding/redaction
+copies, protobuf/compression buffers and exporter/runtime overhead. It is not a
+process-memory ceiling. Measure synthetic peak RSS and allocations with the
+intended envelope and sink concurrency, then reserve host headroom before live
+use. Smaller queues can drop bursts; they add no delivery guarantee. Existing
+SDK limits and drop safeguards remain in force independently of this policy.
+
+The existing OpenTelemetry SDK limits also apply (normally 128 span attributes,
+128 events, 128 links, and 128 attributes per event or link). SDK count drops are
+exposed through `petri.telemetry.dropped_attributes`, `dropped_events`,
+`dropped_links`, per-event dropped-attribute counters, and
+`dropped_link_attributes`, using the same prefix. If an explicit SDK attribute
+length limit is configured, a retained value at that limit is conservatively
+replaced by `[TRUNCATED: SDK length limit]` and counted as bounded: the processor
+cannot tell whether the SDK cut a secret in half. Existing retrieval bounds
+remain: public-web fetches keep at most 256 KiB of response bytes and 12,000
+characters of extracted text, with the tool result's `truncated` flag. Earlier
+provider or harness omissions cannot be reconstructed from spans.
+
+Both exporters use in-memory batching. SQLite waits at most 100 ms for a lock,
+drops a failed batch, and warns once per exporter. OTLP export is best effort;
+there is no durable spool or outage-replay guarantee. Forced termination can lose
+buffered spans, and sampling can omit entire traces. A redaction failure drops
+the affected span and warns with only the exception type. A successful flush or
+HTTP response does not prove backend storage; query the configured backend to
+verify stored span IDs and payloads. This change does not establish request
+propagation or a link between Petri workflow traces and gateway traces.
 
 ## Optional external backend: Jaeger
 
