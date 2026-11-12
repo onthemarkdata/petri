@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -39,6 +40,7 @@ from scripts.e2e.lifecycle_checks import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
+CAPTURE_LIMITS_MAX_BYTES = 4096
 CASES = {
     "isolated": (
         ("In SQLite, two separate connections opened with the exact filename ':memory:' "
@@ -341,6 +343,41 @@ def otlp_loopback_url(value):
     return value
 
 
+def capture_limits_selection(path, *, capture_content):
+    """Read one bounded public policy and return its immutable validated values."""
+    if path is None:
+        return None
+    require(capture_content, "--capture-limits requires --capture-content.")
+    from petri.telemetry.config import CaptureLimits, TelemetryConfig
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate policy field.")
+            result[key] = value
+        return result
+
+    try:
+        # Nonblocking open also lets us reject FIFOs/devices without waiting on them.
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), "rb") as stream:
+            info = os.fstat(stream.fileno())
+            require(stat.S_ISREG(info.st_mode), "--capture-limits must be a regular JSON file.")
+            raw = stream.read(CAPTURE_LIMITS_MAX_BYTES + 1)
+    except OSError:
+        raise AcceptanceError("Cannot read the --capture-limits JSON file.") from None
+    require(len(raw) <= CAPTURE_LIMITS_MAX_BYTES, "--capture-limits JSON must be at most 4096 bytes.")
+    try:
+        values = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
+        if not isinstance(values, dict):
+            raise ValueError("Policy is not an object.")
+        limits = CaptureLimits.model_validate(values)
+        return TelemetryConfig(capture_content=capture_content, capture_limits=limits).capture_limits
+    except (ValueError, RecursionError):
+        # Validation details can contain input values; report no file content.
+        raise AcceptanceError("Invalid --capture-limits JSON object; use valid public CaptureLimits fields.") from None
+
+
 def configuration(endpoint, args, dish):
     config = yaml.safe_load((REPO / "petri/defaults/petri.yaml").read_text())
     config.update(name=dish, model=f"openai-chat:{endpoint.model}",
@@ -368,6 +405,9 @@ def configuration(endpoint, args, dish):
             telemetry["redact_env_vars"] = sorted(set(telemetry.get("redact_env_vars", [])) | {"OPENAI_API_KEY"})
         if otlp:
             telemetry.setdefault("otlp", {})["traces_endpoint"] = otlp_loopback_url(otlp)
+        limits = getattr(args, "capture_limits", None)
+        if limits is not None:
+            telemetry["capture_limits"] = limits.model_dump(mode="json")
     return config
 
 
@@ -403,6 +443,9 @@ def run_identity(endpoint_module, endpoint, configs, args):
             "diagnostics": {"capture_content": args.capture_content,
                             "otlp_traces_endpoint": args.otlp_traces_endpoint,
                             "redact_env_vars": ["OPENAI_API_KEY"] if args.capture_content else []}}
+    limits = getattr(args, "capture_limits", None)
+    if limits is not None:
+        identity["diagnostics"]["capture_limits"] = limits.model_dump(mode="json")
     # YAML source levels use integer keys; the saved identity must compare in JSON form.
     return json.loads(json.dumps(identity))
 
@@ -799,6 +842,8 @@ def main(argv=None):
     parser.add_argument("--tool-limit", type=int, default=100)
     parser.add_argument("--capture-content", action="store_true",
                         help="Opt in to stored model/tool content; requires telemetry integration.")
+    parser.add_argument("--capture-limits", type=Path, metavar="PATH",
+                        help="Public CaptureLimits JSON object, at most 4096 bytes; requires --capture-content.")
     parser.add_argument("--otlp-traces-endpoint", type=otlp_loopback_url,
                         help="Explicit loopback OTLP HTTP/protobuf trace URL.")
     parser.add_argument("--output-mode", choices=["tool", "prompted"], default="tool")
@@ -813,6 +858,8 @@ def main(argv=None):
             parser.error("Integrate Deliverable A's scripts.e2e.local_endpoint before live execution.")
         endpoint_module.connection_arguments(parser)
     args = parser.parse_args(argv)
+    require(args.capture_limits is None or args.action == "run", "--capture-limits is only valid for run.")
+    args.capture_limits = capture_limits_selection(args.capture_limits, capture_content=args.capture_content)
     root = args.directory.resolve()
     if args.action == "capture-dashboard":
         from scripts.e2e.lifecycle_dashboard import capture_dashboard

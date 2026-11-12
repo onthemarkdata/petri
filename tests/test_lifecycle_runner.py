@@ -946,3 +946,179 @@ def test_dashboard_owner_check_rejects_pid_reuse_before_lock(tmp_path, monkeypat
     monkeypatch.setattr(dashboard, "process_identity", lambda pid: birth(start="11", cwd=str(tmp_path)))
     with pytest.raises(checks.AcceptanceError, match="PID was reused"):
         dashboard.check_owner(tmp_path / ".petri", saved)
+
+
+@pytest.fixture
+def capture_policy_guards(endpoint_seam, monkeypatch):
+    import socket
+
+    root, module, endpoint = endpoint_seam
+    calls = []
+    original_endpoint = module.endpoint_from_args
+    monkeypatch.setattr(module, "endpoint_from_args", lambda args: (calls.append("endpoint"), original_endpoint(args))[1])
+    monkeypatch.setattr(endpoint, "guarded_route", lambda: (calls.append("route"), nullcontext(("http://127.0.0.1:1", "synthetic-key")))[1])
+    monkeypatch.setattr(runner, "validate_provider", lambda config: calls.append("model"))
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: pytest.fail("DNS is forbidden."))
+    monkeypatch.setattr(socket.socket, "connect", lambda *a, **k: pytest.fail("Network is forbidden."))
+    return root, module, endpoint, calls
+
+
+def test_capture_policy_omission_preserves_default_identity(capture_policy_guards):
+    root, _, _, calls = capture_policy_guards
+    assert runner.main(["run", str(root)]) == 1
+    identity = runner.load(root / "identity.json")
+    assert identity["diagnostics"] == {"capture_content": False, "otlp_traces_endpoint": None, "redact_env_vars": []}
+    assert all("capture_limits" not in config.get("telemetry", {}) for config in identity["configurations"])
+    assert calls == ["endpoint", "route", "model", "model", "model"]
+    assert runner.main(["run", str(root), "--resume"]) == 1
+
+
+@pytest.mark.parametrize("content", [{}, {"max_text_chars": 200_000, "max_depth": 40}])
+def test_capture_policy_reaches_identity_all_dishes_and_public_loader(capture_policy_guards, tmp_path, content, monkeypatch):
+    from unittest.mock import patch
+
+    from petri.config import load_dish_config
+    from petri.telemetry.config import CaptureLimits, TelemetryConfig
+
+    root, module, _, _ = capture_policy_guards
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(content))
+    expected = CaptureLimits.model_validate(content).model_dump(mode="json")
+    with patch.object(CaptureLimits, "model_validate", wraps=CaptureLimits.model_validate) as validate:
+        assert runner.main(["run", str(root), "--capture-content", "--capture-limits", str(path)]) == 1
+    assert validate.call_count == 1
+    identity = runner.load(root / "identity.json")
+    assert identity["diagnostics"]["capture_limits"] == expected
+    assert str(path) not in json.dumps(identity)
+    assert identity["configuration_hash"] == module.configuration_hash(identity["configurations"])
+    for number, config in enumerate(identity["configurations"], 1):
+        assert config["telemetry"]["capture_content"] is True
+        assert config["telemetry"]["capture_limits"] == expected
+        assert TelemetryConfig.model_validate(config["telemetry"]).capture_limits.model_dump() == expected
+        dish = root / f"cycle-{number}/.petri"
+        assert json.loads(json.dumps(yaml.safe_load((dish / "defaults/petri.yaml").read_text()))) == config
+        assert load_dish_config(dish).telemetry.capture_limits.model_dump() == expected
+
+
+@pytest.mark.parametrize("content", [
+    b"not JSON CANARY_policy", b'{"max_depth":', b'[]', b'null', b'true', b'"CANARY_policy"', b'1',
+    b'{"CANARY_policy": 1}', b'{"max_depth": true}', b'{"max_depth": "40"}',
+    b'{"max_depth": 0}', b'{"max_depth": -1}', b'{"max_depth": 65}',
+    b'{"max_text_chars": 1048577}', b'{"max_collection_items": 513}',
+    b'{"max_nodes": 16385}', b'{"max_input_bytes": 8388609}', b'{"max_span_bytes": 4194305}',
+    b'{"max_depth": 1.0}', b'{"max_depth": null}', b'{"max_depth": NaN}',
+    b'{"max_depth": 40, "max_depth": 41}', b'\xff', b' ' * 4097,
+])
+def test_capture_policy_invalid_input_fails_before_endpoint_or_writes(capture_policy_guards, tmp_path, content):
+    root, _, _, calls = capture_policy_guards
+    path = tmp_path / "policy.json"
+    path.write_bytes(content)
+    with pytest.raises(checks.AcceptanceError, match="--capture-limits") as error:
+        runner.main(["run", str(root), "--capture-content", "--capture-limits", str(path)])
+    assert "CANARY_policy" not in str(error.value)
+    assert str(path) not in str(error.value)
+    assert not root.exists() and calls == []
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory", "fifo", "capture_off", "nonrun"])
+def test_capture_policy_selection_preconditions_fail_before_endpoint(capture_policy_guards, tmp_path, kind):
+    import os
+
+    root, _, _, calls = capture_policy_guards
+    path = tmp_path / "policy.json"
+    if kind == "directory":
+        path.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(path)
+    elif kind != "missing":
+        path.write_text("{}")
+    action = "status" if kind == "nonrun" else "run"
+    arguments = [action, str(root), "--capture-limits", str(path)]
+    if kind != "capture_off":
+        arguments.append("--capture-content")
+    with pytest.raises(checks.AcceptanceError, match="--capture-limits"):
+        runner.main(arguments)
+    assert calls == [] and not root.exists()
+
+
+def test_capture_policy_exact_file_size_is_accepted(capture_policy_guards, tmp_path):
+    root, _, _, _ = capture_policy_guards
+    path = tmp_path / "policy.json"
+    path.write_bytes(b"{}" + b" " * 4094)
+    assert runner.main(["run", str(root), "--capture-content", "--capture-limits", str(path)]) == 1
+
+
+def test_capture_policy_is_resolved_once_before_endpoint_and_not_reopened(capture_policy_guards, tmp_path, monkeypatch):
+    from petri.telemetry.config import CaptureLimits
+
+    root, module, _, calls = capture_policy_guards
+    path = tmp_path / "policy.json"
+    path.write_text('{"max_depth": 40}')
+    expected = CaptureLimits(max_depth=40).model_dump(mode="json")
+    original = module.endpoint_from_args
+
+    def change_after_selection(args):
+        path.write_text('{"max_depth": 41}')
+        result = original(args)
+        path.unlink()
+        return result
+
+    monkeypatch.setattr(module, "endpoint_from_args", change_after_selection)
+    assert runner.main(["run", str(root), "--capture-content", "--capture-limits", str(path)]) == 1
+    identity = runner.load(root / "identity.json")
+    assert identity["diagnostics"]["capture_limits"] == expected
+    assert all(config["telemetry"]["capture_limits"] == expected for config in identity["configurations"])
+    assert calls == ["endpoint", "route", "model", "model", "model"]
+
+
+@pytest.mark.parametrize("change", ["contents", "omit", "effective_yaml"])
+def test_capture_policy_resume_mismatch_stops_before_readiness_and_children(capture_policy_guards, tmp_path, change):
+    root, _, _, calls = capture_policy_guards
+    path = tmp_path / "policy.json"
+    path.write_text('{"max_depth": 40}')
+    arguments = ["run", str(root), "--capture-content", "--capture-limits", str(path)]
+    assert runner.main(arguments) == 1
+    if change == "contents":
+        path.write_text('{"max_depth": 41}')
+    elif change == "omit":
+        arguments = ["run", str(root), "--capture-content"]
+    else:
+        config_path = root / "cycle-2/.petri/defaults/petri.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["telemetry"]["capture_limits"]["max_depth"] = 41
+        config_path.write_text(yaml.safe_dump(config))
+    calls.clear()
+    with pytest.raises(checks.AcceptanceError, match="identity"):
+        runner.main([*arguments, "--resume"])
+    assert calls == ["endpoint"]
+
+
+def test_capture_policy_identity_uses_values_not_path_or_json_spelling(capture_policy_guards, tmp_path):
+    from petri.telemetry.config import CaptureLimits
+
+    root, _, _, _ = capture_policy_guards
+    first, second = tmp_path / "first.json", tmp_path / "second.json"
+    first.write_text("{}")
+    second.write_text(json.dumps(CaptureLimits().model_dump(), sort_keys=True, indent=2))
+    assert runner.main(["run", str(root), "--capture-content", "--capture-limits", str(first)]) == 1
+    identity = (root / "identity.json").read_bytes()
+    first.unlink()
+    assert runner.main(["run", str(root), "--capture-content", "--capture-limits", str(second), "--resume"]) == 1
+    assert (root / "identity.json").read_bytes() == identity
+
+
+def test_capture_limits_help_and_documented_policy_use_public_schema(capsys):
+    import re
+
+    from petri.telemetry.config import CaptureLimits
+
+    with pytest.raises(SystemExit) as exit_status:
+        runner.main(["--help"])
+    assert exit_status.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "--capture-limits PATH" in help_text and "4096 bytes" in help_text
+    guide = (runner.REPO / "docs/local-lifecycle-validation.md").read_text()
+    match = re.search(r"<!-- lifecycle-capture-limits -->\s*```json\n(.*?)```", guide, re.S)
+    assert match
+    assert CaptureLimits.model_validate(json.loads(match[1])) == CaptureLimits()
+    assert '--capture-content --capture-limits "$CAPTURE_LIMITS_JSON"' in guide

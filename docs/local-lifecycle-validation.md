@@ -75,6 +75,53 @@ fragment. Capture adds `OPENAI_API_KEY` to `redact_env_vars` so the temporary re
 key is protected. The selected diagnostics and configuration hash enter the saved
 identity. Capture is off and external export is unset unless requested.
 
+For a larger finite capture envelope, integrate the reviewed
+[`CaptureLimits` policy](observability.md#bounds-and-delivery-limits), create a
+UTF-8 JSON file containing only its public fields, and add
+`--capture-content --capture-limits "$CAPTURE_LIMITS_JSON"` to a **new** run.
+The runner accepts a regular file of at most 4,096 bytes. The complete ceiling
+example below is equivalent to `{}`; omitted fields take public schema defaults.
+Each field may be reduced to a strict positive integer within its ceiling.
+
+<!-- lifecycle-capture-limits -->
+```json
+{
+  "max_text_chars": 1048576,
+  "max_collection_items": 512,
+  "max_depth": 64,
+  "max_nodes": 16384,
+  "max_input_bytes": 8388608,
+  "max_span_bytes": 4194304
+}
+```
+
+The option requires `--capture-content` and is valid only for `run`. Malformed,
+nonobject, oversized or duplicate-key JSON, unknown fields, booleans, numeric
+strings, nonpositive values and values above public ceilings are rejected before
+endpoint construction, readiness, model validation, run-directory writes or
+child launch. Errors do not echo file contents. Do not place credentials or
+importable code in this public configuration file.
+
+The runner reads and resolves the policy once per invocation through the public
+schema. The same resolved values enter all three dishes' telemetry YAML, the
+configuration hash and `identity.json` diagnostics. The path and JSON spelling
+are not policy identity: an equivalent file at a new path can resume, while
+changed resolved values or omission of a previously explicit policy reject
+resume before readiness or children. File changes after selection do not alter
+the bound invocation. Omitting the option preserves existing configuration and
+identity behavior; it adds no `capture_limits` identity field. Changes to live
+YAML still fail the existing preflight, even when prepare already passed.
+
+The policy does not change SDK limits, inference budgets, model settings,
+stages, source/verdict criteria or acceptance gates. Aggregate overflow drops a
+span before either sink; bounded values, missing spans and queue losses still
+fail complete-content acceptance. Review the core resource measurement and host
+headroom before any live use; finite ceilings do not guarantee that every model
+context fits. Capture truncation does not establish inference-input truncation.
+Preserve earlier failed captures. A source change requires a fresh run; never
+resume an old failed run through this patch or edit generated YAML after its
+identity is saved. This runner remains native; Pi execution is separate.
+
 Resume with the identical command plus `--resume`. The saved identity includes
 the source revision, real upstream endpoint, model provenance, context and output
 limits, configuration hash, command deadline, and diagnostics. A's guarded route
