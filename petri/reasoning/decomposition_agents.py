@@ -45,10 +45,22 @@ For example, for "One meter equals one hundred centimeters", return {"is_atomic"
 A contested causal or predictive claim is not bedrock merely because it sounds plausible. Only if the bedrock test fails should you follow the expansion steps below.
 
 """
+COUNTERARGUMENT_SHAPE = (
+    "Use relation limits or rebuts only on a new PremiseCandidate: "
+    '{"claim_text": "<distinct testable claim>", "relation": "limits"} '
+    '(use "rebuts" instead when appropriate). '
+    "A ReferencePremise has only existing_cell_id and reason; do not add relation to it. "
+    "A reason describing a reference as a counterargument does not satisfy the typed counterargument requirement. "
+    "Retain valid references and supply a genuinely distinct, testable counterargument candidate when required. "
+    "Call search_cells for each proposed claim first; reference existing matches instead of recreating them. "
+    "Do not invent a counterargument, remove valid children to claim the singleton exemption, "
+    "or mark a non-atomic parent atomic to evade this requirement."
+)
 COUNTERARGUMENT = (
     "For a non-atomic expansion, include the strongest counterargument as a sub-claim "
     "with relation limits or rebuts; other premises may support the parent. "
-    "A single indispensable sub-premise is exempt from this requirement.\n\n"
+    "A single indispensable sub-premise is exempt from this requirement. "
+    + COUNTERARGUMENT_SHAPE + "\n\n"
 )
 
 SEARCH_INSTRUCTIONS = (
@@ -188,15 +200,19 @@ def search_cells(context: RunContext[DecompositionInput], query: str, top_k: int
 def validate_references(context: RunContext[DecompositionInput], candidates) -> None:
     if candidates and has_earlier_cells(context.deps) and not context.deps.search_performed:
         raise ModelRetry("Call search_cells before proposing premises, including paraphrases. Search for each specific premise.")
-    for candidate in candidates:
+    duplicates = []
+    for index, candidate in enumerate(candidates, start=1):
         if isinstance(candidate, PremiseCandidate):
             if context.deps.db_path is not None:
                 matches = search(context.deps.db_path, candidate.claim_text, exclude_colony=context.deps.colony_id)
                 words = re.findall(r"\w+", candidate.claim_text.casefold())
-                if any(re.findall(r"\w+", match.claim_text.casefold()) == words for match in matches):
-                    raise ModelRetry(
-                        "This premise already exists in an earlier colony. Call search_cells for "
-                        f"{candidate.claim_text!r} and return a ReferencePremise instead of duplicating it."
+                matching_ids = sorted({
+                    match.id for match in matches
+                    if re.findall(r"\w+", match.claim_text.casefold()) == words
+                })
+                if matching_ids:
+                    duplicates.append(
+                        f"Candidate {index}: claim_text={candidate.claim_text!r}; matching existing_cell_ids={matching_ids!r}."
                     )
             continue
         row = (database.get_cell(context.deps.db_path, candidate.existing_cell_id)
@@ -204,6 +220,17 @@ def validate_references(context: RunContext[DecompositionInput], candidates) -> 
         if (row is None or row["colony"] == context.deps.colony_id
                 or candidate.existing_cell_id not in context.deps.search_results):
             raise ModelRetry("Reference an existing cell returned by search_cells from an earlier colony.")
+    if duplicates:
+        raise ModelRetry(
+            "The following selected premises already exist in earlier colonies. "
+            "Retain every relevant selected premise by converting each matching premise to a ReferencePremise; "
+            "correct the whole list rather than only the first duplicate and discarding the others. "
+            "Do not retain irrelevant or redundant premises merely to meet a count. "
+            "Each ReferencePremise has only existing_cell_id and reason; do not add claim_text or relation. "
+            "Call search_cells for each listed claim before referencing an ID that the tool has not returned. "
+            "IDs in this feedback do not replace search results.\n"
+            + "\n".join(duplicates)
+        )
 
 
 @initial_decomposer.output_validator
@@ -264,7 +291,10 @@ def validate_expansion(context: RunContext[DecompositionInput], output: WhyExpan
         isinstance(child, PremiseCandidate) and child.relation in ("limits", "rebuts")
         for child in output.sub_premises
     ):
-        raise ModelRetry("Critical-flaw re-decomposition requires a limits or rebuts premise, even for a singleton or atomic response.")
+        raise ModelRetry(
+            "Critical-flaw re-decomposition requires a limits or rebuts premise, even for a singleton or atomic response. "
+            + COUNTERARGUMENT_SHAPE
+        )
     if output.is_atomic:
         return output
     duplicates = [child for child in output.sub_premises
@@ -277,7 +307,7 @@ def validate_expansion(context: RunContext[DecompositionInput], output: WhyExpan
         if duplicates:
             problems.append("Replace children that restate the parent with distinct, testable premises.")
         if missing_counterargument:
-            problems.append("Include the strongest counterargument with relation limits or rebuts.")
+            problems.append("Include the strongest counterargument with relation limits or rebuts. " + COUNTERARGUMENT_SHAPE)
         raise ModelRetry(" ".join(problems))
     if duplicates:
         for child in duplicates:
@@ -292,7 +322,10 @@ def validate_expansion(context: RunContext[DecompositionInput], output: WhyExpan
         isinstance(child, PremiseCandidate) and child.relation in ("limits", "rebuts")
         for child in output.sub_premises
     ):
-        raise ModelRetry("Retain a distinct limits or rebuts premise for this critical-flaw re-decomposition.")
+        raise ModelRetry(
+            "Retain a distinct limits or rebuts premise for this critical-flaw re-decomposition. "
+            + COUNTERARGUMENT_SHAPE
+        )
     if len(output.sub_premises) >= 2 and all(
         not isinstance(child, PremiseCandidate) or child.relation == "supports" for child in output.sub_premises
     ):
