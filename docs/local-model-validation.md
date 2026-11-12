@@ -1,10 +1,82 @@
-# Local Gemma validation
+# Local model readiness
 
-This optional harness checks real inference through Docker Model Runner and pi.
-It does not add Docker to Petri's runtime dependencies. Run it explicitly when
-validating a model integration; the normal test suite remains offline.
+This optional harness checks real inference through a loopback OpenAI-compatible
+server or Docker Model Runner, directly and through Pi. Run it explicitly when
+validating a model integration; the normal test suite remains offline. Readiness
+does not establish seed, grow, feed, dashboard, export, or recovery acceptance.
 
-## Model provenance
+## Generic local endpoints
+
+Supply the exact API base, request model ID, context limit, response cap, and a
+JSON provenance manifest. For example, save this public template outside the
+repository and replace its placeholders with the deployed artifact's identity:
+
+```json
+{
+  "artifact": "organization/model-repository",
+  "revision": "immutable-upstream-revision",
+  "model_name": "local-model-alias",
+  "response_model": "local-model-alias",
+  "provider": "local-server"
+}
+```
+
+`model_name` records the operator's request alias; `artifact` and `revision`
+identify the declared weights. If completion responses use a different served
+ID, set `response_model` to that exact ID. A name returned by the server does not
+prove a weight digest. Generic verification reports the declaration without
+claiming independent weight verification. Optional `weights_sha256` and `files`
+remain supplied provenance. Optional `chat_template_kwargs` are recorded and
+applied to requests; generic endpoints receive no Gemma-specific defaults.
+
+```sh
+python3 scripts/e2e/model_runner.py check \
+  --base-url http://127.0.0.1:8000/prefix/v1 --model local-model-alias \
+  --provenance /tmp/local-model/provenance.json --context-size 262144 \
+  --max-tokens 4096 --no-auth --output /tmp/local-model/readiness.json
+```
+
+Use `--no-auth` only after confirming that route requires no authentication.
+For bearer auth, use `--api-key-env VARIABLE_NAME` to read a protected environment
+value; an existing `OPENAI_API_KEY` is also supported. For HTTP Basic, use
+`--basic-auth-file /absolute/private/client.toml`, containing top-level `username`
+and `password` fields. The file must be owned by the current user with mode
+`0600`. A provenance manifest may instead supply a `credential_file` reference;
+explicit auth flags take precedence. Never put credential values in the URL,
+manifest, command arguments, or public examples. Credentials are retained in
+memory for requests. Passwords, bearer keys, authorization values, and relay
+keys are removed from decoded diagnostic values before serialization, including
+JSON nested inside text. Protocol keys and configured public model IDs are
+preserved. Basic usernames are removed from explicit `username` fields; their
+occurrence as an ordinary word or part of a public model ID is preserved.
+
+Only HTTP loopback URLs are accepted. Embedded credentials, remote hosts, query
+strings, and fragments are rejected before requests. The API path prefix is
+preserved. Requests ignore proxy environment variables and refuse redirects,
+including redirects to another loopback endpoint. There is no hosted fallback.
+Generic servers need neither DMR metadata nor Gemma's lock; `configure` is a
+DMR-only action. Use the server's configured context maximum, independently of the output cap.
+Every supplied manifest `max_model_len` and `context_size` must match
+`--context-size`; conflicting declarations are rejected before requests. Both
+supplied declarations are recorded in provenance. Context remains an operator
+declaration for generic servers; the
+harness does not change their deployment configuration.
+
+Readiness reports each plain-completion, JSON-schema, function-call, and
+function-result-replay capability separately. A failed or unsupported mode
+remains visible even when later checks pass. HTTP 501 is recorded as
+`unsupported`; other HTTP errors retain their status and body as failures.
+Every required capability must pass, with complete output, the declared response
+model, exact tool arguments, and the replayed result. There is no automatic
+output-mode fallback. A separate Petri run may select a supported output mode
+while preserving these capability results.
+
+Reports include the upstream identity, configured limits, configuration hash,
+source SHA, timestamps, command outcome, and diagnostic copies of responses.
+Failed checks retain sanitized response diagnostics. `--output` creates a new file exclusively so an earlier
+result cannot be overwritten.
+
+## DMR/Gemma adapter and provenance
 
 The selected artifact is [Google's Gemma 4 E2B instruction-tuned QAT Q4_0 GGUF](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf).
 [The lock](../models/gemma.lock.json) records the Hugging Face revision, file
@@ -76,9 +148,48 @@ export PI_OFFLINE=1 PI_TELEMETRY=0
 export PATH="$pi_runtime/node_modules/.bin:$PATH"
 ```
 
-Use provider `petri-local` and the lock's model ID. The command refuses to
-overwrite an existing `models.json`. Keep this directory outside the repository
-and delete it after testing. Petri workflow checks must use isolated research
+Use provider `petri-local` and the selected model ID. Generic endpoints use the
+same connection flags shown above with `pi-config` or `pi-check`. The generated
+`models.json` records the exact upstream URL and selected context/output limits.
+The command refuses to overwrite an existing file. Bearer keys are environment
+references; Basic auth uses the `PETRI_LOCAL_AUTHORIZATION` header reference,
+which a direct Pi caller must populate privately. This file can also serve as a
+reviewable upstream configuration without launching Pi.
+
+`pi-check` and the grow helper generate a second isolated runtime configuration
+for a task-owned loopback relay. The relay preserves the upstream path prefix,
+adds protected auth in memory, checks request and response model identity, and
+refuses upstream redirects before Pi or the provider SDK can follow them. Its
+temporary key is passed through the environment and never written to a file.
+Original successful response bytes are validated and forwarded unchanged.
+Before credential inspection, streamed text is assembled by choice and tool
+arguments by choice/tool identity, including interleaved deltas. Rejected streams
+retain sanitized logical diagnostics without raw fragments; if logical assembly
+fails, raw SSE is omitted from diagnostics. Responses that echo protected
+authentication data are rejected with a generic error and a sanitized diagnostic
+copy, rather than rewritten into a research
+result. HTTP-error bodies are diagnostic copies. Responses, including SSE,
+are buffered; the upstream timeout is 300 seconds. This transport supports
+Chat Completions only.
+
+SSE requires successful terminal `stop` or `tool_calls` reasons for every
+observed choice and the final `[DONE]` marker. Usage-only chunks, comments,
+multiline data, and LF/CRLF/CR framing are supported. EOF, missing terminal
+reasons, truncation, and failed finishes are rejected with retained diagnostics.
+Pi readiness requires a final assistant with `stopReason: stop`, plus the
+read-call/tool-result/final-answer sequence; a matching partial answer cannot pass.
+
+The relay forwards only caller-supplied `traceparent`, `tracestate`,
+`x-request-id`, `x-petri-run-id`, `x-petri-workflow-id`, and `x-petri-cell-id` by
+default. Python callers may extend this with
+`guarded_route(correlation_allowlist={"x-custom-run"})`. Header values must be
+printable ASCII and at most 4,096 characters. Authentication and cookie headers
+remain excluded even when requested; upstream authentication comes from the
+protected route configuration. The relay creates no correlation IDs and makes
+no claim that a client already supplies them.
+
+Keep test configuration outside the repository and delete it after collecting
+the results. Petri workflow checks must use isolated research
 data and separately verify seed, grow, evidence updates, dashboard,
 export/backup/restore and recovery. A passing model check establishes none of
 those application outcomes.

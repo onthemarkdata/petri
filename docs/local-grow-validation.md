@@ -1,12 +1,15 @@
-# Validate grow with the local Gemma model
+# Local grow diagnostics
 
 This opt-in probe runs actual typed research phases and retrieves public web
-sources. It is separate from offline tests and the seed-only bridge smoke.
-It uses the exact model
-`huggingface.co/google/gemma-4-e2b-it-qat-q4_0-gguf:Q4_0` through Docker Model
-Runner at `http://127.0.0.1:12434/engines/llama.cpp/v1`; the worker sets that direct
-endpoint itself. Pi must have a `petri-local` provider pointing to the same URL.
-The worker rejects a different Pi provider endpoint and has no hosted fallback.
+sources. It is separate from offline tests and model readiness. It accepts an
+explicit loopback OpenAI-compatible endpoint and model through either the native
+provider or Pi. See [model readiness](local-model-validation.md) for provenance,
+authentication, URL restrictions, and the retained default DMR/Gemma adapter.
+
+The helper records limited grow evidence. It does not evaluate a complete
+lifecycle, and every report sets `complete_cycle_passed` to `false`. Multi-colony
+seed/approve/grow/feed cycles, crash recovery, dashboard, export, and
+backup/restore require separate acceptance work.
 
 Two public claims have opposite expected outcomes. SQLite documents that two
 connections opened with the unadorned filename `:memory:` create independent
@@ -24,7 +27,7 @@ All runs retain the configured roster, verdict vocabularies, schema validation,
 source gates, retries, and iteration/usage limits. The seed path uses a shallow
 tree and a code-enforced level-one cap to bound the number of cells.
 
-For full-roster acceptance, `--expanded-budget` explicitly configures 120 requests,
+For a full-roster diagnostic, `--expanded-budget` explicitly configures 120 requests,
 600,000 tokens, and 100 tool calls per cell run, plus 24 requests, 100,000 tokens,
 and 20 tool calls per debate. This allows each evidence role to fetch its own
 cited sources. Packaged defaults stay unchanged. The report records the actual
@@ -32,8 +35,9 @@ configuration and persisted usage; the source and verdict gates still apply.
 
 The probe also bounds native provider responses with `model_settings.max_tokens`
 (`--max-tokens`, default 4,096). This is a per-response generation limit, separate
-from the cumulative usage budget. Pi uses the explicitly configured `maxTokens`
-in its local provider; the probe verifies that it matches `--max-tokens`. Petri
+from the cumulative usage budget. Pi uses `maxTokens` in the generated isolated configuration, matching
+`--max-tokens`. `--context-size` records the selected context limit and sets Pi's
+`contextWindow`; a generic server must already be deployed with that capacity. Petri
 rejects native model settings for CLI backends rather than ignoring them.
 Truncated output must still pass the full schema and evidence validators.
 
@@ -45,29 +49,59 @@ packaged native-provider default remains tool output.
 
 Run acceptance probes serially. Automatic llama.cpp slots can share a unified
 KV buffer even when each slot advertises the full configured context length.
-The local validation setup uses one 32,768-token slot, with the exact model
+The recorded DMR/Gemma setup used one 32,768-token slot, with the exact model
 unchanged. Docker supports model runtime flags through
 [`docker model configure`](https://docs.docker.com/ai/model-runner/configuration/).
 Verify the effective slot count before starting a long run; preserve existing
 runtime flags when changing the slot setting.
 
-From the repository, with the local model already running:
+From the repository, with the local model already running and its provenance
+manifest prepared:
 
 ```sh
 export PETRI_RUN_LOCAL_GROW=1
 output=$(mktemp -d)
 PYTHONPATH=. uv run python tests/helpers/local_grow_worker.py "$output" \
-  --harness provider --case isolated
+  --harness provider --case isolated \
+  --base-url http://127.0.0.1:8000/prefix/v1 --model local-model-alias \
+  --provenance /tmp/local-model/provenance.json --context-size 262144 \
+  --max-tokens 4096 --no-auth
 ```
 
-Repeat in a new empty output directory for `--case shared` and for
-`--harness pi`. Pi also needs `PETRI_PI_BIN` and `PI_CODING_AGENT_DIR` configured
-for the local provider. Use `--seed` on at least one run when checking app
-continuity. The worker preserves its configuration, domain database, DBOS
-database, CLI logs, retrieved-source provenance, verdicts, and `result.json`.
-A zero CLI exit alone does not pass the probe: the report also requires the
-expected terminal cell status, real search/source events, and no execution
-failure in the latest round.
+Replace `--no-auth` with the protected bearer or Basic auth option when the route
+requires it. Omitting generic connection flags retains the DMR/Gemma defaults;
+`--adapter dmr` selects that adapter explicitly. No credentials are replaced
+with a no-auth placeholder on an authenticated route.
+
+Repeat in a new empty directory for `--case shared` or `--harness pi`. Pi needs
+its executable available through `PETRI_PI_BIN` or the normal discovery path.
+The worker creates its own `pi-agent/models.json` and an attempt-specific runtime
+configuration, preserving personal settings and inherited `PI_CODING_AGENT_DIR`.
+It uses a task-owned guarded relay for both clients; the immutable run identity
+and review configuration retain the exact upstream URL. The temporary transport
+key is confined to memory/environment, and previous environment settings are
+restored after execution.
+
+The worker preserves configuration, domain and DBOS databases, command history,
+CLI logs, retrieved-source provenance, verdicts, and failures. Each invocation
+writes a new `attempts/<identity>/result.json` and prints its path. Command
+outcomes also append to `commands.jsonl`; earlier attempts are retained.
+`run-identity.json` records model alias, artifact/revision declarations, upstream
+endpoint, adapter/backend, case, fixture kind, limits, source SHA, and the
+configuration hash. Diagnostic copies sanitize decoded credential values,
+including nested JSON, while preserving protocol keys, public model IDs, and
+ordinary text. The relay rejects actual protected credential echoes before
+forwarding responses for client persistence. See the
+[transport policy](local-model-validation.md) for capture and correlation limits.
+
+A diagnostic pass requires successful seed and grow commands when seed was
+requested, the requested colony's exact root at its expected status, successful
+search and fetched-source events with current cell/round identities, and no
+current-round execution failure. Empty searches, incomplete source provenance,
+events from another cell, and an old round's sources cannot satisfy these checks.
+All earlier failures remain in the report. Dish-wide usage and event counts are
+labeled diagnostics and do not satisfy the pass criteria. A one-cell fixture
+can pass this limited diagnostic without establishing a complete cycle.
 
 Allow time for the full roster and configured iteration budget. Poll the
 domain events by agent, cell, and iteration while it runs; a source fetch can
@@ -76,8 +110,20 @@ preserve its directory and resume it rather than recreating the fixture:
 
 ```sh
 PYTHONPATH=. uv run python tests/helpers/local_grow_worker.py "$output" \
-  --harness provider --case isolated --resume
+  --harness provider --case isolated --resume \
+  --base-url http://127.0.0.1:8000/prefix/v1 --model local-model-alias \
+  --provenance /tmp/local-model/provenance.json --context-size 262144 \
+  --max-tokens 4096 --no-auth
 ```
+
+Repeat the original connection, budget, and output-mode flags on resume. The
+saved identity, Petri YAML, and Pi review configuration must match exactly;
+model/backend/case/configuration drift is rejected before inference. Older runs
+without a saved identity cannot be silently adopted. Resume inherits the saved
+fixture kind, so `--seed` need not be repeated for a generated-seed run. This
+helper resumes grow only after a successful recorded seed with the requested
+root present. It does not invoke `seed --resume` after a seed interruption or
+failure; complete seed-crash recovery requires separate lifecycle validation.
 
 After a recorded terminal execution failure, `--resume --requeue REQUEST_ID`
 requests a new validation round through the backend's revalidation API. Use a
