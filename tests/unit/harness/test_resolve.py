@@ -40,10 +40,19 @@ def test_claude_model_and_allowlist():
     assert model.allowed_tools == ("Read", "WebSearch")
 
 
-def test_provider_passthrough_is_exact():
-    name = "custom-provider:model:variant"
-    assert resolve_model({"harness": {"backend": "provider", "model": name}}) is name
-    assert resolve_model({"model": name, "harness": {"backend": "provider"}}) is name
+@pytest.mark.parametrize("name", [
+    "custom-provider:model:variant", "openai:responses", "openai-responses:responses",
+    "openai-chat:fixture:variant", "anthropic:fixture",
+])
+@pytest.mark.parametrize("override", [{}, {"openai_chat_supports_multiple_system_messages": None}])
+def test_provider_passthrough_is_exact(name, override, monkeypatch):
+    from unittest.mock import Mock
+
+    constructor = Mock(side_effect=AssertionError("Unexpected model construction"))
+    monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", constructor)
+    assert resolve_model({"harness": {"backend": "provider", "model": name, **override}}) is name
+    assert resolve_model({"model": name, "harness": {"backend": "provider", **override}}) is name
+    constructor.assert_not_called()
 
 
 @pytest.mark.parametrize(("harness", "key"), [
@@ -74,3 +83,53 @@ def test_invalid_harness_names_key(harness, key):
 def test_incompatible_settings_fail_explicitly(config, key):
     with pytest.raises(ValueError, match=key):
         resolve_model(config)
+
+
+@pytest.mark.parametrize("value", [False, True])
+@pytest.mark.parametrize("inherited", [False, True])
+def test_openai_chat_profile_constructs_only_the_requested_override(monkeypatch, value, inherited):
+    from unittest.mock import Mock
+
+    constructor = Mock()
+    monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", constructor)
+    model = "openai-chat:fixture:variant:quantization"
+    config = {"model": model if inherited else "openai:responses", "harness": {
+        "backend": "provider", "openai_chat_supports_multiple_system_messages": value,
+    }}
+    if not inherited:
+        config["harness"]["model"] = model
+    assert resolve_model(config) is constructor.return_value
+    constructor.assert_called_once_with("fixture:variant:quantization", provider="openai", profile={
+        "openai_chat_supports_multiple_system_messages": value,
+    })
+
+
+@pytest.mark.parametrize("harness,top_level", [
+    ({"backend": "pi"}, "openai-chat:fixture"),
+    ({"backend": "claude-code"}, "openai-chat:fixture"),
+    ({"backend": "provider"}, "openai:responses"),
+    ({"backend": "provider"}, "openai-responses:responses"),
+    ({"backend": "provider"}, "custom:fixture"),
+    ({"backend": "provider"}, "fixture"),
+    ({"backend": "provider"}, "openai-chat:"),
+    ({"backend": "provider"}, "openai-chat:  "),
+    ({"backend": "provider"}, None),
+    ({"backend": "provider"}, " "),
+    ({"backend": "provider", "model": " "}, "openai-chat:fixture"),
+    ({"backend": "provider", "model": "openai:responses"}, "openai-chat:fixture"),
+    ({"backend": "provider", "provider": "openai"}, "openai-chat:fixture"),
+    ({"backend": "provider", "tools": ["read"]}, "openai-chat:fixture"),
+])
+@pytest.mark.parametrize("value", [False, True])
+def test_invalid_profile_selection_never_constructs_a_client(monkeypatch, harness, top_level, value):
+    from unittest.mock import Mock
+
+    constructor = Mock(side_effect=AssertionError("Unexpected client construction"))
+    monkeypatch.setattr("pydantic_ai.providers.openai.OpenAIProvider.__init__", constructor)
+    monkeypatch.setattr("petri.harness.pi.model.PiModel.__init__", constructor)
+    monkeypatch.setattr("petri.harness.claude_code.model.ClaudeCodeModel.__init__", constructor)
+    with pytest.raises(ValueError):
+        resolve_model({"model": top_level, "harness": {
+            **harness, "openai_chat_supports_multiple_system_messages": value,
+        }})
+    constructor.assert_not_called()

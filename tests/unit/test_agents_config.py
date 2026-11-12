@@ -122,3 +122,48 @@ def test_usage_caps_reject_invalid_values(content, value):
     content["limits"]["run"]["request_limit"] = value
     with pytest.raises(ValueError, match="request_limit"):
         AgentConfig.model_validate(content)
+
+
+@pytest.mark.parametrize("value", [None, False, True])
+@pytest.mark.parametrize("inherited", [False, True])
+def test_openai_chat_profile_boolean_and_model_precedence(content, value, inherited):
+    content["model"] = "openai-chat:inherited:variant" if inherited else "anthropic:other"
+    content["harness"] = {"backend": "provider", "openai_chat_supports_multiple_system_messages": value}
+    if not inherited:
+        content["harness"]["model"] = "openai-chat:selected:variant"
+    config = AgentConfig.model_validate(content)
+    assert config.harness.openai_chat_supports_multiple_system_messages is value
+
+
+def test_openai_chat_profile_is_unset_in_packaged_defaults(content):
+    assert "openai_chat_supports_multiple_system_messages" not in content["harness"]
+    assert AgentConfig.model_validate(content).harness.openai_chat_supports_multiple_system_messages is None
+
+
+@pytest.mark.parametrize("value", ["false", "true", "", 0, 1, [], {}, [False]])
+def test_openai_chat_profile_rejects_non_booleans(content, value):
+    content["harness"] = {"backend": "provider", "model": "openai-chat:fixture",
+                          "openai_chat_supports_multiple_system_messages": value}
+    with pytest.raises(ValueError, match="openai_chat_supports_multiple_system_messages"):
+        AgentConfig.model_validate(content)
+
+
+@pytest.mark.parametrize("harness,top_level,match", [
+    ({"backend": "pi", "model": "openai-chat:fixture"}, "openai-chat:fallback", "backend=provider"),
+    ({"backend": "claude-code"}, "openai-chat:fallback", "backend=provider"),
+    ({"backend": "provider"}, "openai:responses", "openai-chat:"),
+    ({"backend": "provider"}, "openai-responses:responses", "openai-chat:"),
+    ({"backend": "provider"}, "anthropic:fixture", "openai-chat:"),
+    ({"backend": "provider", "model": "custom:fixture"}, "openai-chat:fallback", "openai-chat:"),
+    ({"backend": "provider", "model": "openai-chat:"}, "openai-chat:fallback", "nonblank"),
+    ({"backend": "provider"}, "openai-chat: ", "nonblank"),
+    ({"backend": "provider", "provider": "openai"}, "openai-chat:fallback", "harness.provider"),
+    ({"backend": "provider", "tools": ["read"]}, "openai-chat:fallback", "harness.tools"),
+    ({"backend": "provider", "unexpected": False}, "openai-chat:fallback", "unexpected"),
+])
+@pytest.mark.parametrize("value", [False, True])
+def test_openai_chat_profile_rejects_incompatible_selection(content, harness, top_level, match, value):
+    content["model"] = top_level
+    content["harness"] = {**harness, "openai_chat_supports_multiple_system_messages": value}
+    with pytest.raises(ValueError, match=match):
+        AgentConfig.model_validate(content)

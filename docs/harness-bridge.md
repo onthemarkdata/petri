@@ -53,6 +53,43 @@ decomposer. No parser extracts or repairs partial results.
 
 ## Web research tools
 
+### OpenAI Chat compatibility profile
+
+For an OpenAI-compatible Chat Completions server that requires one leading
+system message, set this dish option explicitly:
+
+```yaml
+harness:
+  backend: provider
+  model: openai-chat:local-model-alias
+  output_mode: prompted
+  openai_chat_supports_multiple_system_messages: false
+```
+
+The pinned Pydantic AI SDK joins consecutive leading system messages with two
+newlines, preserving their text and order. Explicit `true` keeps multiple system
+messages. Omission or `null` leaves the resolver's existing provider-string path
+unchanged. The option accepts only YAML booleans or `null`; it requires
+`backend: provider` and an effective `openai-chat:` model with a nonblank identifier.
+`harness.model` takes precedence over the top-level `model`. CLI backends, other
+model prefixes, and explicit `harness.provider` or nonempty `harness.tools` are
+incompatible with this option.
+
+The resolver uses the ordinary OpenAI provider and overlays only this profile
+key. Configure the server and authentication through the existing
+`OPENAI_BASE_URL` and `OPENAI_API_KEY` environment variables; URL path prefixes
+are preserved. There is no server detection or API fallback. `openai:` and
+`openai-responses:` retain their Responses API selection when the option is unset.
+Configuration support does not establish compatibility with a particular server.
+
+This option applies when resolving the selected dish harness model. Per-agent
+model selections remain independent: `build_agents` replaces the harness
+selection for an agent with its own `model`, so this option does not become a
+global override for those agents. Output-mode defaults, retrieval requirements,
+source validation, retries, and usage limits are unchanged.
+
+### Backend tool availability
+
 | Backend | WebSearch equivalent in this bridge |
 | --- | --- |
 | Claude Code | Built-in `WebSearch` and `WebFetch`, when explicitly granted in `harness.tools`. |

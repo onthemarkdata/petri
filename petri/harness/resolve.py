@@ -30,12 +30,20 @@ def resolve_model(dish_config: Mapping[str, object]) -> Model | str:
     model = settings.model if settings.model is not None else dish_config.get("model")
     if not isinstance(model, str) or not model.strip():
         raise ValueError("harness.model or top-level model must be a nonempty string.")
+    settings.validate_openai_chat_model(model)
 
     if settings.backend == "provider":
         if settings.provider is not None:
             raise ValueError("harness.provider is only used by pi; put the provider in harness.model.")
         if settings.tools:
             raise ValueError("harness.tools configures CLI tools; provider tools belong to the agent.")
+        if settings.openai_chat_supports_multiple_system_messages is not None:
+            from pydantic_ai.models.openai import OpenAIChatModel
+            from pydantic_ai.profiles.openai import OpenAIModelProfile
+
+            return OpenAIChatModel(model.split(":", 1)[1], provider="openai", profile=OpenAIModelProfile(
+                openai_chat_supports_multiple_system_messages=settings.openai_chat_supports_multiple_system_messages,
+            ))
         return model
 
     provider = settings.provider
