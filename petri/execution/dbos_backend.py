@@ -410,7 +410,7 @@ class DBOSExecutionBackend:
         status = await DBOS.get_workflow_status_async(handle.workflow_id)
         return self._run_status(status)
 
-    async def _resume_cancelled_cells(self, *, colony_filter=None, cell_ids=None) -> None:
+    async def _resume_cancelled_cells(self, *, colony_filter=None, cell_ids=None) -> set[str]:
         from petri.execution.control import clear_cancellation
         from petri.execution.scheduler import current_round
 
@@ -427,12 +427,15 @@ class DBOSExecutionBackend:
         cancelled = await DBOS.list_workflows_async(
             name="petri.validate_cell", status=["CANCELLED"]
         )
+        resumed = set()
         for child in cancelled:
             if child.workflow_id in selected_rounds:
                 clear_cancellation(
                     self.app.petri_dir / "dbos.sqlite", workflow_ids=[child.workflow_id]
                 )
                 await DBOS.resume_workflow_async(child.workflow_id, queue_name=QUEUE_NAME)
+                resumed.add(child.workflow_id)
+        return resumed
 
     def preflight(self) -> PreflightCheck:
         settings = self.settings
@@ -805,6 +808,27 @@ class DBOSExecutionBackend:
         finally:
             self.close()
 
+    async def _wait_for_stopped_workflows(self, workflow_ids: set[str]) -> None:
+        assert self.app is not None
+        active = {"PENDING", "ENQUEUED", "DELAYED"}
+        owned = set(workflow_ids)
+        while True:
+            runs = await DBOS.list_workflows_async(load_input=False, load_output=False)
+            while True:
+                descendants = {
+                    run.workflow_id for run in runs if run.parent_workflow_id in owned
+                } - owned
+                if not descendants:
+                    break
+                owned.update(descendants)
+            # Phase exit precedes DBOS checkpoint and terminal-state publication.
+            # Terminal parents alone do not prove that their children have settled.
+            if not self.app._active_steps and not any(
+                run.workflow_id in owned and run.status in active for run in runs
+            ):
+                return
+            await asyncio.sleep(0.05)
+
     def process_queue(
         self,
         *,
@@ -872,7 +896,11 @@ class DBOSExecutionBackend:
 
         async def run():
             # Resume outside parent replay so its checkpoint order stays unchanged.
-            await self._resume_cancelled_cells(colony_filter=colony_filter, cell_ids=cell_ids)
+            # Resumed cells can retain an older scoped parent. Track their exact
+            # IDs rather than including unrelated persisted cancellation requests.
+            workflow_ids = await self._resume_cancelled_cells(
+                colony_filter=colony_filter, cell_ids=cell_ids
+            )
             done = asyncio.Event()
             poller = asyncio.create_task(poll_progress(done)) if on_event else None
             try:
@@ -881,6 +909,7 @@ class DBOSExecutionBackend:
                     handles = await self.grow_dish(
                         petri_dir, colony_filter=colony_filter, cell_ids=cell_ids
                     )
+                    workflow_ids.update(handle.workflow_id for handle in handles)
                     colonies.extend(await asyncio.gather(*(handle.get_result() for handle in handles)))
                     # Another colony may have validated a previously blocking premise.
                     if any(
@@ -912,8 +941,7 @@ class DBOSExecutionBackend:
                 )
             except (DBOSWorkflowCancelledError, DBOSAwaitedWorkflowCancelledError):
                 self._stopped = True
-                while self.app._active_steps:
-                    await asyncio.sleep(0.05)
+                await self._wait_for_stopped_workflows(workflow_ids)
                 return QueueProcessingResult()
             finally:
                 done.set()
