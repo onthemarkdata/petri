@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
 from pydantic_ai.settings import ModelSettings
 
 from petri.analysis.analyst import AnalystConfig
@@ -102,6 +102,31 @@ class HarnessContent(StrictContent):
     provider: Nonempty | None = None
     tools: list[Nonempty] = Field(default_factory=list)
     output_mode: Literal["tool", "prompted"] | None = None
+    openai_chat_supports_multiple_system_messages: StrictBool | None = None
+
+    @model_validator(mode="after")
+    def validate_openai_chat_profile(self):
+        if self.openai_chat_supports_multiple_system_messages is not None:
+            if self.backend != "provider":
+                raise ValueError("harness.openai_chat_supports_multiple_system_messages requires backend=provider.")
+            if self.provider is not None:
+                raise ValueError("harness.provider is only used by pi; put the provider in harness.model.")
+            if self.tools:
+                raise ValueError("harness.tools configures CLI tools; provider tools belong to the agent.")
+            if self.model is not None:
+                self.validate_openai_chat_model(self.model)
+        return self
+
+    def validate_openai_chat_model(self, model: object) -> None:
+        """Check the effective model before constructing an opted-in Chat client."""
+        if self.openai_chat_supports_multiple_system_messages is None:
+            return
+        if (not isinstance(model, str) or not model.startswith("openai-chat:")
+                or not model.split(":", 1)[1].strip()):
+            raise ValueError(
+                "harness.openai_chat_supports_multiple_system_messages requires an openai-chat: "
+                "model with a nonblank identifier in harness.model or top-level model."
+            )
 
 
 class DebateContent(StrictContent):
@@ -183,6 +208,9 @@ class AgentConfig(StrictContent):
 
     @model_validator(mode="after")
     def validate_response_settings(self):
+        self.harness.validate_openai_chat_model(
+            self.harness.model if self.harness.model is not None else self.model
+        )
         if self.model_settings.max_tokens is not None and self.harness.backend != "provider":
             raise ValueError("model_settings.max_tokens requires the provider backend; configure CLI response limits in its provider.")
         if self.harness.output_mode == "tool" and self.harness.backend != "provider":
