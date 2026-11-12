@@ -21,6 +21,7 @@ from petri.reasoning.seed_events import current_attempt, record_completion
 from petri.storage.colonies import (
     clear_unapproved_colony,
     colony_exists,
+    existing_colony_message,
     reserve_colony,
     save_colony,
 )
@@ -415,8 +416,8 @@ def register(app: typer.Typer) -> None:
         colony_path = dish_db_path(petri_dir, dish_id)
         if colony_exists(colony_path, colony_id):
             print_error_and_exit(
-                f"Colony '{colony_name}' already exists. Choose another name; "
-                "use seed --resume --colony with this name to continue an interrupted seed.",
+                existing_colony_message(colony_path, colony_id) + " Choose another name; "
+                f"use seed --resume --colony '{colony_name}' to continue an interrupted seed.",
                 code=1,
             )
 

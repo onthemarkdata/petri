@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from contextlib import closing
+from contextlib import closing, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,20 +27,41 @@ def colony_exists(db_path: Path, colony_id: str) -> bool:
         ).fetchone() is not None
 
 
+def existing_colony_message(
+    db_path: Path, colony_id: str, *, connection: sqlite3.Connection | None = None
+) -> str:
+    """Report stored cells and location, reusing an optional transaction."""
+    reader = (
+        nullcontext(connection) if connection is not None else closing(sqlite3.connect(
+            db_path.resolve().as_uri() + "?mode=rw", uri=True, timeout=5
+        ))
+    )
+    with reader as conn:
+        if connection is None:
+            # Query-only access lets SQLite clean up transient WAL sidecars on close.
+            conn.execute("PRAGMA query_only=ON")
+        count = conn.execute("SELECT count(*) FROM cells WHERE colony=?", (colony_id,)).fetchone()[0]
+    unit = "cell" if count == 1 else "cells"
+    return (
+        f"Colony '{colony_id}' already exists with {count} stored {unit}. "
+        f"Dish database: {db_path.resolve()}."
+    )
+
+
 def reserve_colony(db_path: Path, colony: Colony, *, connection: sqlite3.Connection | None = None) -> None:
     """Claim a seed name atomically so concurrent runs cannot overwrite it."""
     from petri.storage.seed_guard import ColonyExistsError
 
     with database.write_connection(db_path,connection) as conn:
         if conn.execute("SELECT 1 FROM cells WHERE colony=? LIMIT 1", (colony.id,)).fetchone():
-            raise ColonyExistsError(f"Colony '{colony.id}' already exists")
+            raise ColonyExistsError(existing_colony_message(db_path, colony.id, connection=conn))
         try:
             conn.execute("INSERT INTO colonies VALUES (?,?,?,?,?,?)", (
                 colony.id, colony.dish, colony.center_cell_id, colony.center_claim,
                 json.dumps(colony.clarifications), colony.created_at or datetime.now(timezone.utc).isoformat(),
             ))
         except sqlite3.IntegrityError as error:
-            raise ColonyExistsError(f"Colony '{colony.id}' already exists") from error
+            raise ColonyExistsError(existing_colony_message(db_path, colony.id, connection=conn)) from error
 
 
 def save_colony(db_path: Path, graph: ColonyGraph, colony: Colony, *,

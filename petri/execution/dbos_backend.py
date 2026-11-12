@@ -44,6 +44,7 @@ from petri.harness.errors import PermanentHarnessError, RateLimitedError
 from petri.execution.reconciliation import DomainReceipt, capture_receipt, read_conflicts
 from petri.models import CellStatus, ProcessCellResult, QueueProcessingResult, build_cell_key, parse_key
 from petri.storage import database
+from petri.storage.colonies import existing_colony_message
 from petri.storage.paths import dish_db_path
 
 
@@ -326,12 +327,14 @@ class DBOSExecutionBackend:
             if existing is not None:
                 if existing["center_claim"] != request.claim:
                     raise ValueError(
-                        "This colony already exists with a different claim; request regeneration explicitly."
+                        existing_colony_message(self.app.db_path, colony_id)
+                        + " It has a different claim; request regeneration explicitly."
                     )
                 if initial is not None:
                     return self._run_status(initial)
                 raise ValueError(
-                    "This colony already exists; request regeneration to replace its draft."
+                    existing_colony_message(self.app.db_path, colony_id)
+                    + " Request regeneration to replace its draft."
                 )
         if initial is not None and initial.status in {"PENDING", "ENQUEUED"}:
             raise ValueError("Wait for or cancel the existing seed run before regenerating it.")
